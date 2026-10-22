@@ -35,6 +35,8 @@ test("public publishing requires explicit consent and valid public configuration
     { DISTRIBUTION_REPOSITORY: "eliasprunaire/hermed-bots" },
     { SPARKLE_PUBLIC_KEY: "invalid" }, { SPARKLE_PUBLIC_KEY: ready.SPARKLE_PUBLIC_KEY + "\n" },
     { DISTRIBUTION_REPOSITORY: "Eliasprunaire/Hermed-bots" },
+    { DISTRIBUTION_REPOSITORY: "eliasprunaire/hermed-bots-oss" },
+    { DISTRIBUTION_REPOSITORY: "EliasPrunaire/Hermed-Bots-OSS" },
   ]) assert.equal(releaseReadiness({ ...ready, ...change }).ready, false);
 });
 
@@ -227,4 +229,10 @@ test("publication refuses missing consent and corrupted local artifacts before c
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("the open-source source repository is never a valid tap source", () => {
+  const { tapRepository } = require("../../scripts/distribution.js");
+  assert.throws(() => tapRepository("eliasprunaire/hermed-bots-oss"), /Invalid distribution repository/);
+  assert.equal(tapRepository("eliasprunaire/hermed-bots-releases"), "eliasprunaire/homebrew-tap");
 });
