@@ -1,0 +1,6 @@
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures (fake API key used by unit tests)"
+regexes = ['''cle-de-test-0123456789''']

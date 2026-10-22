@@ -1,0 +1,7 @@
+Lane 9. Commandes dans la VM
+hv-guard.sh snapshot guard-before.txt
+hv-guard.sh check guard-before.txt
+<HOME>/.hermes/hermes-agent|0|-|-
+<HOME>/.local/bin/hermes|0|-|-
+GUARD OK: chemins protégés inchangés
+Code de sortie : 0

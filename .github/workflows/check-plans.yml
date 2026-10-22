@@ -1,0 +1,21 @@
+name: Check plans
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check-plans:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Check program plans
+        run: node scripts/check-plans.js

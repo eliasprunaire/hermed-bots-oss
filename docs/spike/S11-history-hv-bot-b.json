@@ -1,0 +1,82 @@
+[
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 1,
+  "tokens": null
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 1,
+  "tokens": null
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 1,
+  "tokens": null
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 1,
+  "tokens": null
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 0,
+  "tokens": 0
+ },
+ {
+  "tool_calls": 1,
+  "tokens": null
+ }
+]

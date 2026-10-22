@@ -1,0 +1,10 @@
+HD-13 correction session 2026-10-21, code a4a2732.
+Head median=1.157713s min=1.107464s max=1.191486s n=5 budget=5s.
+Durées en secondes : [1.1769750118255615, 1.1577130556106567, 1.1074639558792114, 1.1439189910888672, 1.1914860010147095]
+Trunk=5/5 flux arrêté sans reprise, une admission par essai.
+Ordre alterné trunk/head, cinq couples dans la même VM.
+Chaque essai head confirme completed et une admission.
+Build Debug, faux serveur derrière le proxy de coupure.
+Le réessai réseau attend une seconde dans ConversationModel.follow.
+Cette mesure ne prouve ni la latence OrbStack ni celle d’un build Release.
+Journal revision-lanes.log, HV-COMPARISON.

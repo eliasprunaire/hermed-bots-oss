@@ -1,0 +1,2 @@
+<HOME>/.hermes/hermes-agent|0|-|-
+<HOME>/.local/bin/hermes|0|-|-

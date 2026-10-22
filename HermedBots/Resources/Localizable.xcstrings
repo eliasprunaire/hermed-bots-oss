@@ -1,0 +1,366 @@
+{
+  "sourceLanguage" : "fr",
+  "strings" : {
+    "%@ : %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@: %@" } }
+      }
+    },
+    "%@ caractères de contrôle sont écrits sous la forme \\u{…}." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ control characters are written as \\u{…}." } }
+      }
+    },
+    "%@ caractères non affichés sur %@ : refusez si vous ne pouvez pas juger la commande." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ characters not shown out of %@: refuse if you cannot judge the command." } }
+      }
+    },
+    "absente du Trousseau" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "missing from the Keychain" } }
+      }
+    },
+    "Afficher la nouvelle liste" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show the new list" } }
+      }
+    },
+    "Ajouté : %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Added: %@" } }
+      }
+    },
+    "Approuver" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Approve" } }
+      }
+    },
+    "Aucun bot" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No bots" } }
+      }
+    },
+    "Aucun bot sélectionné" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No bot selected" } }
+      }
+    },
+    "Aucun fil passé" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No past threads" } }
+      }
+    },
+    "Aucun paramètre." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No parameters." } }
+      }
+    },
+    "Aucune clé SSH dans le Trousseau. Ajoute-la, puis réessaie." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No SSH key in the Keychain. Add it, then retry." } }
+      }
+    },
+    "Cet hôte est refusé en mode test : il désigne perso-hermes." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This host is refused in test mode: it names perso-hermes." } }
+      }
+    },
+    "Changement du modèle…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Changing the model…" } }
+      }
+    },
+    "Clé SSH" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "SSH key" } }
+      }
+    },
+    "Connecter" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect" } }
+      }
+    },
+    "Connexion" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connection" } }
+      }
+    },
+    "en échec" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "failed" } }
+      }
+    },
+    "Envoyer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Send" } }
+      }
+    },
+    "Fermer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Close" } }
+      }
+    },
+    "fermé" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "closed" } }
+      }
+    },
+    "Hermes a refusé la réponse : %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hermes refused the answer: %@" } }
+      }
+    },
+    "Hermes n'est pas joignable." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hermes is not reachable." } }
+      }
+    },
+    "Hermes n'est pas joignable. Votre réponse part dès le retour de la liaison." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hermes cannot be reached. Your answer goes out as soon as the link is back." } }
+      }
+    },
+    "Hermes ne liste aucun profil actif." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hermes lists no active profile." } }
+      }
+    },
+    "Hôte" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Host" } }
+      }
+    },
+    "Hôte injoignable : %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Host unreachable: %@" } }
+      }
+    },
+    "Hôte injoignable." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Host unreachable." } }
+      }
+    },
+    "illisible" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "unreadable" } }
+      }
+    },
+    "inconnu" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "unknown" } }
+      }
+    },
+    "inconnue" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "unknown" } }
+      }
+    },
+    "L'hôte n'est pas valide." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The host is not valid." } }
+      }
+    },
+    "L'utilisateur n'est pas valide." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The user is not valid." } }
+      }
+    },
+    "La clé de l'hôte a changé. Le tunnel reste fermé." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The host key changed. The tunnel stays closed." } }
+      }
+    },
+    "La clé SSH du Trousseau est illisible." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The SSH key in the Keychain is unreadable." } }
+      }
+    },
+    "La commande « hermes profile list » a échoué (code %@) : %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The “hermes profile list” command failed (code %@): %@" } }
+      }
+    },
+    "La liste des bots a changé" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The bot list changed" } }
+      }
+    },
+    "La liste des bots n'a pas pu être lue : %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The bot list could not be read: %@" } }
+      }
+    },
+    "Le bot attend votre réponse." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The bot is waiting for your answer." } }
+      }
+    },
+    "Le bot attend votre réponse…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The bot is waiting for your answer…" } }
+      }
+    },
+    "Le bot demande l'autorisation d'utiliser un outil" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The bot asks for permission to use a tool" } }
+      }
+    },
+    "Le bot reste bloqué tant que cette demande n'a pas de réponse. Pour l'arrêter : kill switch (arrêt du processus Hermes de ce profil sur la VM)." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The bot stays blocked until this request has an answer. To stop it: kill switch (stop the Hermes process of this profile on the VM)." } }
+      }
+    },
+    "Le bot répond…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The bot is replying…" } }
+      }
+    },
+    "Le flux s'est arrêté avant la fin du tour." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The stream stopped before the end of the turn." } }
+      }
+    },
+    "Le port n'est pas valide." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The port is not valid." } }
+      }
+    },
+    "Le serveur refuse la clé SSH. Vérifie la clé du Trousseau, puis réessaie." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The server rejects the SSH key. Check the key in the Keychain, then retry." } }
+      }
+    },
+    "Le tunnel est tombé. Réouverture en cours." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The tunnel dropped. Reopening." } }
+      }
+    },
+    "Message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Message" } }
+      }
+    },
+    "Modèle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Model" } }
+      }
+    },
+    "Modèle du profil" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Profile model" } }
+      }
+    },
+    "Nouvelle session" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "New session" } }
+      }
+    },
+    "Nouvelle session : écrivez le premier message." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "New session: write the first message." } }
+      }
+    },
+    "Outil" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Tool" } }
+      }
+    },
+    "Outil en cours : %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Tool running: %@" } }
+      }
+    },
+    "ouvert sur 127.0.0.1:%@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "open on 127.0.0.1:%@" } }
+      }
+    },
+    "ouverture" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "opening" } }
+      }
+    },
+    "Paramètres" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Parameters" } }
+      }
+    },
+    "pas encore lue" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "not read yet" } }
+      }
+    },
+    "présente dans le Trousseau" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "present in the Keychain" } }
+      }
+    },
+    "Refuser" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refuse" } }
+      }
+    },
+    "Retiré : %@" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Removed: %@" } }
+      }
+    },
+    "Réessayer" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retry" } }
+      }
+    },
+    "réouverture, essai %lld" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "reopening, attempt %lld" } }
+      }
+    },
+    "Réponse envoyée à Hermes…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Answer sent to Hermes…" } }
+      }
+    },
+    "Tester la connexion" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Test the connection" } }
+      }
+    },
+    "Tour annulé" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn cancelled" } }
+      }
+    },
+    "Tour interrompu" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn interrupted" } }
+      }
+    },
+    "Tour terminé" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn completed" } }
+      }
+    },
+    "Tour échoué" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn failed" } }
+      }
+    },
+    "Tunnel" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Tunnel" } }
+      }
+    },
+    "Utilisateur" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "User" } }
+      }
+    },
+    "Version de Hermes" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hermes version" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

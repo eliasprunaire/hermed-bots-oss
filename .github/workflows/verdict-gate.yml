@@ -1,0 +1,43 @@
+name: Verdict gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  issue_comment:
+    types: [created, edited]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: verdict-gate-${{ github.event.pull_request.number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  record-verdict:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # issue_comment: only trusted authors (OWNER, MEMBER, COLLABORATOR) or the verifier App
+    # (login in the repository variable VERIFIER_APP_LOGIN, e.g. my-verifier[bot]).
+    if: >-
+      github.event_name == 'pull_request' ||
+      (github.event.issue.pull_request != null &&
+       (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) ||
+        (github.event.comment.user.type == 'Bot' && vars.VERIFIER_APP_LOGIN != '' && github.event.comment.user.login == vars.VERIFIER_APP_LOGIN)))
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Post verdict-gate on the head SHA
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/verdict-gate.js

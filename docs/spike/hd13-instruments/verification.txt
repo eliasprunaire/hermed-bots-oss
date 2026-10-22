@@ -1,0 +1,155 @@
+HD-13, correction du FAIL, 2026-10-21.
+Code applicatif et tests au commit a4a2732.
+
+Décision Dev Lead appliquée.
+https://github.com/eliasprunaire/hermed-bots/pull/51#issuecomment-6314230869
+Dans HermedBotsTests, seul ConversationModelTests.swift change.
+Les deux tests conservent leurs assertions et contrôlent maintenant la reprise puis la fin terminale.
+Trois tests couvrent les échecs définitifs, la limite des flux fermés et sa remise à zéro après progrès.
+
+npm ci -> code 0.
+npm test -> code 0, 178 tests réussis, 0 échec.
+npm run lint -> code 0.
+python3 docs/spike/hd13-instruments/check-proxy.py -> code 0, PROXY OK.
+xcrun swiftc HermedBots/Transport/ResumeStore.swift docs/spike/hd13-instruments/store-check.swift -o <HOME>/hermed-bots-work/hd13-store-check
+<HOME>/hermed-bots-work/hd13-store-check -> code 0, STORE OK.
+
+Commande ciblée de cette session.
+timeout 3600 zsh ~/<INFRA>/vm.sh exec bash docs/spike/hd13-instruments/run-ui.sh HermedBotsTests/ConversationModelTests
+66 tests, 0 échec, code 0.
+Journal revision-targeted.log.
+La première passe avait quatre assertions en échec dans trois tests.
+Le faux serveur des tests ne donnait pas les en-têtes HTTP aux nouvelles lectures.
+Les appels open() corrigent ces réponses avant les événements.
+Journal revision-targeted-first.log.
+La reproduction antérieure des défauts de production reste dans revision-red.log.
+
+Suite complète de cette session.
+timeout 3600 zsh ~/<INFRA>/vm.sh ui fake
+208 tests unitaires réussis, 0 échec.
+103 tests UI, 53 réussis, 50 sautés, 0 échec.
+xcresulttool get test-results summary --path <HOME>/hermed-bots-work/evidence/ui-20261021-130506-vm/result.xcresult --compact
+totalTestCount=311 passedTests=261 failedTests=0 skippedTests=50
+HV-UI chemin=vm rc=0 durée=866s preuves=<HOME>/hermed-bots-work/evidence/ui-20261021-130506-vm meta=<HOME>/hermed-bots-work/evidence/vmui-20261021-130420
+Les références visuelles sont absentes dans baselines. Aucune référence ne change.
+Les 83 sources suivies de l’app, des tests, des paquets et du projet correspondent à src.tgz de cette passe.
+La cible minimale reste macOS 27.0, exécution en VM macOS 27.0.1.
+
+Tentative OrbStack de cette session. Cible hv-hermes-test.
+HV_EVIDENCE=<HOME>/hermed-bots-work/evidence/hd13-orb-fix-20261021 bash .cursor/skills/verify-hermed-bots/scripts/hv-hermes-env.sh up orb
+bash .cursor/skills/verify-hermed-bots/scripts/hv-hermes-env.sh doctor orb
+timeout 3600 zsh ~/<INFRA>/vm.sh ui orb
+ENV FAIL (32): HV_TEST_API_KEY absent ou de moins de 16 caractères (Hermes refuse de démarrer sinon)
+up orb rc=32
+error: no such object: hv-hermes-test
+container=hv-hermes-test running=
+error: no such object: hv-hermes-test
+hv.owner=
+mounts: aucun montage hôte (volume anonyme interne de l'image seulement)
+Error response from daemon: No such container: hv-hermes-test
+WARN: /Users visible dans le conteneur
+.cursor/skills/verify-hermed-bots/scripts/hv-hermes-env.sh: ligne 82: HV_TEST_API_KEY: HV_TEST_API_KEY absent
+doctor orb rc=1
+HV-UI SAUTÉE : VM indisponible (mode orb : Hermes OrbStack seulement sur l'hôte (tunnel VM non branché)). Passe UI EN ATTENTE de la VM, jamais lancée sur l'hôte (ni FAIL ni BLOCKED)
+HV-UI chemin=attente rc=6 durée=6s preuves=aucune meta=<HOME>/hermed-bots-work/evidence/vmui-20261021-130226 repli="mode orb : Hermes OrbStack seulement sur l'hôte (tunnel VM non branché)"
+
+hd13-orb-cut.png : impossible, clé de test absente, conteneur absent et tunnel VM non branché.
+Passe UI en attente de la VM.
+
+Recettes séparées de cette session.
+timeout 3600 zsh ~/<INFRA>/vm.sh exec bash docs/spike/hd13-instruments/run-lanes.sh
+La commande lance run-comparison.sh, puis chaque run-ui.sh séparément, dans la même VM.
+SixActions/testResumeAfterSleep -> code 0
+Events/testUnknownEventIgnored -> code 0
+ResumeLanes/testCompletedDuringCut -> code 0
+ResumeLanes/testZeroSecondCut -> code 0
+ResumeLanes/testTenMinuteCut -> code 0
+ResumeLanes/testApprovalAcrossCut -> code 0
+ResumeLanes/testCutBeforeAcknowledgement -> code 0
+ResumeLanes/testRelaunchMidTurn -> code 0
+ResumeLanes/testOnlyIDsPersist -> code 0
+ResumeLanes/testNetworkGuardCapture -> code 0
+ResumeLanes/testApprovalWithDetectorCut -> code 0
+ResumeLanes/testLoopGuardCountsAcrossReplay -> code 0
+22 gardes à 0, 22 netwatch à 0.
+HV-COMPARISON sample=1 side=trunk
+HV-PERF13 trunk sample=0 result=stream-ended-no-resume admissions=1
+NET OK : 5 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+HV-COMPARISON sample=1 side=head
+HV-PERF13 sample=0 seconds=1.1769750118255615 admissions=1 result=completed
+HV-PERF13 median=1.1769750118255615s range=1.1769750118255615...1.1769750118255615 n=1
+NET OK : 3 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+HV-COMPARISON sample=2 side=trunk
+HV-PERF13 trunk sample=0 result=stream-ended-no-resume admissions=1
+NET OK : 5 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+HV-COMPARISON sample=2 side=head
+HV-PERF13 sample=0 seconds=1.1577130556106567 admissions=1 result=completed
+HV-PERF13 median=1.1577130556106567s range=1.1577130556106567...1.1577130556106567 n=1
+NET OK : 4 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+HV-COMPARISON sample=3 side=trunk
+HV-PERF13 trunk sample=0 result=stream-ended-no-resume admissions=1
+NET OK : 4 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+HV-COMPARISON sample=3 side=head
+HV-PERF13 sample=0 seconds=1.1074639558792114 admissions=1 result=completed
+HV-PERF13 median=1.1074639558792114s range=1.1074639558792114...1.1074639558792114 n=1
+NET OK : 4 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+HV-COMPARISON sample=4 side=trunk
+HV-PERF13 trunk sample=0 result=stream-ended-no-resume admissions=1
+NET OK : 4 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+HV-COMPARISON sample=4 side=head
+HV-PERF13 sample=0 seconds=1.1439189910888672 admissions=1 result=completed
+HV-PERF13 median=1.1439189910888672s range=1.1439189910888672...1.1439189910888672 n=1
+NET OK : 3 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+HV-COMPARISON sample=5 side=trunk
+HV-PERF13 trunk sample=0 result=stream-ended-no-resume admissions=1
+NET OK : 4 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+HV-COMPARISON sample=5 side=head
+HV-PERF13 sample=0 seconds=1.1914860010147095 admissions=1 result=completed
+HV-PERF13 median=1.1914860010147095s range=1.1914860010147095...1.1914860010147095 n=1
+NET OK : 3 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+NET OK : 7 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+NET OK : 2 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+NET OK : 5 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+NET OK : 14 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+NET OK : 3 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+NET OK : 9 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+NET INCONCLUSIF : aucun socket observé ; le confinement pf reste exigé par vm.sh
+NET OK : 12 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+HV-STATE [{"run":"run_ad2ba286438a448e98c5efed416e25f2","session":"api_1792582801_58b37016"}]
+NET OK : 17 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+NET OK : 17 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+NET OK : 11 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+NET OK : 7 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
+Le sondage de la lane 7 ne voit aucun socket. Sa commande a bien tourné.
+Le confinement pf actif est vérifié par vm.sh avant la passe. Ce confinement ne remplace pas une observation de socket.
+
+Captures copiées sans modification depuis les preuves de cette session.
+hd13-cut.png | testResumeAfterSleep | SHA-256 056f1204d5c4e2e028274988f91d1e3c07347308e5c962fbd81101273690b490 | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132542-vm/shots/hd13-cut.png
+hd13-cut-trunk.png | testTrunkCutOutcome | SHA-256 ecdfe09302c85b1778e1d584c7fb731f5b8cf321f6192023c4e7f2d430db50e4 | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132436-vm/shots/hd13-cut-trunk.png
+hd13-inject.png | testCompletedDuringCut | SHA-256 d857a6fec10c880b063c25fd25a8cbd173732c566b4f19b808f2ba90f7b01040 | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132647-vm/shots/hd13-inject.png
+hd13-zero.png | testZeroSecondCut | SHA-256 f41fcd090439f2b8f82d2604927e206b0298c409b60ab1c06eb5d69ccd05a620 | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132720-vm/shots/hd13-zero.png
+hd13-ten-min.png | testTenMinuteCut | SHA-256 b05776244dacfa5517c1039095b8afd80012cbad76988c692a93fc1862f463b7 | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132752-vm/shots/hd13-ten-min.png
+hd13-ten-min-banner.png | testTenMinuteCut | SHA-256 65652c2cf923d4536fb6c1ce323ff9a718d67906b0005748bc23d7bbf695e99f | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132752-vm/shots/hd13-ten-min-banner.png
+hd13-approval-cut.png | testApprovalAcrossCut | SHA-256 ac8754cdd12472193eb8bcf01f074c5858f605bcb5c483a6cbafb8cbe557091e | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-133815-vm/shots/hd13-approval-cut.png
+hd13-approval-result.png | testApprovalAcrossCut | SHA-256 21677f07da7dca0c649c76449a353683be967064c4d0e0ff5707a791730bdae4 | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-133815-vm/shots/hd13-approval-result.png
+hd13-send-cut.png | testCutBeforeAcknowledgement | SHA-256 b05776244dacfa5517c1039095b8afd80012cbad76988c692a93fc1862f463b7 | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-133848-vm/shots/hd13-send-cut.png
+hd13-relaunch.png | testRelaunchMidTurn | SHA-256 58297feaea25511fd29166d6a715e0eb6b415819887039e382e2a0811e24a0e0 | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-133920-vm/shots/hd13-relaunch.png
+hd13-local-state.png | testOnlyIDsPersist | SHA-256 fbbef8604ca4ce824c9a190cce361dbd36f763ebe2bf85c25a6251bd017b4174 | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-133953-vm/shots/hd13-local-state.png
+hd13-local-state-result.png | testOnlyIDsPersist | SHA-256 39d0a43ded704f9bac6c6f6c6ff849e1771dbf382d1d08b82b98e47d411c9b7a | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-133953-vm/shots/hd13-local-state-result.png
+hd13-net-guard.png | testNetworkGuardCapture | SHA-256 b4f01b104d259df717b38ad344a61ee2b6a405d046f85f76ba885b99fcd42208 | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-134025-vm/shots/hd13-net-guard.png
+hd13-approval-lock-cut.png | testApprovalWithDetectorCut | SHA-256 c98db70e75ad392c3fc9d53b8797a4615d7a0cffe1ff8d1e5fc4a73b4f8c8700 | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-134058-vm/shots/hd13-approval-lock-cut.png
+hd13-loop-guard.png | testLoopGuardCountsAcrossReplay | SHA-256 182da91928790ddc5af24ba6335f59bdd36bb344683084d287de3a9093d999ee | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-134130-vm/shots/hd13-loop-guard.png
+Les 83 sources suivies sont identiques dans les deux archives VM et dans la branche.
+trunk.tgz contient 39 fichiers identiques à origin/main b80a084901b08d16bf38a10305bdb571d4d899f5.
+HD-13 correction session 2026-10-21, code a4a2732.
+Head median=1.157713s min=1.107464s max=1.191486s n=5 budget=5s.
+Durées en secondes : [1.1769750118255615, 1.1577130556106567, 1.1074639558792114, 1.1439189910888672, 1.1914860010147095]
+Trunk=5/5 flux arrêté sans reprise, une admission par essai.
+Ordre alterné trunk/head, cinq couples dans la même VM.
+Chaque essai head confirme completed et une admission.
+Build Debug, faux serveur derrière le proxy de coupure.
+Le réessai réseau attend une seconde dans ConversationModel.follow.
+Cette mesure ne prouve ni la latence OrbStack ni celle d’un build Release.
+Journal revision-lanes.log, HV-COMPARISON.
+
+HV-UI chemin=vm rc=0 durée=1370s preuves=<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132047-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-133953-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132226-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132014-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-134058-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132752-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132331-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132542-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132120-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-134130-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132436-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132259-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132647-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132614-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-133815-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-133848-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132509-vm,<HOME>/hermed-bots-work/evidence/hd13-comparison-20261021-112002-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132153-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132720-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-134025-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132404-vm,<HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-133920-vm meta=<HOME>/hermed-bots-work/evidence/vmui-20261021-131916

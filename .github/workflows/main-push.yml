@@ -1,0 +1,26 @@
+name: Main push
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  require-merged-pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Require a merged pull request
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_BEFORE: ${{ github.event.before }}
+        run: node scripts/check-main-push.js

@@ -1,0 +1,10 @@
+HD-14 2026-10-21 05:23:38+0200 (transcription de terminal rendue en image)
+Lane 9. Chemins protégés absents avant et après les lanes finales ; check code 0.
+
+Lane 9. Commandes dans la VM
+hv-guard.sh snapshot guard-before.txt
+hv-guard.sh check guard-before.txt
+<HOME>/.hermes/hermes-agent|0|-|-
+<HOME>/.local/bin/hermes|0|-|-
+GUARD OK: chemins protégés inchangés
+Code de sortie : 0

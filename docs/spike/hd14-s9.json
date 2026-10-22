@@ -1,0 +1,36 @@
+{
+  "version": "0.22.2",
+  "container": "hv-hermes-test",
+  "gateway_only": {
+    "held": []
+  },
+  "desktop-first": {
+    "detected": {
+      "held": [
+        "hv-bot-a"
+      ]
+    },
+    "api_a": 200,
+    "api_b": 200,
+    "backend_alive": true,
+    "desktop_listening": 18789,
+    "released": {
+      "held": []
+    }
+  },
+  "api-first": {
+    "detected": {
+      "held": [
+        "hv-bot-a"
+      ]
+    },
+    "api_a": 200,
+    "api_b": 200,
+    "backend_alive": true,
+    "desktop_listening": 18789,
+    "released": {
+      "held": []
+    }
+  },
+  "desktop_gui": "manual-only: application macOS absente du conteneur Linux ; tunnel OrbStack VM non branché par vm.sh"
+}

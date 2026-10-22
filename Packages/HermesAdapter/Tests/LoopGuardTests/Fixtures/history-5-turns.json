@@ -1,0 +1,22 @@
+[
+ {
+  "tool_calls": 2,
+  "tokens": 1800
+ },
+ {
+  "tool_calls": 1,
+  "tokens": 900
+ },
+ {
+  "tool_calls": 4,
+  "tokens": 2600
+ },
+ {
+  "tool_calls": 3,
+  "tokens": 2100
+ },
+ {
+  "tool_calls": 2,
+  "tokens": 1500
+ }
+]

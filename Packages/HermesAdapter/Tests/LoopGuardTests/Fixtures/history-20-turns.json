@@ -1,0 +1,82 @@
+[
+ {
+  "tool_calls": 1,
+  "tokens": 800
+ },
+ {
+  "tool_calls": 2,
+  "tokens": 900
+ },
+ {
+  "tool_calls": 2,
+  "tokens": 1000
+ },
+ {
+  "tool_calls": 3,
+  "tokens": 1100
+ },
+ {
+  "tool_calls": 3,
+  "tokens": 1200
+ },
+ {
+  "tool_calls": 3,
+  "tokens": 1300
+ },
+ {
+  "tool_calls": 4,
+  "tokens": 1400
+ },
+ {
+  "tool_calls": 4,
+  "tokens": 1500
+ },
+ {
+  "tool_calls": 4,
+  "tokens": 1600
+ },
+ {
+  "tool_calls": 5,
+  "tokens": 1800
+ },
+ {
+  "tool_calls": 5,
+  "tokens": 2000
+ },
+ {
+  "tool_calls": 5,
+  "tokens": 2200
+ },
+ {
+  "tool_calls": 6,
+  "tokens": 2400
+ },
+ {
+  "tool_calls": 6,
+  "tokens": 2600
+ },
+ {
+  "tool_calls": 7,
+  "tokens": 2800
+ },
+ {
+  "tool_calls": 7,
+  "tokens": 3000
+ },
+ {
+  "tool_calls": 8,
+  "tokens": 3200
+ },
+ {
+  "tool_calls": 8,
+  "tokens": 3600
+ },
+ {
+  "tool_calls": 9,
+  "tokens": 4000
+ },
+ {
+  "tool_calls": 10,
+  "tokens": 5200
+ }
+]

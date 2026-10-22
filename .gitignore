@@ -1,0 +1,19 @@
+.audit/
+node_modules/
+data/*.json
+xcuserdata/
+
+# Règle 13 (2026-10-22) : preuves, journaux bruts et captures restent sur le Mac, hors dépôt.
+evidence/
+**/evidence/
+*.log
+captures/
+screenshots/
+*.mov
+*.mp4
+Screen Shot *.png
+Capture d’écran *.png
+Capture d'écran *.png
+*-live.txt
+*-evidence.json
+docs/spike/**/*.png

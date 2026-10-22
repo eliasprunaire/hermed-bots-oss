@@ -1,0 +1,728 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		2332139CB0A85A37CE29710A /* AccessibilityID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56501CE1FEBA93AE4F036286 /* AccessibilityID.swift */; };
+		3044136BDC4080ACEF153610 /* SecretStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E5B2B217A4B0C2B4EBE062F /* SecretStore.swift */; };
+		5D2A7F19BC7DA2B216AD9C8F /* AccessibilityID.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56501CE1FEBA93AE4F036286 /* AccessibilityID.swift */; };
+		7BE33CD3E32FF1AAFD5E4768 /* HermesAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = DA4C1C94CD32735911D411BC /* HermesAdapter */; };
+		7BE33CD3E32FF1AAFD5E4769 /* HermesAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = DA4C1C94CD32735911D411BD /* HermesAdapter */; };
+		D38EDC3C712F8F95FBC572B9 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = D852961B587E19128FA0D037 /* AppEnvironment.swift */; };
+		A7C1D2E3F4B5069788AABB02 /* SSHTunnel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C1D2E3F4B5069788AABB01 /* SSHTunnel.swift */; };
+		B0B0D8A1C2E3F40596A7B801 /* BotList.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0B0D8A1C2E3F40596A7B802 /* BotList.swift */; };
+		B0B0D8A1C2E3F40596A7B811 /* BotsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0B0D8A1C2E3F40596A7B812 /* BotsModel.swift */; };
+		C0C0D9B1C2E3F40596A7C801 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C802 /* Conversation.swift */; };
+		C0C0D9B1C2E3F40596A7C811 /* ConversationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C812 /* ConversationModel.swift */; };
+		C0C0D9B1C2E3F40596A7C831 /* ConversationMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C832 /* ConversationMachine.swift */; };
+		C0C0D9B1C2E3F40596A7C821 /* MainThreadWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C822 /* MainThreadWatch.swift */; };
+		E2E2F1D4A5B6C70829384A01 /* ApprovalParams.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2E2F1D4A5B6C70829384A02 /* ApprovalParams.swift */; };
+		F12100000000000000000001 /* LoopGuard in Frameworks */ = {isa = PBXBuildFile; productRef = F12100000000000000000003 /* LoopGuard */; };
+		F12100000000000000000002 /* LoopGuard in Frameworks */ = {isa = PBXBuildFile; productRef = F12100000000000000000004 /* LoopGuard */; };
+		F14400000000000000000001 /* ProfileLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14400000000000000000002 /* ProfileLock.swift */; };
+		F15500000000000000000001 /* KillSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15500000000000000000002 /* KillSwitch.swift */; };
+		F14600000000000000000001 /* ResumeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14600000000000000000002 /* ResumeStore.swift */; };
+		F16400000000000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = F16400000000000000000003 /* Sparkle */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		A0C7F6B1D23E805CA65BFBBD /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 359EED06494E38FF40D27457 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9319EB897B2D7E098CFBBF08;
+			remoteInfo = HermedBots;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		09F93F8C10FA034CD23BDE16 /* HermedBotsTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HermedBotsTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		308C0F9D07496BF9D21FFAA2 /* HermesAdapter */ = {isa = PBXFileReference; lastKnownFileType = folder; name = HermesAdapter; path = Packages/HermesAdapter; sourceTree = SOURCE_ROOT; };
+		56501CE1FEBA93AE4F036286 /* AccessibilityID.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityID.swift; sourceTree = "<group>"; };
+		71B620B686C43E0DF866EFE6 /* HermedBotsUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = HermedBotsUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8E5B2B217A4B0C2B4EBE062F /* SecretStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecretStore.swift; sourceTree = "<group>"; };
+		B937F7C524E0D41815DE05AF /* HermedBots.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HermedBots.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D852961B587E19128FA0D037 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
+		A7C1D2E3F4B5069788AABB01 /* SSHTunnel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHTunnel.swift; sourceTree = "<group>"; };
+		B0B0D8A1C2E3F40596A7B802 /* BotList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotList.swift; sourceTree = "<group>"; };
+		B0B0D8A1C2E3F40596A7B812 /* BotsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotsModel.swift; sourceTree = "<group>"; };
+		C0C0D9B1C2E3F40596A7C802 /* Conversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conversation.swift; sourceTree = "<group>"; };
+		C0C0D9B1C2E3F40596A7C812 /* ConversationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationModel.swift; sourceTree = "<group>"; };
+		C0C0D9B1C2E3F40596A7C832 /* ConversationMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationMachine.swift; sourceTree = "<group>"; };
+		C0C0D9B1C2E3F40596A7C822 /* MainThreadWatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainThreadWatch.swift; sourceTree = "<group>"; };
+		E2E2F1D4A5B6C70829384A02 /* ApprovalParams.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalParams.swift; sourceTree = "<group>"; };
+		F14400000000000000000002 /* ProfileLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileLock.swift; sourceTree = "<group>"; };
+		F15500000000000000000002 /* KillSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermedBots/KillSwitch/KillSwitch.swift; sourceTree = SOURCE_ROOT; };
+		F14600000000000000000002 /* ResumeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermedBots/Transport/ResumeStore.swift; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		387DABC9CE34664955888153 /* HermedBotsTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = HermedBotsTests;
+			sourceTree = "<group>";
+		};
+		43C1080BC4B1313FA6DA29C5 /* HermedBots */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = HermedBots;
+			sourceTree = "<group>";
+		};
+		64A14431FB8593F222E76B89 /* HermedBotsUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = HermedBotsUITests;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C97E6F8411C68BFA74B6FC51 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7BE33CD3E32FF1AAFD5E4768 /* HermesAdapter in Frameworks */,
+				F12100000000000000000001 /* LoopGuard in Frameworks */,
+				F16400000000000000000001 /* Sparkle in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C97E6F8411C68BFA74B6FC52 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7BE33CD3E32FF1AAFD5E4769 /* HermesAdapter in Frameworks */,
+				F12100000000000000000002 /* LoopGuard in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		18E5152878F4E83D965FE493 /* HermedBots */ = {
+			isa = PBXGroup;
+			children = (
+				C64D55E5AB315963676EBFE7 /* App */,
+				E2E2F1D4A5B6C70829384A03 /* Approval */,
+				B0B0D8A1C2E3F40596A7B803 /* Bots */,
+				C0C0D9B1C2E3F40596A7C803 /* Conversation */,
+				DA09F8770F5FB3B203FD53A5 /* Secrets */,
+				44F17006FD5279EB25BC4E49 /* Shared */,
+				A7C1D2E3F4B5069788AABB03 /* Transport */,
+			);
+			path = HermedBots;
+			sourceTree = "<group>";
+		};
+		1D4B655F78299BBAF9BEB374 = {
+			isa = PBXGroup;
+			children = (
+				43C1080BC4B1313FA6DA29C5 /* HermedBots */,
+				18E5152878F4E83D965FE493 /* HermedBots */,
+				387DABC9CE34664955888153 /* HermedBotsTests */,
+				64A14431FB8593F222E76B89 /* HermedBotsUITests */,
+				CBAED39BB97D0716692D3AFD /* Packages */,
+				5DDAEA05A35453A231E01D1F /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		44F17006FD5279EB25BC4E49 /* Shared */ = {
+			isa = PBXGroup;
+			children = (
+				56501CE1FEBA93AE4F036286 /* AccessibilityID.swift */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		5DDAEA05A35453A231E01D1F /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				B937F7C524E0D41815DE05AF /* HermedBots.app */,
+				09F93F8C10FA034CD23BDE16 /* HermedBotsTests.xctest */,
+				71B620B686C43E0DF866EFE6 /* HermedBotsUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		C64D55E5AB315963676EBFE7 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				D852961B587E19128FA0D037 /* AppEnvironment.swift */,
+				C0C0D9B1C2E3F40596A7C822 /* MainThreadWatch.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		CBAED39BB97D0716692D3AFD /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				308C0F9D07496BF9D21FFAA2 /* HermesAdapter */,
+			);
+			path = Packages;
+			sourceTree = "<group>";
+		};
+		E2E2F1D4A5B6C70829384A03 /* Approval */ = {
+			isa = PBXGroup;
+			children = (
+				E2E2F1D4A5B6C70829384A02 /* ApprovalParams.swift */,
+			);
+			path = Approval;
+			sourceTree = "<group>";
+		};
+		DA09F8770F5FB3B203FD53A5 /* Secrets */ = {
+			isa = PBXGroup;
+			children = (
+				8E5B2B217A4B0C2B4EBE062F /* SecretStore.swift */,
+			);
+			path = Secrets;
+			sourceTree = "<group>";
+		};
+		A7C1D2E3F4B5069788AABB03 /* Transport */ = {
+			isa = PBXGroup;
+			children = (
+				A7C1D2E3F4B5069788AABB01 /* SSHTunnel.swift */,
+				F14400000000000000000002 /* ProfileLock.swift */,
+			);
+			path = Transport;
+			sourceTree = "<group>";
+		};
+		B0B0D8A1C2E3F40596A7B803 /* Bots */ = {
+			isa = PBXGroup;
+			children = (
+				B0B0D8A1C2E3F40596A7B802 /* BotList.swift */,
+				B0B0D8A1C2E3F40596A7B812 /* BotsModel.swift */,
+			);
+			path = Bots;
+			sourceTree = "<group>";
+		};
+		C0C0D9B1C2E3F40596A7C803 /* Conversation */ = {
+			isa = PBXGroup;
+			children = (
+				C0C0D9B1C2E3F40596A7C802 /* Conversation.swift */,
+				C0C0D9B1C2E3F40596A7C812 /* ConversationModel.swift */,
+				C0C0D9B1C2E3F40596A7C832 /* ConversationMachine.swift */,
+			);
+			path = Conversation;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9319EB897B2D7E098CFBBF08 /* HermedBots */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 6AAB6B91FBC0B9E4254E2E08 /* Build configuration list for PBXNativeTarget "HermedBots" */;
+			buildPhases = (
+				751EB5F57BE23E50041CE3F3 /* Sources */,
+				92758283AA2661FDC8DFB343 /* Resources */,
+				C97E6F8411C68BFA74B6FC51 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				43C1080BC4B1313FA6DA29C5 /* HermedBots */,
+			);
+			name = HermedBots;
+			packageProductDependencies = (
+				DA4C1C94CD32735911D411BC /* HermesAdapter */,
+				F12100000000000000000003 /* LoopGuard */,
+				F16400000000000000000003 /* Sparkle */,
+			);
+			productName = HermedBots;
+			productReference = B937F7C524E0D41815DE05AF /* HermedBots.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F321D7A2E48B76A1377E86C1 /* HermedBotsUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D21D511373339B024E886C2B /* Build configuration list for PBXNativeTarget "HermedBotsUITests" */;
+			buildPhases = (
+				106782E44D3B28464017A320 /* Sources */,
+				45BDC005276A08E23189B8F7 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				8E62AFFF251E55177C5F2A00 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				64A14431FB8593F222E76B89 /* HermedBotsUITests */,
+			);
+			name = HermedBotsUITests;
+			packageProductDependencies = (
+			);
+			productName = HermedBotsUITests;
+			productReference = 71B620B686C43E0DF866EFE6 /* HermedBotsUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		FBD2B6BC509D052C20634A38 /* HermedBotsTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E79C2E48C4F94EB8406CFF02 /* Build configuration list for PBXNativeTarget "HermedBotsTests" */;
+			buildPhases = (
+				AEB10557724B20C9C8AC7486 /* Sources */,
+				C97E6F8411C68BFA74B6FC52 /* Frameworks */,
+				B31EA23BE266C1951BAF75F1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				387DABC9CE34664955888153 /* HermedBotsTests */,
+			);
+			name = HermedBotsTests;
+			packageProductDependencies = (
+				DA4C1C94CD32735911D411BD /* HermesAdapter */,
+				F12100000000000000000004 /* LoopGuard */,
+			);
+			productName = HermedBotsTests;
+			productReference = 09F93F8C10FA034CD23BDE16 /* HermedBotsTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		359EED06494E38FF40D27457 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					9319EB897B2D7E098CFBBF08 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+					F321D7A2E48B76A1377E86C1 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+						TestTargetID = 9319EB897B2D7E098CFBBF08;
+					};
+					FBD2B6BC509D052C20634A38 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = 257EDC7D3E60A8F4D1B75DCC /* Build configuration list for PBXProject "HermedBots" */;
+			developmentRegion = fr;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				fr,
+			);
+			mainGroup = 1D4B655F78299BBAF9BEB374;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				D6523A7F77704CD899E96FDD /* XCLocalSwiftPackageReference "Packages/HermesAdapter" */,
+				F16400000000000000000004 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 5DDAEA05A35453A231E01D1F /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				9319EB897B2D7E098CFBBF08 /* HermedBots */,
+				FBD2B6BC509D052C20634A38 /* HermedBotsTests */,
+				F321D7A2E48B76A1377E86C1 /* HermedBotsUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		45BDC005276A08E23189B8F7 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		92758283AA2661FDC8DFB343 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B31EA23BE266C1951BAF75F1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		106782E44D3B28464017A320 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2332139CB0A85A37CE29710A /* AccessibilityID.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		751EB5F57BE23E50041CE3F3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		AEB10557724B20C9C8AC7486 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F15500000000000000000001 /* KillSwitch.swift in Sources */,
+				F14600000000000000000001 /* ResumeStore.swift in Sources */,
+				5D2A7F19BC7DA2B216AD9C8F /* AccessibilityID.swift in Sources */,
+				E2E2F1D4A5B6C70829384A01 /* ApprovalParams.swift in Sources */,
+				D38EDC3C712F8F95FBC572B9 /* AppEnvironment.swift in Sources */,
+				3044136BDC4080ACEF153610 /* SecretStore.swift in Sources */,
+				A7C1D2E3F4B5069788AABB02 /* SSHTunnel.swift in Sources */,
+				F14400000000000000000001 /* ProfileLock.swift in Sources */,
+				B0B0D8A1C2E3F40596A7B801 /* BotList.swift in Sources */,
+				B0B0D8A1C2E3F40596A7B811 /* BotsModel.swift in Sources */,
+				C0C0D9B1C2E3F40596A7C801 /* Conversation.swift in Sources */,
+				C0C0D9B1C2E3F40596A7C811 /* ConversationModel.swift in Sources */,
+				C0C0D9B1C2E3F40596A7C831 /* ConversationMachine.swift in Sources */,
+				C0C0D9B1C2E3F40596A7C821 /* MainThreadWatch.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		8E62AFFF251E55177C5F2A00 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 9319EB897B2D7E098CFBBF08 /* HermedBots */;
+			targetProxy = A0C7F6B1D23E805CA65BFBBD /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		F16400000000000000000004 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {kind = exactVersion; version = 2.10.0; };
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCBuildConfiguration section */
+		0DB09455BE232B2C0E88D8A1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		2773A721B930A7CEFFA0CF13 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CURRENT_PROJECT_VERSION = 0.0.0;
+				MARKETING_VERSION = 0.0.0;
+				INFOPLIST_FILE = Config/Info.plist;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = NO;
+				INFOPLIST_KEY_CFBundleDisplayName = "Hermed Bots";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hermedbots.HermedBots;
+				PRODUCT_NAME = HermedBots;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		6605D6F8AB803FF5AF6E78D1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hermedbots.HermedBotsTests;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		6B0513CCCB7713F610AC0D62 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_IDENTITY = "-";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 27.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		96C3FC508210494B8F6B2616 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CURRENT_PROJECT_VERSION = 0.0.0;
+				MARKETING_VERSION = 0.0.0;
+				INFOPLIST_FILE = Config/Info.plist;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_APP_SANDBOX = NO;
+				ENABLE_HARDENED_RUNTIME = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Hermed Bots";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hermedbots.HermedBots;
+				PRODUCT_NAME = HermedBots;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		B0DE9854CC2D004EC1A57084 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hermedbots.HermedBotsTests;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		C35AC8D4567F24BD2FDA24D3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hermedbots.HermedBotsUITests;
+				SDKROOT = macosx;
+				TEST_TARGET_NAME = HermedBots;
+			};
+			name = Release;
+		};
+		E78AE216186D7409047A51B5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.hermedbots.HermedBotsUITests;
+				SDKROOT = macosx;
+				TEST_TARGET_NAME = HermedBots;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		257EDC7D3E60A8F4D1B75DCC /* Build configuration list for PBXProject "HermedBots" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0DB09455BE232B2C0E88D8A1 /* Debug */,
+				6B0513CCCB7713F610AC0D62 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		6AAB6B91FBC0B9E4254E2E08 /* Build configuration list for PBXNativeTarget "HermedBots" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2773A721B930A7CEFFA0CF13 /* Debug */,
+				96C3FC508210494B8F6B2616 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D21D511373339B024E886C2B /* Build configuration list for PBXNativeTarget "HermedBotsUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E78AE216186D7409047A51B5 /* Debug */,
+				C35AC8D4567F24BD2FDA24D3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E79C2E48C4F94EB8406CFF02 /* Build configuration list for PBXNativeTarget "HermedBotsTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6605D6F8AB803FF5AF6E78D1 /* Debug */,
+				B0DE9854CC2D004EC1A57084 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		D6523A7F77704CD899E96FDD /* XCLocalSwiftPackageReference "Packages/HermesAdapter" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/HermesAdapter;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		F16400000000000000000003 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F16400000000000000000004 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+		DA4C1C94CD32735911D411BC /* HermesAdapter */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HermesAdapter;
+		};
+		DA4C1C94CD32735911D411BD /* HermesAdapter */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = HermesAdapter;
+		};
+		F12100000000000000000003 /* LoopGuard */ = {isa = XCSwiftPackageProductDependency; productName = LoopGuard; };
+		F12100000000000000000004 /* LoopGuard */ = {isa = XCSwiftPackageProductDependency; productName = LoopGuard; };
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 359EED06494E38FF40D27457 /* Project object */;
+}

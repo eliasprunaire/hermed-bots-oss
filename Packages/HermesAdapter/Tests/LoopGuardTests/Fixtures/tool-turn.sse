@@ -1,0 +1,10 @@
+: open
+
+id: 0
+data: {"event": "tool.started", "run_id": "run_99ea04534a2f4927a87e927174e971f0", "timestamp": 1792357018.983603, "tool": "terminal", "preview": "sleep 300", "seq": 0}
+
+id: 1
+data: {"event": "tool.completed", "run_id": "run_99ea04534a2f4927a87e927174e971f0", "timestamp": 1792357019.2017505, "tool": "terminal", "duration": 0.211, "error": true, "preview": "{\"output\": \"[Command interrupted]\", \"exit_code\": 130, \"error\": null}", "seq": 1}
+
+id: 2
+data: {"event": "run.cancelled", "run_id": "run_99ea04534a2f4927a87e927174e971f0", "timestamp": 1792357019.2202363, "completed": false, "partial": false, "interrupted": true, "turn_exit_reason": "interrupted_by_user", "seq": 2}

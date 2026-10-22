@@ -1,0 +1,3 @@
+#!/bin/sh
+root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd) || exit 1
+exec node "$root/scripts/check-pre-push.js"

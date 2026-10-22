@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Install zsh (runner-publish tests)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh
+      - name: Test
+        run: npm test
+      - name: Lint
+        run: npm run lint --if-present
+  swift-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: swift:6.0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test HermesAdapter
+        run: swift test --package-path Packages/HermesAdapter
+  pr-attribution:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Collect PR body, commit messages, and squash body
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          printf '%s\n' "$PR_BODY" > /tmp/pr-body.txt
+          git log --format=%B "$BASE_SHA"..HEAD > /tmp/pr-commits.txt
+          node scripts/check-pr-attribution.js --print-squash-body > /tmp/squash-body.txt
+      - name: Fail on attribution trailers and agent footers
+        run: node scripts/check-pr-attribution.js --body-file /tmp/pr-body.txt --commits-file /tmp/pr-commits.txt --squash-body-file /tmp/squash-body.txt

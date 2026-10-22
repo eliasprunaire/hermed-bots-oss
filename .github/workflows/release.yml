@@ -1,0 +1,144 @@
+name: Release macOS
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing frozen tag vX.Y.Z, or the VERSION of this branch for a rehearsal
+        required: true
+        type: string
+      rehearsal:
+        description: Build, sign, notarize and staple this branch without publishing anything
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      tag:
+        required: true
+        type: string
+    secrets:
+      APPLE_TEAM_ID: {required: true}
+      DEVELOPER_ID_P12: {required: true}
+      DEVELOPER_ID_P12_PASSWORD: {required: true}
+      ASC_KEY_ID: {required: true}
+      ASC_ISSUER_ID: {required: true}
+      ASC_KEY_P8: {required: true}
+      SPARKLE_PRIVATE_KEY: {required: true}
+      DISTRIBUTION_TOKEN: {required: true}
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    environment: release
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.config.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: latest
+      - name: Check configuration without printing secret values
+        id: config
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+          DISTRIBUTION_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
+          DISTRIBUTION_REPOSITORY: ${{ vars.DISTRIBUTION_REPOSITORY }}
+          DISTRIBUTION_APPROVED: ${{ vars.DISTRIBUTION_APPROVED }}
+        run: node scripts/distribution.js preflight
+  release:
+    needs: preflight
+    if: needs.preflight.outputs.ready == 'true'
+    environment: release
+    permissions:
+      contents: read
+    runs-on: xcode-27
+    timeout-minutes: 60
+    concurrency:
+      group: macos-publication
+      cancel-in-progress: false
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      DISTRIBUTION_REPOSITORY: ${{ vars.DISTRIBUTION_REPOSITORY }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.rehearsal && github.sha || inputs.tag || github.ref_name }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: latest
+      - name: Verify tag, public destination, and current toolchain
+        env:
+          GH_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
+        run: |
+          node scripts/distribution.js version "$RELEASE_TAG"
+          test "$(cat VERSION)" = "${RELEASE_TAG#v}"
+          test "$(gh api "repos/$DISTRIBUTION_REPOSITORY" --jq .visibility)" = public
+          test "$(gh api "repos/$DISTRIBUTION_REPOSITORY" --jq .permissions.push)" = true
+          tap=$(node scripts/distribution.js tap "$DISTRIBUTION_REPOSITORY")
+          test "$(gh api "repos/$tap" --jq .visibility)" = public
+          test "$(gh api "repos/$tap" --jq .permissions.push)" = true
+          developer=$(python3 - <<'PYTHON'
+          import glob, os, re, subprocess
+          candidates = []
+          for app in glob.glob('/Applications/Xcode*.app'):
+              if 'beta' in os.path.realpath(app).lower():
+                  continue
+              output = subprocess.check_output(['xcodebuild', '-version'], env={**os.environ, 'DEVELOPER_DIR': app + '/Contents/Developer'}, text=True)
+              match = re.search(r'^Xcode ([0-9.]+)$', output, re.M)
+              if match:
+                  candidates.append((tuple(map(int, match[1].split('.'))), app))
+          print(max(candidates)[1])
+          PYTHON
+          )
+          sudo xcode-select --switch "$developer/Contents/Developer"
+          node -e 'for (const value of process.argv.slice(1)) if (Number(value.split(".")[0]) < 27) process.exit(1)' "$(sw_vers -productVersion)" "$(xcrun --sdk macosx --show-sdk-version)" "$(xcodebuild -version | head -1 | cut -d' ' -f2)"
+          xcodebuild -version
+      - name: Require a tag on main
+        if: ${{ !inputs.rehearsal }}
+        run: git merge-base --is-ancestor HEAD origin/main
+      - run: npm ci
+      - run: npm run lint
+      - name: Build, sign, notarize, staple, and generate the signed feed
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          DEVELOPER_ID_P12: ${{ secrets.DEVELOPER_ID_P12 }}
+          DEVELOPER_ID_P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          SPARKLE_PUBLIC_KEY: ${{ vars.SPARKLE_PUBLIC_KEY }}
+          DISTRIBUTION_APPROVED: ${{ vars.DISTRIBUTION_APPROVED }}
+          DISTRIBUTION_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
+        run: bash scripts/release-macos.sh "$RELEASE_TAG"
+      - name: Publish archives, signed feed, and Homebrew cask
+        if: ${{ !inputs.rehearsal }}
+        env:
+          GH_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
+          DISTRIBUTION_APPROVED: ${{ vars.DISTRIBUTION_APPROVED }}
+        run: bash scripts/publish-distribution.sh "$RELEASE_TAG"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: distribution-proof
+          path: |
+            .audit/distribution/out/
+            .audit/distribution/notary.json
+            .audit/distribution/spctl.txt
+          if-no-files-found: ignore

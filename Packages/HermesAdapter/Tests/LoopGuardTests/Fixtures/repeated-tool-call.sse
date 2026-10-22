@@ -1,0 +1,11 @@
+: open
+
+id: 0
+data: {"event": "tool.started", "run_id": "run_00000000000000000000000000000001", "timestamp": 1792357100.0, "tool": "terminal", "preview": "ls /tmp", "seq": 0}
+
+id: 1
+data: {"event": "tool.started", "run_id": "run_00000000000000000000000000000001", "timestamp": 1792357101.0, "tool": "terminal", "preview": "ls /tmp", "seq": 1}
+
+id: 2
+data: {"event": "tool.started", "run_id": "run_00000000000000000000000000000001", "timestamp": 1792357102.0, "tool": "terminal", "preview": "ls /tmp", "seq": 2}
+

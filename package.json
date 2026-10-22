@@ -1,0 +1,9 @@
+{
+  "name": "hermed-bots",
+  "private": true,
+  "scripts": {
+    "prepare": "node scripts/install-git-hooks.js",
+    "lint": "node scripts/lint.js",
+    "test": "node scripts/install-git-hooks.js && GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null node --test"
+  }
+}
