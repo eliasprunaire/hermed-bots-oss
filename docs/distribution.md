@@ -143,7 +143,7 @@ gh workflow run release.yml --ref main -f tag=v$(cat VERSION) -f rehearsal=true
 Une répétition échoue quand la configuration est incomplète.
 Un run vert prouve donc que le build, la signature, la notarisation et l'agrafage ont tourné.
 Le résumé du job donne l'identifiant du run et le résultat de ces quatre étapes.
-Le job « Publish » reste ignoré.
+L'étape de publication reste ignorée.
 
 ## Lire les preuves et reprendre un échec
 
