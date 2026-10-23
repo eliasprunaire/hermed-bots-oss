@@ -12,7 +12,6 @@ const PATTERNS = [
   ["PRIVATE_IP", /(?<![\d.])10\.\d{1,3}\.\d{1,3}\.\d{1,3}(?![\d.]*\d)/],
   ["PRIVATE_IP", /(?<![\d.])172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}(?![\d.]*\d)/],
   ["PRIVATE_IP", /(?<![\d.])192\.168\.\d{1,3}\.\d{1,3}(?![\d.]*\d)/],
-  ["INTERNAL_HOST", /(?<![\w.-])[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.orb\.local(?![\w-])/i],
   ["INTERNAL_HOST", /(?<![\w.-])[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.local(?![\w.-])/i],
   ["APPLE_SIGNING_IDENTITY", /Developer ID Applicatio[n]:/],
   ["APPLE_TEAM_ID", /\b(?:DEVELOPMENT_TEAM|TeamIdentifier|team[_ -]?id)\b["']?\s*[:=]\s*["']?[A-Z0-9]{10}\b/i],

@@ -17,7 +17,6 @@ const positives = [
   [j("db 172", ".20.0.5:5432"), "PRIVATE_IP"],
   [j("nas 192", ".168.1.20"), "PRIVATE_IP"],
   [j("open http://nas", ".local/"), "INTERNAL_HOST"],
-  [j("vm", ".orb", ".local"), "INTERNAL_HOST"],
   [j("Developer ID ", "Application: Jane Doe"), "APPLE_SIGNING_IDENTITY"],
   [j("DEVELOPMENT_TEAM = ", "AB12", "CD34EF"), "APPLE_TEAM_ID"],
   [j("team_id: ", "AB12", "CD34EF"), "APPLE_TEAM_ID"],
@@ -46,7 +45,7 @@ test("diff scan reports only added lines, with new-file line numbers", () => {
 });
 test("pull_request event scans title, body and diff", () => {
   const ev = { pull_request: { title: "ok", body: j("see /ho", "me/x/y"), base: { sha: "b" }, head: { sha: "h" } } };
-  const f = scanEvent("pull_request", ev, (b, h) => (b === "b" && h === "h" ? j("+++ b/a\n@@ -0,0 +1 @@\n+vm", ".orb", ".local") : ""));
+  const f = scanEvent("pull_request", ev, (b, h) => (b === "b" && h === "h" ? j("+++ b/a\n@@ -0,0 +1 @@\n+host nas", ".local") : ""));
   assert.deepEqual(f, ["(pr body):1: HOME_PATH", "a:1: INTERNAL_HOST"]);
 });
 test("issue_comment event scans the comment and the PR body", () => {
