@@ -70,7 +70,7 @@ Le workflow importe le P12 dans un trousseau temporaire du runner GitHub jetable
 Le nettoyage retire ce trousseau et les fichiers privés, même après un échec.
 Aucun certificat n'est importé sur le Mac de développement par le script.
 Aucun secret n'est inclus dans les artefacts Actions.
-Une configuration incomplète produit `Distribution skipped` et ignore le job macOS sans échec.
+Une configuration incomplète produit `Distribution skipped` et ignore le job macOS sans échec, sauf en répétition : elle échoue.
 Une clé présente mais invalide provoque un échec réel.
 
 ## Préparer Sparkle
@@ -125,17 +125,25 @@ Aucun chemin de compatibilité descendante n'existe.
 
 ## Répéter une release sans publier
 
-Le workflow **Release macOS** accepte l'option `rehearsal` quand un opérateur le lance à la main depuis une branche.
-Il construit, signe, notarise et agrafe cette branche avec les vraies clés.
+Le workflow **Release macOS** accepte l'option `rehearsal` quand un opérateur le lance à la main.
+Il construit, signe, notarise et agrafe le commit lancé avec les vraies clés.
 Il génère le flux Sparkle signé et le cask.
 Il ne publie rien et n'exige pas de tag sur `main`.
-Le champ `tag` reçoit alors `v` suivi du contenu de `VERSION` sur la branche.
-L'artefact `distribution-proof` contient le résultat.
-Cette répétition teste les scripts avant leur fusion : un tag exécute toujours les scripts de son propre commit.
+Le champ `tag` reçoit `v` suivi du contenu de `VERSION` sur ce commit.
+
+L'environnement `release` n'autorise que la branche `main`.
+GitHub refuse un lancement depuis une autre branche avant la première étape, donc avant tout accès aux secrets.
+La répétition se lance depuis `main`.
+Autoriser une autre branche est un réglage du dépôt, hors de ce workflow.
 
 ```bash
-gh workflow run release.yml --ref <branche> -f tag=v$(cat VERSION) -f rehearsal=true
+gh workflow run release.yml --ref main -f tag=v$(cat VERSION) -f rehearsal=true
 ```
+
+Une répétition échoue quand la configuration est incomplète.
+Un run vert prouve donc que le build, la signature, la notarisation et l'agrafage ont tourné.
+Le résumé du job donne l'identifiant du run et le résultat de ces quatre étapes.
+L'étape de publication reste ignorée.
 
 ## Lire les preuves et reprendre un échec
 
@@ -151,6 +159,7 @@ L'artefact Actions `distribution-proof` contient les éléments suivants.
 | --- | --- |
 | `notary.json` | Le statut et l'identifiant de la soumission Apple. |
 | `spctl.txt` | La décision Gatekeeper sur l'app exportée et agrafée. |
+| `stages.txt` | Les étapes `build`, `signature`, `notarization` et `stapling` réussies, une par ligne. |
 | `HermedBots-X.Y.Z.zip` | L'archive finale de l'app. |
 | `appcast.xml` | Le flux et ses signatures EdDSA. |
 | `hermed-bots.rb` | Le cask avec le SHA-256 de cette archive. |

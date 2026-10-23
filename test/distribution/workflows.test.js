@@ -60,3 +60,26 @@ test("the cask goes to the tap, never to the releases repository", () => {
   assert.match(publish, /path="repos\/\$tap\/contents\/Casks\/hermed-bots\.rb"/);
   assert.ok(!publish.includes('path="repos/$DISTRIBUTION_REPOSITORY'));
 });
+
+test("a rehearsal cannot publish and the workflow makes no write call to another repository", () => {
+  const steps = release.split("\n      - ");
+  const publishing = steps.filter(step => step.includes("publish-distribution.sh"));
+  assert.equal(publishing.length, 1);
+  assert.match(publishing[0].split("run:")[0], /if: \$\{\{ !inputs\.rehearsal \}\}/);
+  for (const line of release.split("\n").filter(text => text.includes("gh api"))) {
+    assert.doesNotMatch(line, / (-[fFX]|--method|--input|--field|--raw-field)( |$)/);
+  }
+  assert.doesNotMatch(release, /gh (release|pr|repo|workflow)|git push/);
+});
+
+test("a rehearsal needs the full configuration and the run states which stages ran", () => {
+  const preflight = release.slice(release.indexOf("  preflight:"), release.indexOf("  release:"));
+  assert.match(preflight, /REHEARSAL: \$\{\{ inputs\.rehearsal \}\}\n[\s\S]*run: node scripts\/distribution\.js preflight/);
+  const job = release.slice(release.indexOf("  release:"));
+  assert.match(job, /\n    env:\n      RELEASE_TAG: .*\n      REHEARSAL: \$\{\{ inputs\.rehearsal \}\}\n/);
+  const proof = job.slice(job.indexOf("- name: Summarize the rehearsal proof"));
+  // shell: bash adds pipefail, so a failed proof is not hidden by the tee that feeds the step summary
+  assert.match(proof.split("run:")[0], /if: \$\{\{ always\(\) && inputs\.rehearsal \}\}\n\s+shell: bash\n/);
+  assert.match(proof.split("\n      - ")[0], /run: node scripts\/distribution\.js proof \.audit\/distribution\/stages\.txt .*GITHUB_STEP_SUMMARY/);
+  assert.match(job, /\.audit\/distribution\/stages\.txt/);
+});

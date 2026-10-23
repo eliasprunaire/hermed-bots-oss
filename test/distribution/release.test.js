@@ -77,6 +77,29 @@ test("signing refuses a configured non-CI host", () => {
   assert.match(run.stderr, /ephemeral GitHub macOS runner/);
 });
 
+test("an incomplete configuration fails a rehearsal instead of passing silently", () => {
+  const env = { PATH: process.env.PATH, REHEARSAL: "true" };
+  const preflight = spawnSync(process.execPath, ["scripts/distribution.js", "preflight"], { encoding: "utf8", env });
+  assert.equal(preflight.status, 1);
+  assert.match(preflight.stdout, /Distribution skipped/);
+  const build = spawnSync("bash", ["scripts/release-macos.sh", "v0.1.0"], { encoding: "utf8", env });
+  assert.equal(build.status, 1);
+  assert.match(build.stdout, /Distribution skipped/);
+  const publication = spawnSync(process.execPath, ["scripts/distribution.js", "preflight"], { encoding: "utf8", env: { PATH: process.env.PATH, REHEARSAL: "false" } });
+  assert.equal(publication.status, 0);
+});
+
+test("the rehearsal proof names build, signature, notarization and stapling and fails when one did not run", () => {
+  const { rehearsalProof } = require("../../scripts/distribution.js");
+  const full = rehearsalProof("build\nsignature\nnotarization\nstapling\n", "42");
+  assert.equal(full.ok, true);
+  assert.equal(full.text, "Rehearsal run 42\nbuild: pass\nsignature: pass\nnotarization: pass\nstapling: pass\n");
+  const partial = rehearsalProof("build\nsignature\n", "42");
+  assert.equal(partial.ok, false);
+  assert.match(partial.text, /notarization: fail\nstapling: fail/);
+  assert.equal(rehearsalProof("", "42").ok, false);
+});
+
 test("release signs and staples before archiving; notarization and Gatekeeper failures prevent a feed", () => {
   for (const failure of ["none", "notary", "gatekeeper"]) {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-release-"));
@@ -134,6 +157,11 @@ esac
       }
       assert.match(calls, /security delete-keychain/);
       assert.equal(fs.readdirSync(root).filter(name => name.startsWith("hermed-signing.")).length, 0);
+      const stages = path.join(root, ".audit/distribution/stages.txt");
+      const proof = spawnSync(process.execPath, ["scripts/distribution.js", "proof", stages], { cwd: root, encoding: "utf8" });
+      assert.deepEqual(fs.readFileSync(stages, "utf8").split("\n").filter(Boolean),
+        failure === "notary" ? ["build", "signature"] : ["build", "signature", "notarization", "stapling"]);
+      assert.equal(proof.status, failure === "notary" ? 1 : 0);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
