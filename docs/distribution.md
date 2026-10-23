@@ -314,7 +314,7 @@ CFBundleVersion: 0.1.0
 HOMEBREW-PROOF version=0.1.0 install=pass gatekeeper=pass signature=pass staple=ticket-file-only versions=pass
 ```
 
-Cette preuve a six limites.
+Cette preuve a sept limites.
 
 1. La VM bloque `github.com`. Le lanceur sert l'archive de la release `v0.1.0` depuis un miroir local sur la boucle locale.
    Le script copie cette archive dans le cache de Homebrew. Homebrew la compare au SHA-256 du cask.
@@ -329,6 +329,7 @@ Cette preuve a six limites.
    Le verdict de `spctl` reste le contrôle de lancement.
 6. Le compte de la VM n'est pas administrateur. Le script installe donc l'app dans `~/Applications` avec `--appdir`.
    La commande de l'utilisateur n'a pas besoin de cette option.
+7. La passe de fixtures (42 tests UI ignorés, 118 captures exportées, 80 comparaisons visuelles réussies) ne prouve ni l'installation Homebrew ni la mise à jour Sparkle.
 
 ## Mise à jour de 0.1.0 vers 0.1.1 : preuve en attente
 
