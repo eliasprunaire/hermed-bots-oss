@@ -149,3 +149,4 @@ jobs:
             .audit/distribution/spctl.txt
             .audit/distribution/stages.txt
           if-no-files-found: ignore
+          retention-days: 1

@@ -292,3 +292,9 @@ test("the open-source source repository is never a valid tap source", () => {
   assert.throws(() => tapRepository("eliasprunaire/hermed-bots-oss"), /Invalid distribution repository/);
   assert.equal(tapRepository("eliasprunaire/hermed-bots-releases"), "eliasprunaire/homebrew-tap");
 });
+
+test("the distribution-proof artifact expires after 1 day", () => {
+  const yml = require("node:fs").readFileSync(require("node:path").join(__dirname, "../../.github/workflows/release.yml"), "utf8");
+  const step = yml.split("- uses: actions/upload-artifact").find((s) => s.includes("name: distribution-proof"));
+  assert.match(step, /^\s+retention-days: 1$/m);
+});
