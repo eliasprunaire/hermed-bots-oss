@@ -26,7 +26,7 @@ function run({ codes = {}, out = {}, env = {}, args = ["0.1.0"], ticket = "s8ch"
   fs.mkdirSync(installed, { recursive: true });
   fs.writeFileSync(path.join(installed, "CodeResources"), `${ticket}-ticket`);
   const outputs = { brew: cache, PlistBuddy: "0.1.0", ...out };
-  for (const name of ["curl", "brew", "spctl", "codesign", "xcrun", "PlistBuddy", "open", "pgrep", "pkill", "sleep"]) {
+  for (const name of ["curl", "brew", "spctl", "codesign", "xcrun", "PlistBuddy"]) {
     const list = [].concat(codes[name] ?? 0);
     const exits = list.map((code, i) => `${i + 1}) exit ${code};;`).join(" ");
     const record = name === "brew" ? `[ "$1" = install ] && echo "\${HOMEBREW_CASK_OPTS:-}" > ${dir}/cask-opts` : ":";
@@ -57,15 +57,14 @@ function run({ codes = {}, out = {}, env = {}, args = ["0.1.0"], ticket = "s8ch"
 }
 
 const checks = ["curl", "brew", "spctl", "codesign", "xcrun", "PlistBuddy", "PlistBuddy"];
-const launched = [...checks, "open", "pgrep", "sleep", "pgrep", "pkill"];
 
-test("every step accepted: install, Gatekeeper, signature, staple, both versions and launch, then one summary line", () => {
+test("every step accepted: install, Gatekeeper, signature, staple and both versions, then one summary line", () => {
   const { res, lines, called } = run();
   assert.equal(res.status, 0, res.stderr);
-  assert.deepEqual(called, launched);
+  assert.deepEqual(called, checks);
   assert.ok(lines.includes(`brew install --cask ${cask}`));
   assert.ok(lines.some((line) => line.startsWith("codesign --verify --deep --strict")));
-  assert.match(res.stdout, /^HOMEBREW-PROOF version=0\.1\.0 install=pass gatekeeper=pass signature=pass staple=validated versions=pass launch=pass$/m);
+  assert.match(res.stdout, /^HOMEBREW-PROOF version=0\.1\.0 install=pass gatekeeper=pass signature=pass staple=validated versions=pass$/m);
 });
 
 test("a missing version argument exits 2 before any tool runs", () => {
@@ -77,13 +76,13 @@ test("a missing version argument exits 2 before any tool runs", () => {
 test("a reachable github.com leaves the Homebrew download cache alone, even with a mirror", () => {
   const { res, called } = run({ env: { HV_MIRROR_URL: mirror } });
   assert.equal(res.status, 0, res.stderr);
-  assert.deepEqual(called, launched);
+  assert.deepEqual(called, checks);
 });
 
 test("an unreachable github.com with a mirror downloads the archive into the Homebrew cache before the install", () => {
   const { res, lines, called, cache } = run({ codes: { curl: [28, 0] }, env: { HV_MIRROR_URL: mirror } });
   assert.equal(res.status, 0, res.stderr);
-  assert.deepEqual(called, ["curl", "brew", "curl", ...launched.slice(1)]);
+  assert.deepEqual(called, ["curl", "brew", "curl", ...checks.slice(1)]);
   assert.equal(lines[1], `brew --cache --cask ${cask}`);
   assert.equal(lines[2], `curl -fsS -o ${cache} ${archive}`);
   assert.equal(lines[3], `brew install --cask ${cask}`);
@@ -127,7 +126,7 @@ test("a codesign refusal exits non-zero and stops before stapler", () => {
 test("a stapler failure falls back to the stapled ticket file and says so in the summary", () => {
   const { res, called } = run({ codes: { xcrun: 68 } });
   assert.equal(res.status, 0, res.stderr);
-  assert.deepEqual(called, launched);
+  assert.deepEqual(called, checks);
   assert.match(res.stdout, /stapler: online validation failed/);
   assert.match(res.stdout, /staple=ticket-file-only/);
 });
@@ -144,25 +143,11 @@ test("a PlistBuddy failure exits non-zero", () => {
   assert.deepEqual(called, ["curl", "brew", "spctl", "codesign", "xcrun", "PlistBuddy"]);
 });
 
-test("a bundle version other than the published one exits non-zero before the launch", () => {
+test("a bundle version other than the published one exits non-zero", () => {
   const { res, called } = run({ out: { PlistBuddy: "0.0.9" } });
   assert.notEqual(res.status, 0);
   assert.match(res.stdout, /CFBundleShortVersionString is 0\.0\.9, expected 0\.1\.0/);
   assert.deepEqual(called, ["curl", "brew", "spctl", "codesign", "xcrun", "PlistBuddy"]);
-});
-
-test("an app that is not running after the launch exits non-zero and shows no summary line", () => {
-  const { res, called } = run({ codes: { pgrep: [1] } });
-  assert.notEqual(res.status, 0);
-  assert.match(res.stdout, /launch: the app did not stay running/);
-  assert.doesNotMatch(res.stdout, /HOMEBREW-PROOF/);
-  assert.equal(called.at(-1), "pkill");
-});
-
-test("an app that exits during the settle time exits non-zero", () => {
-  const { res } = run({ codes: { pgrep: [0, 1] } });
-  assert.notEqual(res.status, 0);
-  assert.match(res.stdout, /launch: the app did not stay running/);
 });
 
 test("the output is also saved as install.txt in a new evidence directory, and a failure keeps its exit code", () => {
