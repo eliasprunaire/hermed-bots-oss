@@ -16,9 +16,12 @@ function assertReleaseOrder(tag, latest) {
   if (difference < 0) throw new Error("Refusing to replace a newer release");
 }
 
+// Source repositories (old and open-source) must never be used as the distribution target
+const SOURCE_REPOSITORIES = new Set(["eliasprunaire/hermed-bots", "eliasprunaire/hermed-bots-oss"]);
+
 function validRepository(repository) {
   return /^[A-Za-z0-9_-]+\/[A-Za-z0-9_.-]+$/.test(repository || "") && !/\s/.test(repository) &&
-    repository.toLowerCase() !== "eliasprunaire/hermed-bots";
+    !SOURCE_REPOSITORIES.has(repository.toLowerCase());
 }
 
 // Homebrew resolves owner/tap to the owner/homebrew-tap repository
