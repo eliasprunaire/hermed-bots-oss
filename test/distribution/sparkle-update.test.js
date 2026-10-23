@@ -21,3 +21,35 @@ test("the app bundle carries the Sparkle feed, the public key and the signed-fee
     assert.equal(plist[key], "<true/>", key);
   }
 });
+
+const os = require("node:os");
+const path = require("node:path");
+const { spawnSync } = require("node:child_process");
+
+const PROOF = "scripts/sparkle-update-proof.sh";
+
+test("the update proof is valid shell and never expands the production signing key", () => {
+  const syntax = spawnSync("bash", ["-n", PROOF], { encoding: "utf8" });
+  assert.equal(syntax.status, 0, syntax.stderr);
+  const source = fs.readFileSync(PROOF, "utf8");
+  // The proof signs with a key pair created for the run; the repository secret must not even reach a child process
+  assert.ok(!/\$\{?SPARKLE_PRIVATE_KEY/.test(source));
+  assert.match(source, /^unset SPARKLE_PRIVATE_KEY$/m);
+  assert.match(source, /^set \+x$/m);
+});
+
+test("the update proof refuses a machine that is not macOS and an unknown mode", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-proof-"));
+  try {
+    fs.writeFileSync(path.join(root, "uname"), "#!/bin/sh\necho Linux\n", { mode: 0o755 });
+    const env = { PATH: `${root}:${process.env.PATH}` };
+    const linux = spawnSync("bash", [PROOF, "prepare"], { encoding: "utf8", env });
+    assert.equal(linux.status, 2);
+    assert.match(linux.stderr, /needs macOS/);
+    const mode = spawnSync("bash", [PROOF, "publish"], { encoding: "utf8", env });
+    assert.equal(mode.status, 2);
+    assert.match(mode.stderr, /Usage/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
