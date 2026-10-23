@@ -58,6 +58,7 @@ jobs:
           DISTRIBUTION_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
           DISTRIBUTION_REPOSITORY: ${{ vars.DISTRIBUTION_REPOSITORY }}
           DISTRIBUTION_APPROVED: ${{ vars.DISTRIBUTION_APPROVED }}
+          REHEARSAL: ${{ inputs.rehearsal }}
         run: node scripts/distribution.js preflight
   release:
     needs: preflight
@@ -72,6 +73,7 @@ jobs:
       cancel-in-progress: false
     env:
       RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      REHEARSAL: ${{ inputs.rehearsal }}
       DISTRIBUTION_REPOSITORY: ${{ vars.DISTRIBUTION_REPOSITORY }}
     steps:
       - uses: actions/checkout@v7
@@ -133,6 +135,10 @@ jobs:
           GH_TOKEN: ${{ secrets.DISTRIBUTION_TOKEN }}
           DISTRIBUTION_APPROVED: ${{ vars.DISTRIBUTION_APPROVED }}
         run: bash scripts/publish-distribution.sh "$RELEASE_TAG"
+      - name: Summarize the rehearsal proof
+        if: ${{ always() && inputs.rehearsal }}
+        shell: bash
+        run: node scripts/distribution.js proof .audit/distribution/stages.txt | tee -a "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -141,4 +147,5 @@ jobs:
             .audit/distribution/out/
             .audit/distribution/notary.json
             .audit/distribution/spctl.txt
+            .audit/distribution/stages.txt
           if-no-files-found: ignore

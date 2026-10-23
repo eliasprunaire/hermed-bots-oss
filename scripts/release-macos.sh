@@ -17,6 +17,8 @@ if [ "${GITHUB_ACTIONS:-}" != true ] || [ "${RUNNER_OS:-}" != macOS ]; then
 fi
 work="$PWD/.audit/distribution"
 mkdir -p "$work/out"
+stages="$work/stages.txt"
+: > "$stages"
 private=$(mktemp -d "$RUNNER_TEMP/hermed-signing.XXXXXX")
 keychain="$private/signing.keychain-db"
 cleanup() {
@@ -53,14 +55,18 @@ cat > "$private/ExportOptions.plist" <<PLIST
 PLIST
 xcodebuild -exportArchive -archivePath "$work/HermedBots.xcarchive" \
   -exportPath "$work/export" -exportOptionsPlist "$private/ExportOptions.plist"
+echo build >> "$stages"
 app="$work/export/HermedBots.app"
 codesign --verify --deep --strict --verbose=2 "$app"
+echo signature >> "$stages"
 ditto -c -k --sequesterRsrc --keepParent "$app" "$work/notarize.zip"
 xcrun notarytool submit "$work/notarize.zip" --key "$private/AuthKey.p8" \
   --key-id "$ASC_KEY_ID" --issuer "$ASC_ISSUER_ID" --wait --output-format json > "$work/notary.json"
 node -e 'if (require(process.argv[1]).status !== "Accepted") process.exit(1)' "$work/notary.json"
+echo notarization >> "$stages"
 xcrun stapler staple "$app"
 xcrun stapler validate "$app"
+echo stapling >> "$stages"
 spctl -a -vv --type execute "$app" > "$work/spctl.txt" 2>&1
 cat "$work/spctl.txt"
 archive="$work/out/HermedBots-$version.zip"

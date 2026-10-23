@@ -43,6 +43,17 @@ function releaseReadiness(env) {
   return { ready: missing.length === 0, missing };
 }
 
+// A rehearsal counts only if every stage left its marker in the stages file
+const STAGES = ["build", "signature", "notarization", "stapling"];
+
+function rehearsalProof(stages, runId) {
+  const done = new Set(stages.split("\n").filter(Boolean));
+  return {
+    ok: STAGES.every(stage => done.has(stage)),
+    text: `Rehearsal run ${runId}\n${STAGES.map(stage => `${stage}: ${done.has(stage) ? "pass" : "fail"}`).join("\n")}\n`,
+  };
+}
+
 function renderCask(tag, sha256, repository) {
   const version = versionFromTag(tag);
   if (sha256.length !== 64 || !/^[a-f0-9]{64}$/.test(sha256) || !validRepository(repository)) throw new Error("Invalid cask archive hash or repository");
@@ -72,13 +83,19 @@ if (require.main === module) {
       const result = releaseReadiness(process.env);
       console.log(result.ready ? "Distribution ready" : `Distribution skipped: ${result.missing.join(", ")}`);
       if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `ready=${result.ready}\n`);
+      // A skipped rehearsal would end green without signing anything
+      if (!result.ready && process.env.REHEARSAL === "true") process.exitCode = 1;
+    } else if (command === "proof") {
+      const proof = rehearsalProof(fs.existsSync(args[0]) ? fs.readFileSync(args[0], "utf8") : "", process.env.GITHUB_RUN_ID || "local");
+      process.stdout.write(proof.text);
+      if (!proof.ok) process.exitCode = 1;
     } else if (command === "cask") process.stdout.write(renderCask(...args));
     else if (command === "tap") console.log(tapRepository(args[0]));
-    else throw new Error("Usage: distribution.js version <tag> | preflight | cask <tag> <sha256> <owner/repo> | tap <owner/repo>");
+    else throw new Error("Usage: distribution.js version <tag> | preflight | proof <stages-file> | cask <tag> <sha256> <owner/repo> | tap <owner/repo>");
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;
   }
 }
 
-module.exports = { versionFromTag, releaseReadiness, renderCask, assertReleaseOrder, tapRepository };
+module.exports = { versionFromTag, releaseReadiness, rehearsalProof, renderCask, assertReleaseOrder, tapRepository };
