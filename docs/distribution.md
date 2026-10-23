@@ -6,7 +6,7 @@ style_gate: pass
 
 La chaîne produit une archive ZIP signée Developer ID, notarisée et agrafée, un appcast Sparkle signé et un cask Homebrew.
 Elle cible macOS 27 au minimum.
-Le dépôt source reste privé.
+Le dépôt source est public.
 
 ```text
 VERSION sur main -> tag vX.Y.Z -> archive Release -> Developer ID
@@ -19,7 +19,6 @@ VERSION sur main -> tag vX.Y.Z -> archive Release -> Developer ID
 La chaîne écrit dans deux dépôts publics.
 `eliasprunaire/hermed-bots-releases` reçoit les archives, le flux Sparkle, les empreintes et le SHA source.
 `eliasprunaire/homebrew-tap` reçoit le cask `Casks/hermed-bots.rb`.
-Le code source, les certificats et la documentation interne restent dans le dépôt privé.
 
 Le dépôt du tap se déduit du propriétaire de `DISTRIBUTION_REPOSITORY` : `<propriétaire>/homebrew-tap`.
 Homebrew nomme ce tap `<propriétaire>/tap`.
@@ -42,7 +41,6 @@ Un administrateur configure les éléments suivants dans le dépôt source.
 Les deux dépôts publics doivent avoir une branche par défaut initialisée.
 Le workflow vérifie leur visibilité et les droits d'écriture avant la signature.
 Il ne crée aucun dépôt et ne change aucune visibilité.
-Un appcast placé dans les releases privées du dépôt source ne convient pas aux installations sans jeton.
 
 ## Préparer les clés Apple
 
