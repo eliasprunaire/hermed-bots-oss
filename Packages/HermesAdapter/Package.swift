@@ -13,7 +13,7 @@ let package = Package(
         .target(name: "HermesAdapter"),
         .target(name: "LoopGuard"),
         .executableTarget(name: "hd-probe", dependencies: ["HermesAdapter", "LoopGuard"]),
-        .testTarget(name: "HermesAdapterTests", dependencies: ["HermesAdapter"]),
+        .testTarget(name: "HermesAdapterTests", dependencies: ["HermesAdapter"], exclude: ["Fixtures"]),
         .testTarget(name: "LoopGuardTests", dependencies: ["LoopGuard"], exclude: ["Fixtures"]),
     ]
 )

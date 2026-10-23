@@ -6,15 +6,14 @@ enum FixtureVersion: String, CaseIterable {
     case previous
 }
 
-// Les fixtures vivent dans le dossier du skill de vérification : le paquet les lit en place, sans copie
+// Les fixtures vivent dans Fixtures/ à côté de ce fichier : le paquet les lit en place, sans copie
 struct Fixture {
     let version: FixtureVersion
     let root: [String: Any]
 
     static func load(_ version: FixtureVersion) throws -> Fixture {
-        var url = URL(fileURLWithPath: #filePath)
-        for _ in 0..<5 { url.deleteLastPathComponent() }
-        url.appendPathComponent(".cursor/skills/verify-hermed-bots/fixtures/hermes-\(version.rawValue)/contract.json")
+        let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .appendingPathComponent("Fixtures/hermes-\(version.rawValue)/contract.json")
         let object = try JSONSerialization.jsonObject(with: Data(contentsOf: url))
         return Fixture(version: version, root: object as! [String: Any])
     }
