@@ -61,5 +61,5 @@ for order in ('desktop-first', 'api-first'):
             desktop.wait(timeout=30)
     result[order]['released'] = snapshot()
     assert result[order]['released']['held'] == []
-result['desktop_gui'] = 'manual-only: application macOS absente du conteneur Linux ; tunnel OrbStack VM non branché par vm.sh'
+result['desktop_gui'] = 'manual-only: application macOS absente du conteneur Linux ; tunnel OrbStack VM non branché par le script de VM de test'
 print(json.dumps(result, ensure_ascii=False, indent=2))

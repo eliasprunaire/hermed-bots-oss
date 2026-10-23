@@ -1,6 +1,6 @@
-# publish.sh : publication du verdict et réessai passager du lanceur (sourcé par runner.sh, 2026-10-22, issue #62)
+# Script de publication : publication du verdict et réessai passager du lanceur (sourcé par le lanceur, 2026-10-22, issue #62)
 # Copie de référence testée par test/runner-publish.test.js ; la copie active vit dans le dossier local du lanceur (hors dépôt).
-# Attend : R, S, NAME, REPO, LOG et les fonctions log et notify (notify.sh) et gh_post (gh-post.sh, règle 13)
+# Attend : R, S, NAME, REPO, LOG et les fonctions log et notify (script de notification) et gh_post (script d'appel GitHub, règle 13)
 typeset -f gh_post >/dev/null 2>&1 || source "$R/gh-post.sh"
 
 valid_verdict(){ # $1 fichier $2 sha -> 0 si la 1re ligne est « VERDICT: … @ sha » et que le marqueur est présent

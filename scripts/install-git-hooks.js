@@ -80,15 +80,15 @@ function installDispatcher(cwd) {
   return { dest };
 }
 
-// Rule 13: the hooks written above replace pre-push; re-chain the local infra-guard
-// (optional tool, outside the repo) so its pre-commit/pre-push checks stay active.
+// Rule 13: the hooks written above replace pre-push; re-chain an optional extra
+// local check (outside the repo) so its pre-commit/pre-push checks stay active.
 function chainInfraGuard(cwd, env = process.env) {
   const bin = env.INFRA_GUARD_BIN || "infra-guard";
   const top = git(cwd, ["rev-parse", "--show-toplevel"]);
   const repo = top.status === 0 ? top.stdout.trim() : cwd;
   const res = spawnSync(bin, ["install", repo], { cwd, encoding: "utf8", env });
   if (res.error && res.error.code === "ENOENT") {
-    console.warn("install-git-hooks: infra-guard not found, local rule 13 hooks not chained (warning only)");
+    console.warn("install-git-hooks: extra local check not found, local rule 13 hooks not chained (warning only)");
     return "missing";
   }
   if (res.error || res.status !== 0) {

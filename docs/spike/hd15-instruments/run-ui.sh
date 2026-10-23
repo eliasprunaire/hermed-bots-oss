@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Lancer uniquement par vm.sh exec
+# Lancer uniquement par le script de VM de test
 set -uo pipefail
 [ "$HOME" =  ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
 SK=.cursor/skills/verify-hermed-bots/scripts

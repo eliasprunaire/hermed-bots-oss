@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # render-net-guard.sh <sortie.png> <sortie-passe>... <journal-lane5> : la lane 10 de HD-10, rendue en image
-# Chaque <sortie-passe> est la sortie de `vm.sh exec bash docs/spike/hd10-instruments/run-ui.sh ...` ; son dossier de preuves et le dossier du module (meta) s'y lisent
+# Chaque <sortie-passe> est la sortie de `<vm-test-script> exec bash docs/spike/hd10-instruments/run-ui.sh ...` ; son dossier de preuves et le dossier du module (meta) s'y lisent
 # On en tire : le mode du faux serveur, les lignes NET et GUARD de la passe, la garde de l'hôte avant et après (guard-host-*.txt du module), et les destinations lues dans net.txt
 # <journal-lane5> est lane.log de lane-orb-model.sh : la garde de la lane 5, sur l'hôte
 # Le PNG est une transcription de terminal rendue en image, pas une capture de l'app

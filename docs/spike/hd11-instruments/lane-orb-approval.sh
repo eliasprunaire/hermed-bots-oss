@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # lane-orb-approval.sh <sortie.png> : lane 9 de HD-11, répondre à une approbation sur hv-hermes-test avec le faux fournisseur
-# L'app ne tourne pas contre OrbStack : la VM de la passe UI n'atteint pas l'hôte (`vm.sh ui orb` rend « HV-UI SAUTÉE »), et l'app ne se lance jamais sur l'hôte
+# L'app ne tourne pas contre OrbStack : la VM de la passe UI n'atteint pas l'hôte (`<vm-test-script> ui orb` rend « HV-UI SAUTÉE »), et l'app ne se lance jamais sur l'hôte
 # Cette lane rejoue donc, avec hd-probe et HermesClient, les appels de la feuille : start_run, run_events jusqu'à approval.request, approve avec once (Oui) ou deny (Non)
 # `HV_TOOL_DETACH go` fait lancer au faux fournisseur la commande `python3 -c "…subprocess.Popen(['sleep','303']…); os.system('sleep 300')"`, que Hermes soumet à l'approbation (« script execution via -e/-c flag »)
 # Pass : chaque appel à hd-probe et à docker réussit ; après Non, aucun `sleep 303` ne tourne dans le conteneur et le tour finit `completed` ; après Oui, `sleep 303` tourne dans le conteneur (l'outil a tourné)
@@ -75,7 +75,7 @@ LANE_RC=${PIPESTATUS[0]}
 if grep -qF "$HV_TEST_API_KEY" "$LOG"; then echo "SECRET dans le journal : arrêt" >&2; exit 1; fi
 {
   echo "HD-11 lane 9 code=$(git -C "$REPO" rev-parse --short HEAD) rendu=$(TZ=Europe/Paris date '+%Y-%m-%d %H:%M:%S') Paris"
-  echo "Transcription de terminal rendue en image, pas une capture de l'app : l'app ne tourne pas contre OrbStack (vm.sh ui orb : HV-UI SAUTÉE)"
+  echo "Transcription de terminal rendue en image, pas une capture de l'app : l'app ne tourne pas contre OrbStack (<vm-test-script> ui orb : HV-UI SAUTÉE)"
   echo
   fold -w 118 -s "$LOG"
 } > "$EVD/render.txt"

@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # run-ui.sh [Classe/test ...] : une passe UI ciblée de HD-09 contre le faux serveur, sans le reste de la suite
-# Dans la VM : zsh ~/.runner/vm.sh exec bash docs/spike/hd09-instruments/run-ui.sh SixActions/testConversation ConversationPerfProbe
-# vm.sh exporte HV_XCTESTRUN après build-for-testing et rapatrie le dossier de preuves créé sous $HV_WORK/evidence
+# Dans la VM : zsh <vm-test-script> exec bash docs/spike/hd09-instruments/run-ui.sh SixActions/testConversation ConversationPerfProbe
+# le script de VM de test exporte HV_XCTESTRUN après build-for-testing et rapatrie le dossier de preuves créé sous $HV_WORK/evidence
 # Sans argument : toutes les classes de HD-09
 set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 SK=$ROOT/.cursor/skills/verify-hermed-bots/scripts
 WORK=${HV_WORK:-$HOME/hermed-bots-work}
-XCTESTRUN=${HV_XCTESTRUN:?HV_XCTESTRUN absent : lancer par vm.sh exec}
+XCTESTRUN=${HV_XCTESTRUN:?HV_XCTESTRUN absent : lancer par le script de VM de test}
 HV_EVIDENCE=$WORK/evidence/hd09-ui-$(TZ=Europe/Paris date +%Y%m%d-%H%M%S)
 export HV_EVIDENCE
 mkdir -p "$HV_EVIDENCE"

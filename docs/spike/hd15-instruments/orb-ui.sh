@@ -8,7 +8,7 @@ mkdir -p "$EVD"
   curl --connect-timeout 3 --max-time 5 -fsS http://192.0.2.10:18642/health
   code=$?
   echo "curl rc=$code"
-  echo 'Lane 2 impossible sur UI OrbStack. Le tunnel VM vers hv-hermes-test manque dans vm.sh, pf interdit cet accès.'
+  echo 'Lane 2 impossible sur UI OrbStack. Le tunnel VM vers hv-hermes-test manque dans le script de VM de test, pf interdit cet accès.'
   echo 'La sonde API distincte run-orb.sh ne prouve pas le clic UI.'
   echo 'HD15 lane 9 capture hd15-operator.png. Recherche du résultat manuel fourni par Ayo.'
   if test -s "$HV_WORK/hd15-operator-result.md"; then

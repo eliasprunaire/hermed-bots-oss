@@ -35,5 +35,5 @@ Lane 7. Backend Desktop réel prêt sur hv-hermes-test ; parcours graphique manu
       "held": []
     }
   },
-  "desktop_gui": "manual-only: application macOS absente du conteneur Linux ; tunnel OrbStack VM non branché par vm.sh"
+  "desktop_gui": "manual-only: application macOS absente du conteneur Linux ; tunnel OrbStack VM non branché par le script de VM de test"
 }

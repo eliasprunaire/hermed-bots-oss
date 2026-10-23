@@ -67,11 +67,11 @@ These are facts the plan or the PRD did not expect. The spike does not propose a
 
 ## Cloud lane worker to Mac lane
 
-The plan asks to settle how a cloud lane worker dispatches a Mac lane to the launchd runner and reads `$HV_WORK/evidence/`. Result: decision pending. No such mechanism exists on this Mac today.
+The plan asks to settle how a cloud lane worker dispatches a Mac lane to the scheduled launcher task and reads `$HV_WORK/evidence/`. Result: decision pending. No such mechanism exists on this Mac today.
 
-- The installed runner is the launchd job `<INFRA>` (`StartInterval` 120 s). It runs `~/<INFRA>/runner-all.sh`, which discovers the repositories by the GitHub topic `dev-lead` and runs `runner.sh <repo>` for each.
-- `runner.sh` writes `heartbeat.json` and `lock.json` on the branch `runner-heartbeat` of the repository, and takes the open issues labeled `dev-lead:task`. While `lock.json` says `owner: cloud`, the Mac executes nothing. `AGENTS.md` says the cloud agents take over when the Mac heartbeat is older than 10 minutes.
-- Neither `runner.sh` nor `runner-all.sh` contains `hv-run`, `HV_WORK`, `evidence` or `lane`. They never call `hv-run.sh` and never read `$HV_WORK/evidence/`. The folder `~/hermes-desktop-work` does not exist on the Mac.
+- The installed runner is the scheduled launcher task. It discovers the repositories by a GitHub topic and runs the per-repository runner for each.
+- The per-repository runner writes `heartbeat.json` and `lock.json` on the branch `runner-heartbeat` of the repository, and takes the open issues labeled `dev-lead:task`. While `lock.json` says `owner: cloud`, the Mac executes nothing. `AGENTS.md` says the cloud agents take over when the Mac heartbeat is older than 10 minutes.
+- Neither launcher script contains `hv-run`, `HV_WORK`, `evidence` or `lane`. They never call `hv-run.sh` and never read `$HV_WORK/evidence/`. The local work folder does not exist on the Mac.
 - `hv-run.sh` can be started by hand: `HV_UNDER_RUNNER=1 scripts/hv-run.sh api orb`. It writes its evidence under `$HV_WORK/evidence/<mode>-<stamp>/`.
 
 What the user has to decide: the channel a cloud worker uses to ask for a Mac lane, and the channel it uses to read the evidence back. This spike did not invent one.

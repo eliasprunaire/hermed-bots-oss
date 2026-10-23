@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run-ui.sh [--mode normal|slow|drop-route] [--drop <contrat>] [Classe/test ...] : une passe UI ciblée de HD-10 contre le faux serveur, sans le reste de la suite
-# Dans la VM : zsh ~/.runner/vm.sh exec bash docs/spike/hd10-instruments/run-ui.sh --mode slow SixActions/testASlowServerShowsAWaitStateAndTheWindowStaysResponsive
-# vm.sh exporte HV_XCTESTRUN après build-for-testing et rapatrie le dossier de preuves créé sous $HV_WORK/evidence
+# Dans la VM : zsh <vm-test-script> exec bash docs/spike/hd10-instruments/run-ui.sh --mode slow SixActions/testASlowServerShowsAWaitStateAndTheWindowStaysResponsive
+# le script de VM de test exporte HV_XCTESTRUN après build-for-testing et rapatrie le dossier de preuves créé sous $HV_WORK/evidence
 # --mode règle HV_FAKE_MODE du faux serveur (défaut normal), --drop règle HV_DROP (défaut set_model) : chaque lane qui exige un autre mode lance sa passe
 # Sans test : les classes de HD-10 (SixActions, ModelPerfProbe)
 # Lane 10 : autour des tests, hv-guard.sh relève les chemins protégés avant et après, et netsample.sh (HD-08) échantillonne les connexions de l'app (lsof, toutes les 0,3 s)
@@ -10,7 +10,7 @@ set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 SK=$ROOT/.cursor/skills/verify-hermed-bots/scripts
 WORK=${HV_WORK:-$HOME/hermed-bots-work}
-XCTESTRUN=${HV_XCTESTRUN:?HV_XCTESTRUN absent : lancer par vm.sh exec}
+XCTESTRUN=${HV_XCTESTRUN:?HV_XCTESTRUN absent : lancer par le script de VM de test}
 mode=normal
 drop=set_model
 while [ $# -gt 0 ]; do
