@@ -15,7 +15,7 @@ xcrun swiftc HermedBots/Transport/ResumeStore.swift docs/spike/hd13-instruments/
 <HOME>/hermed-bots-work/hd13-store-check -> code 0, STORE OK.
 
 Commande ciblée de cette session.
-timeout 3600 zsh ~/<INFRA>/vm.sh exec bash docs/spike/hd13-instruments/run-ui.sh HermedBotsTests/ConversationModelTests
+timeout 3600 zsh ~/<INFRA>/<vm-test-script> exec bash docs/spike/hd13-instruments/run-ui.sh HermedBotsTests/ConversationModelTests
 66 tests, 0 échec, code 0.
 Journal revision-targeted.log.
 La première passe avait quatre assertions en échec dans trois tests.
@@ -25,7 +25,7 @@ Journal revision-targeted-first.log.
 La reproduction antérieure des défauts de production reste dans revision-red.log.
 
 Suite complète de cette session.
-timeout 3600 zsh ~/<INFRA>/vm.sh ui fake
+timeout 3600 zsh ~/<INFRA>/<vm-test-script> ui fake
 208 tests unitaires réussis, 0 échec.
 103 tests UI, 53 réussis, 50 sautés, 0 échec.
 xcresulttool get test-results summary --path <HOME>/hermed-bots-work/evidence/ui-20261021-130506-vm/result.xcresult --compact
@@ -38,7 +38,7 @@ La cible minimale reste macOS 27.0, exécution en VM macOS 27.0.1.
 Tentative OrbStack de cette session. Cible hv-hermes-test.
 HV_EVIDENCE=<HOME>/hermed-bots-work/evidence/hd13-orb-fix-20261021 bash .cursor/skills/verify-hermed-bots/scripts/hv-hermes-env.sh up orb
 bash .cursor/skills/verify-hermed-bots/scripts/hv-hermes-env.sh doctor orb
-timeout 3600 zsh ~/<INFRA>/vm.sh ui orb
+timeout 3600 zsh ~/<INFRA>/<vm-test-script> ui orb
 ENV FAIL (32): HV_TEST_API_KEY absent ou de moins de 16 caractères (Hermes refuse de démarrer sinon)
 up orb rc=32
 error: no such object: hv-hermes-test
@@ -57,7 +57,7 @@ hd13-orb-cut.png : impossible, clé de test absente, conteneur absent et tunnel 
 Passe UI en attente de la VM.
 
 Recettes séparées de cette session.
-timeout 3600 zsh ~/<INFRA>/vm.sh exec bash docs/spike/hd13-instruments/run-lanes.sh
+timeout 3600 zsh ~/<INFRA>/<vm-test-script> exec bash docs/spike/hd13-instruments/run-lanes.sh
 La commande lance run-comparison.sh, puis chaque run-ui.sh séparément, dans la même VM.
 SixActions/testResumeAfterSleep -> code 0
 Events/testUnknownEventIgnored -> code 0
@@ -113,7 +113,7 @@ NET OK : 5 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
 NET OK : 14 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
 NET OK : 3 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
 NET OK : 9 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
-NET INCONCLUSIF : aucun socket observé ; le confinement pf reste exigé par vm.sh
+NET INCONCLUSIF : aucun socket observé ; le confinement pf reste exigé par le script de VM de test
 NET OK : 12 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
 HV-STATE [{"run":"run_ad2ba286438a448e98c5efed416e25f2","session":"api_1792582801_58b37016"}]
 NET OK : 17 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
@@ -121,7 +121,7 @@ NET OK : 17 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
 NET OK : 11 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
 NET OK : 7 relevés lsof de l'app, destinations vues : 127.0.0.1:18642
 Le sondage de la lane 7 ne voit aucun socket. Sa commande a bien tourné.
-Le confinement pf actif est vérifié par vm.sh avant la passe. Ce confinement ne remplace pas une observation de socket.
+Le confinement pf actif est vérifié par le script de VM de test avant la passe. Ce confinement ne remplace pas une observation de socket.
 
 Captures copiées sans modification depuis les preuves de cette session.
 hd13-cut.png | testResumeAfterSleep | SHA-256 056f1204d5c4e2e028274988f91d1e3c07347308e5c962fbd81101273690b490 | <HOME>/hermed-bots-work/evidence/hd13-ui-normal-20261021-132542-vm/shots/hd13-cut.png

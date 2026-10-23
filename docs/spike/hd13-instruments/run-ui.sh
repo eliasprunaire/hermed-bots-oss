@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Exécuter uniquement par vm.sh exec, jamais sur l’hôte
+# Exécuter uniquement par le script de VM de test, jamais sur l’hôte
 set -uo pipefail
 [ "$HOME" =  ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo "VM hvtest requise"; exit 2; }
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
 SK=$ROOT/.cursor/skills/verify-hermed-bots/scripts
 WORK=${HV_WORK:-$HOME/hermed-bots-work}
-XCTESTRUN=${HV_XCTESTRUN:?HV_XCTESTRUN absent : lancer par vm.sh exec}
+XCTESTRUN=${HV_XCTESTRUN:?HV_XCTESTRUN absent : lancer par le script de VM de test}
 mode=normal
 drop=set_model
 while [ $# -gt 0 ]; do
@@ -66,7 +66,7 @@ others=$(printf '%s' "$destinations" | tr ' ' '\n' | grep -vx -e '' -e "127.0.0.
 if [ "$samples" -gt 0 ] && [ -z "$others" ]; then
   echo "NET OK : $samples relevés lsof de l'app, destinations vues : ${destinations:-aucune}"
 elif [ "$samples" -eq 0 ]; then
-  echo "NET INCONCLUSIF : aucun socket observé ; le confinement pf reste exigé par vm.sh"
+  echo "NET INCONCLUSIF : aucun socket observé ; le confinement pf reste exigé par le script de VM de test"
 else
   echo "NET FAIL : $samples relevés lsof de l'app, destinations vues : ${destinations:-aucune}"; [ $rc -eq 0 ] && rc=14
 fi

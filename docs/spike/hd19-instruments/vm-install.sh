@@ -1,6 +1,6 @@
 #!/bin/bash
 # Installs the published cask in the throwaway VM, then reads Gatekeeper and the bundle versions
-# Run from the repository root: zsh ~/.runner/vm.sh exec bash docs/spike/hd19-instruments/vm-install.sh
+# Run from the repository root: zsh <vm-test-script> exec bash docs/spike/hd19-instruments/vm-install.sh
 # PLISTBUDDY replaces the system tool in test/distribution/vm-install.test.js
 set -euo pipefail
 export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1

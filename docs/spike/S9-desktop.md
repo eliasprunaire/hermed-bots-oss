@@ -84,8 +84,8 @@ L'archive reste un fichier de travail local.
 
 ```bash
 git archive e2b98b8f07ebe91bc147bdb506670efb0f367bb8 HermedBots HermedBots.xcodeproj Packages > docs/spike/hd14-instruments/trunk-source.tar
-timeout 3600 zsh ~/<INFRA>/vm.sh exec bash docs/spike/hd14-instruments/run-all.sh
-timeout 3600 zsh ~/<INFRA>/vm.sh ui fake
+timeout 3600 zsh ~/<INFRA>/<vm-test-script> exec bash docs/spike/hd14-instruments/run-all.sh
+timeout 3600 zsh ~/<INFRA>/<vm-test-script> ui fake
 ```
 
 Le harnais exécute les lanes successivement.

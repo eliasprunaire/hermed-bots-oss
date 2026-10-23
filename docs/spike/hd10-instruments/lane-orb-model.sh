@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # lane-orb-model.sh <sortie.png> : lane 5 de HD-10, changer le modèle d'une session de hv-bot-a sur hv-hermes-test
-# L'app ne tourne pas contre OrbStack : la VM de la passe UI n'atteint pas l'hôte (`vm.sh ui orb` rend « HV-UI SAUTÉE »), et l'app ne se lance jamais sur l'hôte
+# L'app ne tourne pas contre OrbStack : la VM de la passe UI n'atteint pas l'hôte (`<vm-test-script> ui orb` rend « HV-UI SAUTÉE »), et l'app ne se lance jamais sur l'hôte
 # Cette lane rejoue donc, avec hd-probe et HermesClient, les appels que ConversationModel fait : new_session, set_model, list_sessions, start_run avec session_id et model, run_events
 # Pass : la réponse du tour suivant nomme le modèle choisi (S4), une session sans choix garde le modèle du profil, la liste des fils porte le modèle du verrou, config.yaml du profil est inchangé
 # Le script montre aussi pourquoi l'app met `model` dans chaque run : sans lui, `POST /v1/runs` ignore le verrou (route_source global)
@@ -67,7 +67,7 @@ reply() { grep '^text: ' | head -1; }
 if grep -qF "$HV_TEST_API_KEY" "$LOG"; then echo "SECRET dans le journal : arrêt" >&2; exit 1; fi
 {
   echo "HD-10 lane 5 code=$(git -C "$REPO" rev-parse --short HEAD) rendu=$(TZ=Europe/Paris date '+%Y-%m-%d %H:%M:%S') Paris"
-  echo "Transcription de terminal rendue en image, pas une capture de l'app : l'app ne tourne pas contre OrbStack (vm.sh ui orb : HV-UI SAUTÉE)"
+  echo "Transcription de terminal rendue en image, pas une capture de l'app : l'app ne tourne pas contre OrbStack (<vm-test-script> ui orb : HV-UI SAUTÉE)"
   echo
   fold -w 118 -s "$LOG"
 } > "$EVD/render.txt"

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # lane-orb-send.sh <sortie.png> : lane 2 de HD-09, un message à hv-bot-a sur hv-hermes-test
-# L'app ne tourne pas contre OrbStack : la VM de la passe UI n'atteint pas l'hôte (`vm.sh ui orb` rend « HV-UI SAUTÉE »), et l'app ne se lance jamais sur l'hôte
+# L'app ne tourne pas contre OrbStack : la VM de la passe UI n'atteint pas l'hôte (`<vm-test-script> ui orb` rend « HV-UI SAUTÉE »), et l'app ne se lance jamais sur l'hôte
 # Cette lane rejoue donc, avec hd-probe et HermesClient, les appels que ConversationModel fait : new_session, start_run avec session_id, run_events, session_messages
 # Pass : l'état est completed, la réponse est celle du faux fournisseur, et le transcript du fil de Hermes garde le message une fois
 # Le PNG est une transcription de terminal rendue en image, pas une capture de l'app
@@ -49,7 +49,7 @@ trap '"$SK/hv-hermes-env.sh" down orb >/dev/null 2>&1' EXIT
 if grep -qF "$HV_TEST_API_KEY" "$LOG"; then echo "SECRET dans le journal : arrêt" >&2; exit 1; fi
 {
   echo "HD-09 lane 2 code=$(git -C "$REPO" rev-parse --short HEAD) rendu=$(TZ=Europe/Paris date '+%Y-%m-%d %H:%M:%S') Paris"
-  echo "Transcription de terminal rendue en image, pas une capture de l'app : l'app ne tourne pas contre OrbStack (vm.sh ui orb : HV-UI SAUTÉE)"
+  echo "Transcription de terminal rendue en image, pas une capture de l'app : l'app ne tourne pas contre OrbStack (<vm-test-script> ui orb : HV-UI SAUTÉE)"
   echo
   fold -w 118 -s "$LOG"
 } > "$EVD/render.txt"

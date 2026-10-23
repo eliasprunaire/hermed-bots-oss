@@ -232,7 +232,7 @@ Le script démarre les apps et exige une session graphique macOS.
 Sur le Mac de développement, la passe tourne dans la VM jetable :
 
 ```bash
-zsh ~/<INFRA>/vm.sh exec bash -c 'PROOF_OUT=$HOME/<WORK>/evidence/sparkle-update-proof SOURCE_PACKAGES=$HOME/<WORK>/sp bash scripts/sparkle-update-proof.sh'
+zsh ~/<INFRA>/<vm-test-script> exec bash -c 'PROOF_OUT=$HOME/<WORK>/evidence/sparkle-update-proof SOURCE_PACKAGES=$HOME/<WORK>/sp bash scripts/sparkle-update-proof.sh'
 ```
 
 `PROOF_OUT` désigne le dossier des preuves. Il reste hors du dépôt.
@@ -254,7 +254,7 @@ Il ne peut pas être remplacé par un test du générateur de cask.
 5. Relire les deux champs de version du bundle installé.
 6. Vérifier la conservation des réglages de connexion.
 
-Toutes les passes UI utilisent exclusivement `zsh ~/<INFRA>/vm.sh ui fake` ou `vm.sh exec` depuis la racine.
+Toutes les passes UI utilisent exclusivement `zsh ~/<INFRA>/<vm-test-script> ui fake` ou `<vm-test-script> exec` depuis la racine.
 Un délai extérieur de 3 600 secondes laisse au lanceur le temps de préparer la VM.
 La VM de recette bloque Internet par pf.
 Une recette publique Homebrew et Sparkle exige donc un transport de recette approuvé vers les archives et le flux.

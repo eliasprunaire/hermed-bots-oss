@@ -36,7 +36,7 @@ test("install-git-hooks (CLI) only warns when infra-guard is missing", () => {
     const rc = installGitHooks(repo, { ...process.env, INFRA_GUARD_BIN: path.join(repo, "does-not-exist") });
     assert.equal(rc, 0);
   } finally { console.warn = warn; }
-  assert.ok(seen.some((m) => /infra-guard not found/.test(m)));
+  assert.ok(seen.some((m) => /extra local check not found/.test(m)));
   assert.ok(fs.existsSync(path.join(repo, ".git", "hermed-bots-hooks", "pre-push")));
 });
 
