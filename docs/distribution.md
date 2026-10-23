@@ -254,6 +254,9 @@ Il ne peut pas être remplacé par un test du générateur de cask.
 5. Relire les deux champs de version du bundle installé.
 6. Vérifier la conservation des réglages de connexion.
 
+Le script `docs/spike/hd19-instruments/vm-install.sh` fait les étapes 1, 2 et 5 pour la version installée.
+La section « Installation de la version 0.1.0 prouvée » donne son résultat.
+
 Toutes les passes UI utilisent exclusivement `zsh ~/<INFRA>/<vm-test-script> ui fake` ou `<vm-test-script> exec` depuis la racine.
 Un délai extérieur de 3 600 secondes laisse au lanceur le temps de préparer la VM.
 La VM de recette bloque Internet par pf.
@@ -276,3 +279,67 @@ La preuve du run 39967121968 donne le statut de notarisation `Accepted` et la d�
 
 Le résumé Actions n'affiche le bloc de preuve que pour une répétition.
 Un vrai run garde sa preuve dans l'artefact `distribution-proof`, conservé un jour.
+
+## Installation de la version 0.1.0 prouvée
+
+La passe `vm-install.sh` installe la version 0.1.0 depuis le tap dans la VM de recette jetable.
+Elle a réussi avec le code 0.
+Elle exécute la commande de l'utilisateur : `brew install --cask eliasprunaire/tap/hermed-bots`.
+Le tap `eliasprunaire/tap` et le cask `hermed-bots` ont donc répondu à cette commande exacte.
+
+La passe part de la racine du dépôt.
+
+```bash
+zsh ~/<INFRA>/<vm-test-script> exec bash docs/spike/hd19-instruments/vm-install.sh 0.1.0
+```
+
+La dernière ligne du lanceur est `HV-UI chemin=vm rc=0 durée=264s`.
+La sortie utile suit, caviardée.
+
+```text
+github.com: unreachable
+archive: copied from the local mirror into the Homebrew cache
+==> Installing Cask hermed-bots
+==> Moving App 'HermedBots.app' to '~/Applications/HermedBots.app'
+hermed-bots was successfully installed!
+~/Applications/HermedBots.app: accepted
+source=Notarized Developer ID
+override=security disabled
+origin=<signing identity redacted>
+~/Applications/HermedBots.app: valid on disk
+~/Applications/HermedBots.app: satisfies its Designated Requirement
+stapler: online validation failed, reading the stapled ticket file instead
+CFBundleShortVersionString: 0.1.0
+CFBundleVersion: 0.1.0
+HOMEBREW-PROOF version=0.1.0 install=pass gatekeeper=pass signature=pass staple=ticket-file-only versions=pass
+```
+
+Cette preuve a sept limites.
+
+1. La VM bloque `github.com`. Le lanceur sert l'archive de la release `v0.1.0` depuis un miroir local sur la boucle locale.
+   Le script copie cette archive dans le cache de Homebrew. Homebrew la compare au SHA-256 du cask.
+   La preuve ne couvre pas le téléchargement depuis `github.com`.
+2. Le tap de la VM vient d'un miroir local du dépôt public du tap.
+3. La VM ajoute `override=security disabled` au verdict de `spctl`.
+   Ce verdict ne prouve donc pas seul que Gatekeeper applique la règle sur le Mac d'un utilisateur.
+   La décision Gatekeeper de la release elle-même figure dans la section « Release 0.1.0 ».
+4. `xcrun stapler validate` exige l'accès aux serveurs d'Apple, selon sa page de manuel. La VM n'y accède pas. Hors ligne, `stapler` sort avec le code 68. Le script lit alors le fichier du ticket agrafé, qui commence par `s8ch`. Il montre que le ticket est présent. Il ne vérifie pas sa validité. Les codes 65 (ticket invalide), 66 (ticket absent) et 77 (ticket révoqué) arrêtent le script avec ce code. Aucun repli ne s'applique. La validité de l'agrafe vient de l'étape `stapling` du run 39967121968.
+5. Le script ne démarre pas l'app. Une première tentative avec `open` est restée bloquée 16 minutes, et le processus de l'app est resté arrêté.
+   La cause n'est pas confirmée. Une app en quarantaine demande peut-être une confirmation à sa première ouverture, que la VM sans écran ne donne pas.
+   Le verdict de `spctl` reste le contrôle de lancement.
+6. Le compte de la VM n'est pas administrateur. Le script installe donc l'app dans `~/Applications` avec `--appdir`.
+   La commande de l'utilisateur n'a pas besoin de cette option.
+7. La passe de fixtures (42 tests UI ignorés, 118 captures exportées, 80 comparaisons visuelles réussies) ne prouve ni l'installation Homebrew ni la mise à jour Sparkle.
+
+## Mise à jour de 0.1.0 vers 0.1.1 : preuve en attente
+
+La mise à jour de 0.1.0 vers 0.1.1 n'est pas prouvée.
+La publication de 0.1.1 démarre quand le changement de `VERSION` à `0.1.1` arrive sur `main`.
+**Freeze version** crée alors le tag, puis **Release macOS** publie la release sans clic.
+
+L'app lit le flux à une adresse GitHub en HTTPS.
+Le flux public de la release courante répond HTTP 200 sans authentification, contrôlé depuis le poste de développement.
+La VM bloque cette adresse. Le miroir local sert seulement la disposition de Homebrew, en HTTP.
+La preuve de mise à jour exige donc un transport de recette approuvé vers le flux HTTPS et vers l'archive de 0.1.1.
+
+Cette pull request laisse l'issue #19 ouverte. La pull request suivante enregistre la preuve de mise à jour dans ce fichier, puis ferme l'issue.
