@@ -14,7 +14,7 @@ module.exports = Object.freeze([
     job: "pr-attribution",
   }),
   Object.freeze({
-    rule: "Marked PASS or PASS+NOTES on the head or the same git patch-id",
+    rule: "Marked PASS or PASS+NOTES, posted by an allowlisted verifier, on the exact head SHA",
     script: "scripts/verdict-gate.js",
     test: "test/verdict-gate.test.js",
     job: "record-verdict",
