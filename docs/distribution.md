@@ -324,7 +324,9 @@ Cette preuve a six limites.
    Ce verdict ne prouve donc pas seul que Gatekeeper applique la règle sur le Mac d'un utilisateur.
    La décision Gatekeeper de la release elle-même figure dans la section « Release 0.1.0 ».
 4. `xcrun stapler validate` exige l'accès aux serveurs d'Apple, selon sa page de manuel. La VM n'y accède pas.
-   Le script lit alors le fichier du ticket agrafé, qui commence par `s8ch`. Il montre que le ticket est présent. Il ne vérifie pas sa validité.
+   Hors ligne, `stapler` sort avec le code 68. Le script lit alors le fichier du ticket agrafé, qui commence par `s8ch`.
+   Il montre que le ticket est présent. Il ne vérifie pas sa validité.
+   Les codes 65 (ticket invalide), 66 (ticket absent) et 77 (ticket révoqué) arrêtent le script avec ce code. Aucun repli ne s'applique.
    La validité de l'agrafe vient de l'étape `stapling` du run 39967121968.
 5. Le script ne démarre pas l'app. Une première tentative avec `open` est restée bloquée 16 minutes, et le processus de l'app est resté arrêté.
    La cause n'est pas confirmée. Une app en quarantaine demande peut-être une confirmation à sa première ouverture, que la VM sans écran ne donne pas.
