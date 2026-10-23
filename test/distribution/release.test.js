@@ -100,17 +100,17 @@ test("the rehearsal proof names build, signature, notarization and stapling and 
   assert.equal(rehearsalProof("", "42").ok, false);
 });
 
-test("release signs and staples before archiving; notarization and Gatekeeper failures prevent a feed", () => {
-  for (const failure of ["none", "notary", "gatekeeper"]) {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-release-"));
-    try {
-      fs.mkdirSync(path.join(root, "scripts"));
-      for (const file of ["release-macos.sh", "distribution.js"]) {
-        fs.copyFileSync(path.resolve("scripts", file), path.join(root, "scripts", file));
-      }
-      const bin = path.join(root, "bin");
-      fs.mkdirSync(bin);
-      const stub = `#!/bin/bash
+// Runs the whole release script against stub tools; `failure` names the stage whose stub fails
+function release(failure, check) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-release-"));
+  try {
+    fs.mkdirSync(path.join(root, "scripts"));
+    for (const file of ["release-macos.sh", "distribution.js"]) {
+      fs.copyFileSync(path.resolve("scripts", file), path.join(root, "scripts", file));
+    }
+    const bin = path.join(root, "bin");
+    fs.mkdirSync(bin);
+    const stub = `#!/bin/bash
 set -eu
 name=$(basename "$0")
 echo "$name $*" >> "$TRACE"
@@ -130,42 +130,70 @@ case "$name" in
   spctl) [ "$FAILURE" != gatekeeper ]; echo accepted ;;
   ditto) touch "\${!#}" ;;
   generate_appcast) touch .audit/distribution/out/appcast.xml ;;
+  sign_update) [ "$FAILURE" != verify ] ;;
   git) echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa ;;
 esac
 `;
-      const stubPath = path.join(bin, "stub");
-      fs.writeFileSync(stubPath, stub, { mode: 0o755 });
-      for (const name of ["security", "codesign", "xcodebuild", "xcrun", "spctl", "ditto", "git"]) fs.symlinkSync(stubPath, path.join(bin, name));
-      const trace = path.join(root, "trace");
-      const result = spawnSync("bash", ["scripts/release-macos.sh", "v1.2.3"], {
-        cwd: root, encoding: "utf8",
-        env: { ...process.env, ...ready, DEVELOPER_ID_P12: "dGVzdA==", PATH: `${bin}:${process.env.PATH}`,
-          GITHUB_ACTIONS: "true", RUNNER_OS: "macOS", RUNNER_TEMP: root, TRACE: trace, STUB: stubPath, FAILURE: failure },
-      });
-      const calls = fs.readFileSync(trace, "utf8");
-      const output = path.join(root, ".audit/distribution/out");
+    const stubPath = path.join(bin, "stub");
+    fs.writeFileSync(stubPath, stub, { mode: 0o755 });
+    for (const name of ["security", "codesign", "xcodebuild", "xcrun", "spctl", "ditto", "git"]) fs.symlinkSync(stubPath, path.join(bin, name));
+    const trace = path.join(root, "trace");
+    const result = spawnSync("bash", ["scripts/release-macos.sh", "v1.2.3"], {
+      cwd: root, encoding: "utf8",
+      env: { ...process.env, ...ready, DEVELOPER_ID_P12: "dGVzdA==", PATH: `${bin}:${process.env.PATH}`,
+        GITHUB_ACTIONS: "true", RUNNER_OS: "macOS", RUNNER_TEMP: root, TRACE: trace, STUB: stubPath, FAILURE: failure },
+    });
+    check({ root, result, calls: fs.readFileSync(trace, "utf8"), output: path.join(root, ".audit/distribution/out") });
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function assertStages({ root, result, calls }, stages, proofStatus) {
+  assert.match(calls, /security delete-keychain/);
+  assert.equal(fs.readdirSync(root).filter(name => name.startsWith("hermed-signing.")).length, 0);
+  const file = path.join(root, ".audit/distribution/stages.txt");
+  const proof = spawnSync(process.execPath, ["scripts/distribution.js", "proof", file], { cwd: root, encoding: "utf8" });
+  assert.deepEqual(fs.readFileSync(file, "utf8").split("\n").filter(Boolean), stages);
+  assert.equal(proof.status, proofStatus);
+}
+
+const ALL_STAGES = ["build", "signature", "notarization", "stapling"];
+
+test("release signs and staples before archiving; notarization and Gatekeeper failures prevent a feed", () => {
+  for (const failure of ["none", "notary", "gatekeeper"]) {
+    release(failure, run => {
+      const { result, calls, output } = run;
       if (failure === "none") {
         assert.equal(result.status, 0, result.stderr);
         assert.ok(fs.existsSync(path.join(output, "hermed-bots.rb")));
         assert.ok(calls.indexOf("stapler staple") < calls.indexOf("ditto -c -k --sequesterRsrc --keepParent", calls.indexOf("stapler staple")));
         assert.ok(calls.indexOf("spctl -a") < calls.indexOf("generate_appcast"));
         assert.match(calls, /sign_update --verify/);
+        assert.ok(calls.indexOf("generate_appcast") < calls.indexOf("sign_update --verify"));
+        assert.ok(calls.includes(`SPARKLE_FEED_URL=https://github.com/${ready.DISTRIBUTION_REPOSITORY}/releases/latest/download/appcast.xml`));
+        assert.ok(calls.includes(`SPARKLE_PUBLIC_KEY=${ready.SPARKLE_PUBLIC_KEY}`));
       } else {
         assert.notEqual(result.status, 0);
         assert.ok(!fs.existsSync(path.join(output, "appcast.xml")));
         if (failure === "notary") assert.ok(!calls.includes("stapler staple"));
       }
-      assert.match(calls, /security delete-keychain/);
-      assert.equal(fs.readdirSync(root).filter(name => name.startsWith("hermed-signing.")).length, 0);
-      const stages = path.join(root, ".audit/distribution/stages.txt");
-      const proof = spawnSync(process.execPath, ["scripts/distribution.js", "proof", stages], { cwd: root, encoding: "utf8" });
-      assert.deepEqual(fs.readFileSync(stages, "utf8").split("\n").filter(Boolean),
-        failure === "notary" ? ["build", "signature"] : ["build", "signature", "notarization", "stapling"]);
-      assert.equal(proof.status, failure === "notary" ? 1 : 0);
-    } finally {
-      fs.rmSync(root, { recursive: true, force: true });
-    }
+      assertStages(run, failure === "notary" ? ["build", "signature"] : ALL_STAGES, failure === "notary" ? 1 : 0);
+    });
   }
+});
+
+test("a failed feed signature verification stops the release before the cask or the checksums exist", () => {
+  release("verify", run => {
+    const { result, calls, output } = run;
+    assert.notEqual(result.status, 0);
+    assert.match(calls, /sign_update --verify/);
+    assert.ok(!fs.existsSync(path.join(output, "hermed-bots.rb")));
+    assert.ok(!fs.existsSync(path.join(output, "SHA256SUMS")));
+    assert.ok(!fs.existsSync(path.join(output, "commit.txt")));
+    assert.ok(!calls.includes("git rev-parse"));
+    assertStages(run, ALL_STAGES, 0);
+  });
 });
 
 test("a retry may reuse a version but publication cannot move backwards", () => {
