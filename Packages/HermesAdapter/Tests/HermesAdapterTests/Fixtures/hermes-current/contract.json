@@ -1,0 +1,532 @@
+{
+  "version": "0.22.2",
+  "observed": "2026-10-18, conteneur hv-hermes-test, image nousresearch/hermes-agent:latest (v0.22.2), relevés de docs/spike/",
+  "optional_fields": [
+    "title",
+    "preview"
+  ],
+  "profiles": {
+    "served": [
+      "default",
+      "cyber",
+      "gaming",
+      "ia",
+      "perso",
+      "recherches",
+      "sport",
+      "tiny",
+      "wikilibriste",
+      "hv-bot-a",
+      "hv-bot-b"
+    ],
+    "stopped": [
+      "hv-old"
+    ]
+  },
+  "contracts": {
+    "version": {
+      "method": "GET",
+      "path": "/health",
+      "auth": false,
+      "status": 200,
+      "response": {
+        "status": "ok",
+        "platform": "hermes-agent",
+        "version": "0.22.2"
+      }
+    },
+    "list_profiles": {
+      "transport": "ssh",
+      "command": [
+        "hermes",
+        "profile",
+        "list"
+      ],
+      "read_only": true,
+      "exit": 0,
+      "stopped_gateway": "stopped",
+      "output": "\n Profile          Model                        Gateway      Alias        Distribution\n ───────────────    ───────────────────────────    ───────────    ───────────    ────────────────────\n ◆default         hv-fake-1                    running      —            —\n  cyber           hv-fake-1                    running      —            —\n  gaming          hv-fake-1                    running      —            —\n  hv-bot-a        hv-fake-1                    running      —            —\n  hv-bot-b        hv-fake-1                    running      —            —\n  hv-old          hv-fake-1                    stopped      —            —\n  ia              hv-fake-1                    running      —            —\n  perso           hv-fake-1                    running      —            —\n  recherches      hv-fake-1                    running      —            —\n  sport           hv-fake-1                    running      —            —\n  tiny            hv-fake-1                    running      —            —\n  wikilibriste    hv-fake-1                    running      —            —\n\n",
+      "note": "Décision S6 (issue #6, 18/10 16:15) : second canal SSH en lecture seule, `hermes profile list`. Un profil au Gateway `stopped` est décommissionné et exclu de la liste. Le contrat compare la liste à `profiles.served` et `profiles.stopped`, puis vérifie chaque profil sur le port API (actif : 200, arrêté : 404)"
+    },
+    "profile_served": {
+      "method": "GET",
+      "path": "/p/{profile}/v1/models",
+      "status": 200,
+      "response": {
+        "object": "list",
+        "data": [
+          {
+            "id": "{profile}",
+            "object": "model",
+            "created": 1792343642,
+            "owned_by": "hermes",
+            "permission": [],
+            "root": "{profile}",
+            "parent": null
+          }
+        ]
+      }
+    },
+    "new_session": {
+      "method": "POST",
+      "path": "/p/{profile}/api/sessions",
+      "body": {},
+      "status": 201,
+      "response": {
+        "object": "hermes.session",
+        "session": {
+          "id": "{new_session}",
+          "source": "api_server",
+          "user_id": null,
+          "model": null,
+          "title": null,
+          "started_at": 1792343642.9064848,
+          "ended_at": null,
+          "end_reason": null,
+          "message_count": 0,
+          "tool_call_count": 0,
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "reasoning_tokens": 0,
+          "estimated_cost_usd": null,
+          "actual_cost_usd": null,
+          "api_call_count": 0,
+          "parent_session_id": null,
+          "pinned": false,
+          "archived": false,
+          "hidden": false,
+          "has_system_prompt": false,
+          "has_model_config": false,
+          "is_internal_child": false
+        }
+      }
+    },
+    "list_sessions": {
+      "method": "GET",
+      "path": "/p/{profile}/api/sessions",
+      "status": 200,
+      "response": {
+        "object": "list",
+        "data": [
+          {
+            "id": "s-past-1",
+            "source": "api_server",
+            "user_id": null,
+            "model": null,
+            "title": "Fil passé 1",
+            "started_at": 1792330255.35,
+            "ended_at": null,
+            "end_reason": null,
+            "message_count": 2,
+            "tool_call_count": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "reasoning_tokens": 0,
+            "estimated_cost_usd": null,
+            "actual_cost_usd": null,
+            "api_call_count": 0,
+            "parent_session_id": null,
+            "last_active": 1792330255.68,
+            "preview": "Bonjour",
+            "pinned": false,
+            "archived": false,
+            "hidden": false,
+            "has_system_prompt": false,
+            "has_model_config": false,
+            "is_internal_child": false
+          },
+          {
+            "id": "s-open",
+            "source": "api_server",
+            "user_id": null,
+            "model": null,
+            "title": "Fil courant",
+            "started_at": 1792330300.12,
+            "ended_at": null,
+            "end_reason": null,
+            "message_count": 2,
+            "tool_call_count": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "cache_write_tokens": 0,
+            "reasoning_tokens": 0,
+            "estimated_cost_usd": null,
+            "actual_cost_usd": null,
+            "api_call_count": 0,
+            "parent_session_id": null,
+            "last_active": 1792330301.5,
+            "preview": "Suite",
+            "pinned": false,
+            "archived": false,
+            "hidden": false,
+            "has_system_prompt": false,
+            "has_model_config": false,
+            "is_internal_child": false
+          }
+        ],
+        "limit": 50,
+        "offset": 0,
+        "has_more": false
+      }
+    },
+    "set_model": {
+      "method": "POST",
+      "path": "/p/{profile}/api/sessions/{session}/model",
+      "body": {
+        "model": "hv-fake-2"
+      },
+      "status": 200,
+      "response": {
+        "object": "hermes.session.model_lock",
+        "session_id": "{session}",
+        "runtime": {
+          "provider": "",
+          "model": "{model}",
+          "route_source": "raw_request",
+          "requested": {
+            "provider": "",
+            "model": "{model}"
+          },
+          "model_lock": "accepted"
+        }
+      }
+    },
+    "send_message": {
+      "method": "POST",
+      "path": "/p/{profile}/api/sessions/{session}/chat",
+      "body": {
+        "input": "hv-probe"
+      },
+      "status": 200,
+      "repeat": 2,
+      "expect": {
+        "session_id": "{session}"
+      },
+      "expect_locked": {
+        "runtime.model": "hv-fake-2",
+        "runtime.route_source": "session_model_lock"
+      },
+      "response": {
+        "object": "hermes.session.chat.completion",
+        "session_id": "{session}",
+        "message": {
+          "role": "assistant",
+          "content": "HV-FAKE-REPLY model={model} user_msgs={n}"
+        },
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "total_tokens": 0,
+          "runtime": {
+            "provider": "custom",
+            "model": "{model}",
+            "route_source": "{route_source}",
+            "requested": {
+              "provider": "",
+              "model": "{model}"
+            },
+            "model_lock": "confirmed"
+          }
+        },
+        "runtime": {
+          "provider": "custom",
+          "model": "{model}",
+          "route_source": "{route_source}",
+          "requested": {
+            "provider": "",
+            "model": "{model}"
+          },
+          "model_lock": "confirmed"
+        }
+      },
+      "note": "Décision S4 (issue #6) : le tour passe par le chat de session, qui lit le verrou de modèle. Deux messages dans la session verrouillée par `set_model` portent le modèle verrouillé. `POST /v1/runs` ignore le verrou : il reste sous le nom `start_run`, pour les tours à événements (approbation, annulation)"
+    },
+    "session_messages": {
+      "method": "GET",
+      "path": "/p/{profile}/api/sessions/{session}/messages",
+      "status": 200,
+      "expect": {
+        "session_id": "{session}"
+      },
+      "response": {
+        "object": "list",
+        "session_id": "{session}",
+        "data": [
+          {
+            "id": 13,
+            "session_id": "{session}",
+            "role": "user",
+            "content": "Bonjour",
+            "tool_call_id": null,
+            "tool_calls": null,
+            "tool_name": null,
+            "timestamp": 1792330255.35,
+            "token_count": null,
+            "finish_reason": null,
+            "reasoning": null,
+            "reasoning_content": null,
+            "display_kind": null
+          },
+          {
+            "id": 14,
+            "session_id": "{session}",
+            "role": "assistant",
+            "content": "Réponse de test",
+            "tool_call_id": null,
+            "tool_calls": null,
+            "tool_name": null,
+            "timestamp": 1792330255.68,
+            "token_count": null,
+            "finish_reason": "stop",
+            "reasoning": null,
+            "reasoning_content": null,
+            "display_kind": null
+          }
+        ],
+        "pagination": {
+          "limit": 500,
+          "offset": 0,
+          "order": "latest",
+          "returned": 2
+        }
+      },
+      "note": "Relevé le 2026-10-19 (HD-09) sur hv-hermes-test, Hermes 0.22.2. `id` est un numéro de ligne de la base du profil, pas un rang dans la session. Une session vide rend `data: []`. Le chat de session ajoute les deux messages d'un échange, user puis assistant. Seuls les rôles `user` et `assistant` portant un `content` texte sont des messages à afficher"
+    },
+    "start_run": {
+      "method": "POST",
+      "path": "/p/{profile}/v1/runs",
+      "body": {
+        "input": "hv-probe"
+      },
+      "status": 202,
+      "response": {
+        "run_id": "{new_run}",
+        "status": "started",
+        "replayed": false
+      }
+    },
+    "run_events": {
+      "method": "GET",
+      "path": "/p/{profile}/v1/runs/{run}/events",
+      "response": "SSE"
+    },
+    "approve": {
+      "method": "POST",
+      "path": "/p/{profile}/v1/runs/{run}/approval",
+      "setup": {
+        "input": "HV_TOOL_DETACH go",
+        "wait": "approval.request"
+      },
+      "body": {
+        "request_id": "$request_id",
+        "choice": "deny"
+      },
+      "status": 200,
+      "response": {
+        "object": "hermes.run.approval_response",
+        "run_id": "{run}",
+        "choice": "deny",
+        "request_id": "a0f9bf7c496b4be2abfd03cdf45873c1",
+        "resolved": 1
+      }
+    },
+    "cancel_run": {
+      "method": "POST",
+      "path": "/p/{profile}/v1/runs/{run}/stop",
+      "setup": {
+        "input": "HV_TOOL_SLEEP go",
+        "wait": "tool.started"
+      },
+      "status": 200,
+      "response": {
+        "run_id": "{run}",
+        "status": "stopping"
+      }
+    }
+  },
+  "events": [
+    {
+      "event": "tool.started",
+      "run_id": "{run}",
+      "timestamp": 1792343644.3556447,
+      "tool": "terminal",
+      "preview": "python3 -c \"import os,subprocess; subprocess.Popen(['sleep','303'], start_new_session=True); os.system('sleep 300')\"",
+      "seq": 0
+    },
+    {
+      "event": "hv.unknown_future_event",
+      "run_id": "{run}",
+      "timestamp": 1792343644.38,
+      "payload": {
+        "x": 1
+      },
+      "seq": 1
+    },
+    {
+      "command": "python3 -c \"import os,subprocess; subprocess.Popen(['sleep','303'], start_new_session=True); os.system('sleep 300')\"",
+      "pattern_key": "script execution via -e/-c flag",
+      "pattern_keys": [
+        "script execution via -e/-c flag"
+      ],
+      "description": "script execution via -e/-c flag",
+      "allow_permanent": true,
+      "allow_session": true,
+      "request_id": "a0f9bf7c496b4be2abfd03cdf45873c1",
+      "event": "approval.request",
+      "run_id": "{run}",
+      "timestamp": 1792343644.4102314,
+      "choices": [
+        "once",
+        "session",
+        "always",
+        "deny"
+      ],
+      "seq": 2
+    },
+    {
+      "event": "approval.responded",
+      "run_id": "{run}",
+      "timestamp": 1792343644.4147387,
+      "choice": "deny",
+      "request_id": "a0f9bf7c496b4be2abfd03cdf45873c1",
+      "resolved": 1,
+      "seq": 3
+    },
+    {
+      "event": "tool.completed",
+      "run_id": "{run}",
+      "timestamp": 1792343644.4195127,
+      "tool": "terminal",
+      "duration": 0.065,
+      "error": true,
+      "preview": "{\"output\": \"\", \"exit_code\": -1, \"error\": \"BLOCKED: Command denied by user. The user has NOT consented to this action. Do NOT retry this command, do NOT rephrase it, and do NOT attempt the same outcome via a different command. Stop the current workflow and wait for the user to respond before taking any further destructive or irreversible action.\", \"status\": \"blocked\", \"user_summary\": \"You denied this command — it did not run.\"}",
+      "seq": 4
+    },
+    {
+      "event": "message.delta",
+      "run_id": "{run}",
+      "timestamp": 1792343644.4644709,
+      "delta": "Réponse de test",
+      "seq": 5
+    },
+    {
+      "event": "reasoning.available",
+      "run_id": "{run}",
+      "timestamp": 1792343644.4691634,
+      "text": "Réponse de test",
+      "seq": 6
+    },
+    {
+      "event": "run.completed",
+      "run_id": "{run}",
+      "timestamp": 1792343644.496143,
+      "output": "Réponse de test",
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0
+      },
+      "runtime": {
+        "provider": "custom",
+        "model": "hv-fake-1",
+        "route_source": "global"
+      },
+      "completed": true,
+      "partial": false,
+      "interrupted": false,
+      "seq": 7
+    }
+  ],
+  "edges": [
+    {
+      "name": "message-vide",
+      "method": "POST",
+      "path": "/p/{profile}/v1/runs",
+      "body": {
+        "input": ""
+      },
+      "status": 400
+    },
+    {
+      "name": "run-inexistant",
+      "method": "GET",
+      "path": "/p/{profile}/v1/runs/run_nope/events",
+      "status": 404
+    },
+    {
+      "name": "session-inexistante",
+      "method": "POST",
+      "path": "/p/{profile}/api/sessions/api_nope/model",
+      "body": {
+        "model": "hv-fake-2"
+      },
+      "status": 404
+    },
+    {
+      "name": "id-negatif",
+      "method": "GET",
+      "path": "/p/{profile}/v1/runs/-1/events",
+      "status": 404
+    },
+    {
+      "name": "session-negative",
+      "method": "POST",
+      "path": "/p/{profile}/api/sessions/-1/model",
+      "body": {
+        "model": "hv-fake-2"
+      },
+      "status": 404
+    },
+    {
+      "name": "json-invalide",
+      "method": "POST",
+      "path": "/p/{profile}/v1/runs",
+      "raw": "{pas du json",
+      "status": 400
+    },
+    {
+      "name": "cle-absente",
+      "method": "GET",
+      "path": "/p/{profile}/api/sessions",
+      "auth": false,
+      "status": 401
+    },
+    {
+      "name": "profil-parque",
+      "method": "GET",
+      "path": "/p/hv-old/v1/models",
+      "status": 404
+    },
+    {
+      "name": "liste-http-absente",
+      "method": "GET",
+      "path": "/v1/profiles",
+      "status": 404
+    },
+    {
+      "name": "chat-message-vide",
+      "method": "POST",
+      "path": "/p/{profile}/api/sessions/{session}/chat",
+      "body": {
+        "input": ""
+      },
+      "status": 400
+    },
+    {
+      "name": "chat-session-inexistante",
+      "method": "POST",
+      "path": "/p/{profile}/api/sessions/api_nope/chat",
+      "body": {
+        "input": "x"
+      },
+      "status": 404
+    }
+  ]
+}
