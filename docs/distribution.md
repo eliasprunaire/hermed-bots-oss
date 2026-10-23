@@ -261,3 +261,18 @@ Une recette publique Homebrew et Sparkle exige donc un transport de recette appr
 Cette PR ne modifie aucune règle réseau de la VM.
 Une passe de fixtures ne prouve ni Gatekeeper, ni l'installation Homebrew, ni le passage N vers N+1.
 Une ligne `HV-UI SAUTÉE` conserve la passe UI en attente de la VM.
+
+## Release 0.1.0
+
+La release 0.1.0 est publiée.
+Le tag léger `v0.1.0` pointe sur le commit `e33d36ec828f6afd88ddba38ea1aa2a91f84d80d` de `main`.
+Le run 39966068978 de **Release macOS** est la répétition de ce commit. Ses étapes `build`, `signature`, `notarization` et `stapling` ont réussi.
+Le run 39967121968 de **Freeze version** a créé le tag, puis publié la release.
+
+La release `v0.1.0` de `eliasprunaire/hermed-bots-releases` n'est pas un brouillon.
+Elle contient `HermedBots-0.1.0.zip`, `appcast.xml`, `hermed-bots.rb`, `SHA256SUMS` et `commit.txt`.
+Le cask `Casks/hermed-bots.rb` de `eliasprunaire/homebrew-tap` porte la version 0.1.0.
+La preuve du run 39967121968 donne le statut de notarisation `Accepted` et la décision Gatekeeper `accepted`.
+
+Le résumé Actions n'affiche le bloc de preuve que pour une répétition.
+Un vrai run garde sa preuve dans l'artefact `distribution-proof`, conservé un jour.
