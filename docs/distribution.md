@@ -340,3 +340,5 @@ L'app lit le flux à une adresse GitHub en HTTPS.
 Le flux public de la release courante répond HTTP 200 sans authentification, contrôlé depuis le poste de développement.
 La VM bloque cette adresse. Le miroir local sert seulement la disposition de Homebrew, en HTTP.
 La preuve de mise à jour exige donc un transport de recette approuvé vers le flux HTTPS et vers l'archive de 0.1.1.
+
+Cette pull request laisse l'issue #19 ouverte. La pull request suivante enregistre la preuve de mise à jour dans ce fichier, puis ferme l'issue.
