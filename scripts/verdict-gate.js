@@ -1,6 +1,5 @@
 "use strict";
 
-const { spawnSync } = require("node:child_process");
 const { readFileSync } = require("node:fs");
 
 const MARKER = "<!-- dev-lead-verifier -->";
@@ -9,6 +8,9 @@ const VERDICT_LINE = /^VERDICT: (PASS\+NOTES|PASS|FAIL) @ ([0-9a-fA-F]{40})$/;
 const DESCRIPTION_MAX = 140;
 const UNREADABLE_DESCRIPTION = "could not read PR comments";
 const HEX_SHA = /^[0-9a-fA-F]{40}$/;
+const VERIFIERS = Object.freeze([
+  Object.freeze({ login: "app-pilote-verifier[bot]", type: "Bot" }),
+]);
 
 function render(text) {
   if (text.length > DESCRIPTION_MAX) {
@@ -165,35 +167,6 @@ function noneDescription(hint, headSha) {
   return `no marked VERDICT for ${headSha}`;
 }
 
-function shaMatchesHead(citedSha, headSha, matchesHead) {
-  if (citedSha === headSha) {
-    return true;
-  }
-  return typeof matchesHead === "function" && matchesHead(citedSha, headSha) === true;
-}
-
-function gitPatchId(sha, io) {
-  const show = io.run("git", ["show", sha]);
-  if (show.status !== 0 || typeof show.stdout !== "string" || show.stdout === "") {
-    return "";
-  }
-  const patch = io.run("git", ["patch-id", "--stable"], show.stdout);
-  if (patch.status !== 0 || typeof patch.stdout !== "string") {
-    return "";
-  }
-  const field = patch.stdout.trim().split(/\s+/)[0] || "";
-  if (!/^[0-9a-fA-F]+$/.test(field)) {
-    return "";
-  }
-  return field.toLowerCase();
-}
-
-function gitMatchesHead(citedSha, headSha, io) {
-  const citedId = gitPatchId(citedSha, io);
-  const headId = gitPatchId(headSha, io);
-  return citedId !== "" && citedId === headId;
-}
-
 function readLogin(user) {
   if (user == null || typeof user !== "object") {
     return null;
@@ -202,6 +175,41 @@ function readLogin(user) {
     return null;
   }
   return user.login;
+}
+
+function readType(user) {
+  if (user == null || typeof user !== "object" || typeof user.type !== "string") {
+    return null;
+  }
+  return user.type;
+}
+
+function nonEmpty(value) {
+  return typeof value === "string" && value !== "";
+}
+
+// absent list: default; invalid list or entry: empty (fail closed)
+function usableVerifiers(verifiers) {
+  if (verifiers == null) {
+    return VERIFIERS;
+  }
+  if (
+    !Array.isArray(verifiers) ||
+    !verifiers.every(
+      (entry) => entry != null && nonEmpty(entry.login) && nonEmpty(entry.type),
+    )
+  ) {
+    return [];
+  }
+  return verifiers;
+}
+
+function isVerifier(comment, verifiers) {
+  if (comment == null || comment.user == null) {
+    return false;
+  }
+  const { login, type } = comment.user;
+  return verifiers.some((entry) => entry.login === login && entry.type === type);
 }
 
 function foldLogin(value) {
@@ -213,12 +221,15 @@ function foldLogin(value) {
 
 function decide(input) {
   const headSha = requireHead(input.headSha);
-  const matchesHead = input.matchesHead;
+  const verifiers = usableVerifiers(input.verifiers);
   let seenLine = false;
   let seenMarker = false;
   let winner = null;
 
   for (const comment of input.comments) {
+    if (!isVerifier(comment, verifiers)) {
+      continue;
+    }
     requireComment(comment);
     const lines = verdictLines(comment.body);
     const hasMarker = plainMarker(comment.body);
@@ -267,7 +278,7 @@ function decide(input) {
     };
   }
 
-  if (!shaMatchesHead(first.sha, headSha, matchesHead)) {
+  if (first.sha !== headSha) {
     return {
       kind: "fail",
       reason: {
@@ -284,18 +295,6 @@ function decide(input) {
   }
 
   const authorLogin = foldLogin(input.authorLogin);
-  if (winner.login == null) {
-    return {
-      kind: "fail",
-      reason: {
-        code: "missing-login",
-        headSha,
-        commentId: winner.id,
-        side: "comment",
-      },
-      description: render("marked comment has no login"),
-    };
-  }
   if (authorLogin == null) {
     return {
       kind: "fail",
@@ -397,7 +396,7 @@ function toComment(raw) {
     id,
     createdAtMs,
     body: raw.body,
-    user: { login: readLogin(raw.user) },
+    user: { login: readLogin(raw.user), type: readType(raw.user) },
   };
 }
 
@@ -566,7 +565,7 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     headSha,
     comments,
     authorLogin: head.authorLogin,
-    matchesHead: (citedSha, head) => gitMatchesHead(citedSha, head, io),
+    verifiers: io.verifiers,
   });
   const state = decision.kind === "pass" ? "success" : "failure";
   return postStatus(
@@ -590,13 +589,6 @@ const defaultIo = {
   },
   stderr(line) {
     console.error(line);
-  },
-  run(command, args, stdin) {
-    return spawnSync(command, args, {
-      encoding: "utf8",
-      input: stdin,
-      maxBuffer: 32 * 1024 * 1024,
-    });
   },
 };
 
