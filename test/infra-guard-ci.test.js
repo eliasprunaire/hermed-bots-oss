@@ -17,6 +17,8 @@ const positives = [
   [j("db 172", ".20.0.5:5432"), "PRIVATE_IP"],
   [j("nas 192", ".168.1.20"), "PRIVATE_IP"],
   [j("open http://nas", ".local/"), "INTERNAL_HOST"],
+  [j("ping nas", ".local."), "INTERNAL_HOST"],
+  [j("ping vm.lab", ".local."), "INTERNAL_HOST"],
   [j("Developer ID ", "Application: Jane Doe"), "APPLE_SIGNING_IDENTITY"],
   [j("DEVELOPMENT_TEAM = ", "AB12", "CD34EF"), "APPLE_TEAM_ID"],
   [j("team_id: ", "AB12", "CD34EF"), "APPLE_TEAM_ID"],
@@ -24,7 +26,7 @@ const positives = [
 const negatives = [
   "cd ~/src && open <HOME>/x", "/Users/<USER>/x", "host <HOST> ip <IP>", "public 8.8.8.8 and 172.32.0.1 and 192.169.1.1",
   "version 10.2.3", "git config --local core.x", "secrets.APPLE_TEAM_ID", "example.com localhost 127.0.0.1",
-  "THISISTEN1 without context", "Developer ID Installer",
+  "THISISTEN1 without context", "Developer ID Installer", j("edit app", ".local", ".json"), j("edit app.lab", ".local", ".json"),
 ];
 
 for (const [text, type] of positives) {
