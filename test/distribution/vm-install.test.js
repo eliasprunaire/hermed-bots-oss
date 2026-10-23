@@ -131,6 +131,17 @@ test("a stapler failure falls back to the stapled ticket file and says so in the
   assert.match(res.stdout, /staple=ticket-file-only/);
 });
 
+// 65 invalid ticket, 66 missing or invalid ticket, 77 revoked ticket: a ticket file that starts with s8ch must not hide them
+for (const [code, meaning] of [[65, "invalid"], [66, "missing"], [77, "revoked"]]) {
+  test(`a stapler refusal with code ${code} (${meaning} ticket) exits with that code, even when the ticket file starts with s8ch`, () => {
+    const { res, called } = run({ codes: { xcrun: code } });
+    assert.equal(res.status, code, res.stderr);
+    assert.deepEqual(called, ["curl", "brew", "spctl", "codesign", "xcrun"]);
+    assert.match(res.stdout, new RegExp(`stapler: refused with exit ${code}`));
+    assert.doesNotMatch(res.stdout, /ticket-file-only|HOMEBREW-PROOF/);
+  });
+}
+
 test("a stapler failure with no ticket file in the bundle exits non-zero", () => {
   const { res, called } = run({ codes: { xcrun: 68 }, ticket: "none" });
   assert.notEqual(res.status, 0);

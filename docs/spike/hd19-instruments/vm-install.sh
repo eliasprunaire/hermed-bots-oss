@@ -31,8 +31,12 @@ mkdir -p "$out"
   spctl -a -vv --type execute "$app"
   codesign --verify --deep --strict --verbose=2 "$app"
   # stapler asks Apple's servers, which the VM cannot reach: offline, the stapled ticket file (it starts with s8ch) is the only evidence
+  # Only exit 68 is that offline answer (observed in the VM); 65 invalid, 66 missing and 77 revoked ticket are refusals that stop the script
   staple=validated
-  if ! xcrun stapler validate "$app"; then
+  staple_rc=0
+  xcrun stapler validate "$app" || staple_rc=$?
+  if [ "$staple_rc" != 0 ]; then
+    [ "$staple_rc" = 68 ] || { echo "stapler: refused with exit $staple_rc"; exit "$staple_rc"; }
     echo 'stapler: online validation failed, reading the stapled ticket file instead'
     [ "$(head -c 4 "$app/Contents/CodeResources")" = s8ch ]
     staple=ticket-file-only
