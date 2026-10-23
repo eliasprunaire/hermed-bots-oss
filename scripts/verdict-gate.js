@@ -1,6 +1,5 @@
 "use strict";
 
-const { spawnSync } = require("node:child_process");
 const { readFileSync } = require("node:fs");
 
 const MARKER = "<!-- dev-lead-verifier -->";
@@ -168,35 +167,6 @@ function noneDescription(hint, headSha) {
   return `no marked VERDICT for ${headSha}`;
 }
 
-function shaMatchesHead(citedSha, headSha, matchesHead) {
-  if (citedSha === headSha) {
-    return true;
-  }
-  return typeof matchesHead === "function" && matchesHead(citedSha, headSha) === true;
-}
-
-function gitPatchId(sha, io) {
-  const show = io.run("git", ["show", sha]);
-  if (show.status !== 0 || typeof show.stdout !== "string" || show.stdout === "") {
-    return "";
-  }
-  const patch = io.run("git", ["patch-id", "--stable"], show.stdout);
-  if (patch.status !== 0 || typeof patch.stdout !== "string") {
-    return "";
-  }
-  const field = patch.stdout.trim().split(/\s+/)[0] || "";
-  if (!/^[0-9a-fA-F]+$/.test(field)) {
-    return "";
-  }
-  return field.toLowerCase();
-}
-
-function gitMatchesHead(citedSha, headSha, io) {
-  const citedId = gitPatchId(citedSha, io);
-  const headId = gitPatchId(headSha, io);
-  return citedId !== "" && citedId === headId;
-}
-
 function readLogin(user) {
   if (user == null || typeof user !== "object") {
     return null;
@@ -251,7 +221,6 @@ function foldLogin(value) {
 
 function decide(input) {
   const headSha = requireHead(input.headSha);
-  const matchesHead = input.matchesHead;
   const verifiers = usableVerifiers(input.verifiers);
   let seenLine = false;
   let seenMarker = false;
@@ -309,7 +278,7 @@ function decide(input) {
     };
   }
 
-  if (!shaMatchesHead(first.sha, headSha, matchesHead)) {
+  if (first.sha !== headSha) {
     return {
       kind: "fail",
       reason: {
@@ -597,7 +566,6 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     comments,
     authorLogin: head.authorLogin,
     verifiers: io.verifiers,
-    matchesHead: (citedSha, head) => gitMatchesHead(citedSha, head, io),
   });
   const state = decision.kind === "pass" ? "success" : "failure";
   return postStatus(
@@ -621,13 +589,6 @@ const defaultIo = {
   },
   stderr(line) {
     console.error(line);
-  },
-  run(command, args, stdin) {
-    return spawnSync(command, args, {
-      encoding: "utf8",
-      input: stdin,
-      maxBuffer: 32 * 1024 * 1024,
-    });
   },
 };
 

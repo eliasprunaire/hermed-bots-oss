@@ -121,9 +121,6 @@ function harness({
     stderr: (line) => {
       stderr.push(line);
     },
-    run() {
-      return { status: 1, stdout: "" };
-    },
   };
   if (verifiers !== undefined) {
     io.verifiers = verifiers;
@@ -209,85 +206,45 @@ test("comment array order does not change the decision", () => {
   assert.equal(forward.commentId, "11");
 });
 
-test("an exact head SHA still passes when matchesHead is false", () => {
-  const decision = decide({
-    headSha: HEAD,
-    comments: [comment("1", 1, marked("PASS", HEAD))],
-    matchesHead: () => false,
-  });
-  assert.equal(decision.kind, "pass");
-  assert.equal(decision.sha, HEAD);
-});
-
-test("two git commits with the same diff share a patch-id so the gate passes", () => {
-  const dir = mkdtempSync(join(tmpdir(), "verdict-patch-"));
-  const git = (args, input) =>
-    spawnSync("git", args, { cwd: dir, encoding: "utf8", input });
-  try {
-    assert.equal(git(["init", "-q"]).status, 0);
-    git(["config", "user.email", "dev@example.com"]);
-    git(["config", "user.name", "dev"]);
-    writeFileSync(join(dir, "note.txt"), "hello\n");
-    git(["add", "note.txt"]);
-    assert.equal(git(["commit", "-qm", "first"]).status, 0);
-    const sha1 = git(["rev-parse", "HEAD"]).stdout.trim();
-    assert.equal(git(["commit", "--amend", "-qm", "second"]).status, 0);
-    const sha2 = git(["rev-parse", "HEAD"]).stdout.trim();
-    assert.notEqual(sha1, sha2);
-    const patchId = (sha) => {
-      const shown = git(["show", sha]);
-      assert.equal(shown.status, 0);
-      const patched = git(["patch-id", "--stable"], shown.stdout);
-      assert.equal(patched.status, 0);
-      return patched.stdout.trim().split(/\s+/)[0];
-    };
-    assert.equal(patchId(sha1), patchId(sha2));
+test("matchesHead is ignored: a cited SHA other than the head always mismatches", () => {
+  for (const verdict of ["PASS", "PASS+NOTES", "FAIL"]) {
     const decision = decide({
-      headSha: sha2,
-      comments: [comment("1", 1, marked("PASS", sha1))],
-      matchesHead: (citedSha, headSha) => patchId(citedSha) === patchId(headSha),
+      headSha: HEAD,
+      comments: [comment("1", 1, marked(verdict, OTHER))],
+      matchesHead: () => true,
     });
-    assert.equal(decision.kind, "pass");
-    assert.equal(decision.sha, sha1);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
+    assert.deepEqual(decision, {
+      kind: "fail",
+      reason: {
+        code: "sha-mismatch",
+        verdict,
+        citedSha: OTHER,
+        headSha: HEAD,
+        commentId: "1",
+      },
+      description: `VERDICT ${verdict} @ ${OTHER} does not match head ${HEAD}`,
+    });
   }
 });
 
-test("a cited SHA that matchesHead accepts is the same patch as the head", () => {
-  const decision = decide({
-    headSha: HEAD,
-    comments: [comment("1", 1, marked("PASS", OTHER))],
-    matchesHead: (citedSha, headSha) => citedSha === OTHER && headSha === HEAD,
-  });
-  assert.deepEqual(decision, {
-    kind: "pass",
-    verdict: "PASS",
-    sha: OTHER,
-    commentId: "1",
-    description: `VERDICT PASS @ ${OTHER}`,
-  });
+test("a SHA that is a prefix of the head does not qualify", () => {
+  for (const cited of [HEAD.slice(0, 7), HEAD.slice(0, 39)]) {
+    const decision = decide({
+      headSha: HEAD,
+      comments: [comment("1", 1, `VERDICT: PASS @ ${cited}\n${MARKER}`)],
+    });
+    assert.equal(decision.kind, "fail");
+    assert.equal(decision.reason.code, "none");
+  }
 });
 
-test("a cited SHA that matchesHead rejects still mismatches", () => {
-  const decision = decide({
-    headSha: HEAD,
-    comments: [comment("1", 1, marked("PASS", OTHER))],
-    matchesHead: () => false,
-  });
-  assert.equal(decision.kind, "fail");
-  assert.equal(decision.reason.code, "sha-mismatch");
-});
-
-test("FAIL on a same-patch SHA still fails the gate", () => {
-  const decision = decide({
-    headSha: HEAD,
-    comments: [comment("1", 1, marked("FAIL", OTHER))],
-    matchesHead: () => true,
-  });
-  assert.equal(decision.kind, "fail");
-  assert.equal(decision.reason.code, "verdict-fail");
-  assert.equal(decision.description, `VERDICT FAIL @ ${HEAD}`);
+test("the script does not import child_process", () => {
+  const source = readFileSync(
+    join(__dirname, "..", "scripts/verdict-gate.js"),
+    "utf8",
+  );
+  assert.equal(source.includes("child_process"), false);
+  assert.equal(source.includes("spawnSync"), false);
 });
 
 test("PASS and PASS+NOTES at the head SHA pass", () => {
@@ -962,7 +919,7 @@ test("the workflow records a status from record-verdict", () => {
   assert.match(job, /fetch-depth:\s*0/);
 });
 
-test("main posts success when git patch-id of the cited SHA matches the head", async () => {
+test("main fails on a cited SHA with the same patch as the head and runs no git", async () => {
   const dir = mkdtempSync(join(tmpdir(), "verdict-gate-git-"));
   const git = (args, input) =>
     spawnSync("git", args, { cwd: dir, encoding: "utf8", input });
@@ -981,108 +938,42 @@ test("main posts success when git patch-id of the cited SHA matches the head", a
     assert.equal(git(["commit", "-qm", "replay"]).status, 0);
     const sha2 = git(["rev-parse", "HEAD"]).stdout.trim();
     assert.notEqual(sha1, sha2);
-    const posts = [];
-    const stderr = [];
-    const code = await main([], {
-      env: env({ GITHUB_EVENT_NAME: "pull_request" }),
-      readFile: () =>
-        JSON.stringify({
-          action: "synchronize",
-          pull_request: {
-            number: 7,
-            head: { sha: sha2 },
-            user: { login: "eliasprunaire" },
-          },
-        }),
-      fetch: async (url, init = {}) => {
-        const method = init.method ?? "GET";
-        if (method === "POST") {
-          posts.push({ url, body: JSON.parse(init.body) });
-          return response(201, {});
-        }
-        if (url === `${API}/issues/7/comments?per_page=100`) {
-          return response(200, [
-            rawComment(1, "2026-10-15T18:00:00Z", marked("PASS", sha1)),
-          ]);
-        }
-        throw new Error(`unexpected GET ${url}`);
+    const patchId = (sha) => {
+      const shown = git(["show", sha]);
+      return git(["patch-id", "--stable"], shown.stdout).stdout.trim().split(/\s+/)[0];
+    };
+    assert.equal(patchId(sha1), patchId(sha2));
+    const { io, posts, stderr } = harness({
+      eventName: "pull_request",
+      payload: {
+        action: "synchronize",
+        pull_request: {
+          number: 7,
+          head: { sha: sha2 },
+          user: { login: "eliasprunaire" },
+        },
       },
-      stderr: (line) => {
-        stderr.push(line);
-      },
-      run(command, args, stdin) {
-        return spawnSync(command, args, {
-          cwd: dir,
-          encoding: "utf8",
-          input: stdin,
-          maxBuffer: 32 * 1024 * 1024,
-        });
-      },
+      pages: [
+        {
+          url: `${API}/issues/7/comments?per_page=100`,
+          comments: [rawComment(1, "2026-10-15T18:00:00Z", marked("PASS", sha1))],
+        },
+      ],
     });
-    assert.equal(code, 0);
-    assert.equal(posts[0].url, `${API}/statuses/${sha2}`);
+    const spawned = [];
+    io.run = (...call) => {
+      spawned.push(call);
+      return { status: 1, stdout: "" };
+    };
+    assert.equal(await main([], io), 0);
+    assert.deepEqual(spawned, []);
+    const description = `VERDICT PASS @ ${sha1} does not match head ${sha2}`;
     assert.deepEqual(posts[0].body, {
-      state: "success",
+      state: "failure",
       context: "verdict-gate",
-      description: `VERDICT PASS @ ${sha1}`,
+      description,
     });
-    assert.deepEqual(stderr, [`VERDICT PASS @ ${sha1}`]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("a missing cited SHA has an empty patch-id and does not match the head", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "verdict-gate-empty-"));
-  const git = (args, input) =>
-    spawnSync("git", args, { cwd: dir, encoding: "utf8", input });
-  const missing = "d".repeat(40);
-  try {
-    assert.equal(git(["init", "-q"]).status, 0);
-    git(["config", "user.email", "dev@example.com"]);
-    git(["config", "user.name", "dev"]);
-    writeFileSync(join(dir, "note.txt"), "hello\n");
-    git(["add", "note.txt"]);
-    assert.equal(git(["commit", "-qm", "only"]).status, 0);
-    const head = git(["rev-parse", "HEAD"]).stdout.trim();
-    const posts = [];
-    const code = await main([], {
-      env: env({ GITHUB_EVENT_NAME: "pull_request" }),
-      readFile: () =>
-        JSON.stringify({
-          action: "synchronize",
-          pull_request: { number: 7, head: { sha: head } },
-        }),
-      fetch: async (url, init = {}) => {
-        const method = init.method ?? "GET";
-        if (method === "POST") {
-          posts.push({ body: JSON.parse(init.body) });
-          return response(201, {});
-        }
-        if (url === `${API}/issues/7/comments?per_page=100`) {
-          return response(200, [
-            rawComment(1, "2026-10-15T18:00:00Z", marked("PASS", missing)),
-          ]);
-        }
-        throw new Error(`unexpected GET ${url}`);
-      },
-      stderr: () => {},
-      run(command, args, stdin) {
-        return spawnSync(command, args, {
-          cwd: dir,
-          encoding: "utf8",
-          input: stdin,
-          maxBuffer: 32 * 1024 * 1024,
-        });
-      },
-    });
-    assert.equal(code, 0);
-    assert.equal(posts.length, 1);
-    assert.equal(posts[0].body.state, "failure");
-    assert.equal(
-      posts[0].body.description,
-      `VERDICT PASS @ ${missing} does not match head ${head}`,
-    );
+    assert.deepEqual(stderr, [description]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
