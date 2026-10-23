@@ -46,9 +46,57 @@ function scanDiff(diff) {
   return findings;
 }
 
-function gitDiff(base, head) {
-  if (!base || /^0+$/.test(base)) return execFileSync("git", ["show", "--format=", "--no-color", "-U0", head], { encoding: "utf8", maxBuffer: 1 << 28 });
-  return execFileSync("git", ["diff", "--no-color", "-U0", `${base}...${head}`], { encoding: "utf8", maxBuffer: 1 << 28 });
+function git(args, extra = {}) {
+  return execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 28, ...extra });
+}
+
+const FROM_EMPTY = { empty: true };
+
+function defaultBranchRef(event, env = process.env) {
+  const name = (event && event.repository && event.repository.default_branch)
+    || env.GITHUB_DEFAULT_BRANCH
+    || "main";
+  return `origin/${name}`;
+}
+
+function commitMissing(sha) {
+  if (!sha || /^0+$/.test(sha)) return true;
+  try {
+    git(["cat-file", "-e", `${sha}^{commit}`]);
+    return false;
+  } catch (err) {
+    if (err && err.code === "ENOENT") throw err;
+    if (err && err.status === 128) return true;
+    throw err;
+  }
+}
+
+function commitId(name) {
+  return git(["rev-parse", "--verify", `${name}^{commit}`]).trim();
+}
+
+function emptyTree() {
+  return git(["mktree"], { input: "" }).trim();
+}
+
+function fallbackFrom(head, event, env) {
+  const headSha = commitId(head);
+  let mergeBase;
+  try {
+    mergeBase = git(["merge-base", defaultBranchRef(event, env), headSha]).trim();
+  } catch (err) {
+    commitId(defaultBranchRef(event, env));
+    if (err && (err.status === 1 || err.status === 128)) return FROM_EMPTY;
+    throw err;
+  }
+  if (mergeBase === headSha) return FROM_EMPTY;
+  return mergeBase;
+}
+
+function gitDiff(base, head, event, env = process.env) {
+  const from = commitMissing(base) ? fallbackFrom(head, event, env) : base;
+  if (from === FROM_EMPTY) return git(["diff", "--no-color", "-U0", emptyTree(), head]);
+  return git(["diff", "--no-color", "-U0", `${from}...${head}`]);
 }
 
 function scanEvent(name, event, diffFn = gitDiff) {
@@ -56,10 +104,10 @@ function scanEvent(name, event, diffFn = gitDiff) {
   if (name === "pull_request" || name === "pull_request_target") {
     const pr = event.pull_request || {};
     out.push(...scanText("(pr title)", pr.title), ...scanText("(pr body)", pr.body));
-    out.push(...scanDiff(diffFn(pr.base && pr.base.sha, pr.head && pr.head.sha)));
+    out.push(...scanDiff(diffFn(pr.base && pr.base.sha, pr.head && pr.head.sha, event)));
   } else if (name === "push") {
     for (const c of event.commits || []) out.push(...scanText(`(commit ${String(c.id).slice(0, 12)})`, c.message));
-    out.push(...scanDiff(diffFn(event.before, event.after)));
+    out.push(...scanDiff(diffFn(event.before, event.after, event)));
   } else if (name === "issue_comment") {
     out.push(...scanText("(comment)", event.comment && event.comment.body));
     if (event.issue && event.issue.pull_request) out.push(...scanText("(pr body)", event.issue.body));
