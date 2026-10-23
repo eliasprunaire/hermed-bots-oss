@@ -9,6 +9,9 @@ const VERDICT_LINE = /^VERDICT: (PASS\+NOTES|PASS|FAIL) @ ([0-9a-fA-F]{40})$/;
 const DESCRIPTION_MAX = 140;
 const UNREADABLE_DESCRIPTION = "could not read PR comments";
 const HEX_SHA = /^[0-9a-fA-F]{40}$/;
+const VERIFIERS = Object.freeze([
+  Object.freeze({ login: "app-pilote-verifier[bot]", type: "Bot" }),
+]);
 
 function render(text) {
   if (text.length > DESCRIPTION_MAX) {
@@ -204,6 +207,41 @@ function readLogin(user) {
   return user.login;
 }
 
+function readType(user) {
+  if (user == null || typeof user !== "object" || typeof user.type !== "string") {
+    return null;
+  }
+  return user.type;
+}
+
+function nonEmpty(value) {
+  return typeof value === "string" && value !== "";
+}
+
+// absent list: default; invalid list or entry: empty (fail closed)
+function usableVerifiers(verifiers) {
+  if (verifiers == null) {
+    return VERIFIERS;
+  }
+  if (
+    !Array.isArray(verifiers) ||
+    !verifiers.every(
+      (entry) => entry != null && nonEmpty(entry.login) && nonEmpty(entry.type),
+    )
+  ) {
+    return [];
+  }
+  return verifiers;
+}
+
+function isVerifier(comment, verifiers) {
+  if (comment == null || comment.user == null) {
+    return false;
+  }
+  const { login, type } = comment.user;
+  return verifiers.some((entry) => entry.login === login && entry.type === type);
+}
+
 function foldLogin(value) {
   if (typeof value !== "string" || value === "") {
     return null;
@@ -214,11 +252,15 @@ function foldLogin(value) {
 function decide(input) {
   const headSha = requireHead(input.headSha);
   const matchesHead = input.matchesHead;
+  const verifiers = usableVerifiers(input.verifiers);
   let seenLine = false;
   let seenMarker = false;
   let winner = null;
 
   for (const comment of input.comments) {
+    if (!isVerifier(comment, verifiers)) {
+      continue;
+    }
     requireComment(comment);
     const lines = verdictLines(comment.body);
     const hasMarker = plainMarker(comment.body);
@@ -284,18 +326,6 @@ function decide(input) {
   }
 
   const authorLogin = foldLogin(input.authorLogin);
-  if (winner.login == null) {
-    return {
-      kind: "fail",
-      reason: {
-        code: "missing-login",
-        headSha,
-        commentId: winner.id,
-        side: "comment",
-      },
-      description: render("marked comment has no login"),
-    };
-  }
   if (authorLogin == null) {
     return {
       kind: "fail",
@@ -397,7 +427,7 @@ function toComment(raw) {
     id,
     createdAtMs,
     body: raw.body,
-    user: { login: readLogin(raw.user) },
+    user: { login: readLogin(raw.user), type: readType(raw.user) },
   };
 }
 
@@ -566,6 +596,7 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     headSha,
     comments,
     authorLogin: head.authorLogin,
+    verifiers: io.verifiers,
     matchesHead: (citedSha, head) => gitMatchesHead(citedSha, head, io),
   });
   const state = decision.kind === "pass" ? "success" : "failure";

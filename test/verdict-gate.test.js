@@ -14,11 +14,13 @@ const HEAD = "a".repeat(40);
 const OTHER = "b".repeat(40);
 const GITHUB_SHA = "c".repeat(40);
 const API = "https://api.github.com/repos/acme/app-pilote";
+const VERIFIER = "app-pilote-verifier[bot]";
+const REAL_USER = { login: VERIFIER, type: "Bot" };
 
-function comment(id, createdAtMs, body, login = "cursor[bot]") {
+function comment(id, createdAtMs, body, user = REAL_USER) {
   const row = { id, createdAtMs, body };
-  if (login !== null) {
-    row.user = { login };
+  if (user !== null) {
+    row.user = user;
   }
   return row;
 }
@@ -34,7 +36,7 @@ function marked(verdict, sha) {
   return `VERDICT: ${verdict} @ ${sha}\n${MARKER}`;
 }
 
-function rawComment(id, createdAt, body, updatedAt, user = { login: "cursor[bot]" }) {
+function rawComment(id, createdAt, body, updatedAt, user = REAL_USER) {
   return {
     id,
     created_at: createdAt,
@@ -90,6 +92,7 @@ function harness({
   },
   pages,
   postStatus = 201,
+  verifiers,
 }) {
   const posts = [];
   const gets = [];
@@ -122,6 +125,9 @@ function harness({
       return { status: 1, stdout: "" };
     },
   };
+  if (verifiers !== undefined) {
+    io.verifiers = verifiers;
+  }
   return { io, posts, gets, stderr };
 }
 
@@ -1082,11 +1088,14 @@ test("a missing cited SHA has an empty patch-id and does not match the head", as
   }
 });
 
-test("a marked PASS from the pull request author fails", () => {
+const AUTHOR = { login: "eliasprunaire", type: "User" };
+
+test("a marked PASS from the pull request author fails even when listed", () => {
   const decision = decide({
     headSha: HEAD,
     authorLogin: "eliasprunaire",
-    comments: [comment("1", 1, marked("PASS", HEAD), "eliasprunaire")],
+    verifiers: [AUTHOR],
+    comments: [comment("1", 1, marked("PASS", HEAD), AUTHOR)],
   });
   assert.deepEqual(decision, {
     kind: "fail",
@@ -1100,11 +1109,26 @@ test("a marked PASS from the pull request author fails", () => {
   });
 });
 
-test("a marked PASS from a different login still passes", () => {
+test("a marked PASS from the pull request author is ignored when not listed", () => {
   const decision = decide({
     headSha: HEAD,
     authorLogin: "eliasprunaire",
-    comments: [comment("1", 1, marked("PASS", HEAD), "ada")],
+    comments: [comment("1", 1, marked("PASS", HEAD), AUTHOR)],
+  });
+  assert.deepEqual(decision, {
+    kind: "fail",
+    reason: { code: "none", headSha: HEAD, hint: "neither" },
+    description: `no marked VERDICT for ${HEAD}`,
+  });
+});
+
+test("a listed login different from the author passes", () => {
+  const ada = { login: "ada", type: "Bot" };
+  const decision = decide({
+    headSha: HEAD,
+    authorLogin: "eliasprunaire",
+    verifiers: [ada],
+    comments: [comment("1", 1, marked("PASS", HEAD), ada)],
   });
   assert.deepEqual(decision, {
     kind: "pass",
@@ -1115,13 +1139,13 @@ test("a marked PASS from a different login still passes", () => {
   });
 });
 
-test("a matching verdict with no comment login fails closed", () => {
-  const comments = [
+test("a verdict with no comment login is ignored and fails closed", () => {
+  const entries = [
     comment("1", 1, marked("PASS", HEAD), null),
-    { id: "2", createdAtMs: 2, body: marked("PASS", HEAD), user: { login: "" } },
-    { id: "3", createdAtMs: 3, body: marked("PASS", HEAD), user: {} },
+    comment("2", 2, marked("PASS", HEAD), { login: "", type: "Bot" }),
+    comment("3", 3, marked("PASS", HEAD), { type: "Bot" }),
   ];
-  for (const entry of comments) {
+  for (const entry of entries) {
     const decision = decideGate({
       headSha: HEAD,
       authorLogin: "eliasprunaire",
@@ -1129,13 +1153,8 @@ test("a matching verdict with no comment login fails closed", () => {
     });
     assert.deepEqual(decision, {
       kind: "fail",
-      reason: {
-        code: "missing-login",
-        headSha: HEAD,
-        commentId: entry.id,
-        side: "comment",
-      },
-      description: "marked comment has no login",
+      reason: { code: "none", headSha: HEAD, hint: "neither" },
+      description: `no marked VERDICT for ${HEAD}`,
     });
   }
 });
@@ -1144,11 +1163,11 @@ test("a matching verdict with no pull author login fails closed", () => {
   const withNull = decide({
     headSha: HEAD,
     authorLogin: null,
-    comments: [comment("1", 1, marked("PASS", HEAD), "ada")],
+    comments: [comment("1", 1, marked("PASS", HEAD))],
   });
   const omitted = decideGate({
     headSha: HEAD,
-    comments: [comment("2", 2, marked("PASS", HEAD), "ada")],
+    comments: [comment("2", 2, marked("PASS", HEAD))],
   });
   for (const decision of [withNull, omitted]) {
     assert.equal(decision.kind, "fail");
@@ -1159,10 +1178,12 @@ test("a matching verdict with no pull author login fails closed", () => {
 });
 
 test("author login match is case insensitive", () => {
+  const upper = { login: "EliasPrunaire", type: "User" };
   const decision = decide({
     headSha: HEAD,
     authorLogin: "eliasprunaire",
-    comments: [comment("1", 1, marked("PASS+NOTES", HEAD), "EliasPrunaire")],
+    verifiers: [upper],
+    comments: [comment("1", 1, marked("PASS+NOTES", HEAD), upper)],
   });
   assert.deepEqual(decision, {
     kind: "fail",
@@ -1187,6 +1208,7 @@ test("issue_comment fails when the comment login matches the pull author", async
       head: { sha: HEAD },
       user: { login: "eliasprunaire" },
     },
+    verifiers: [AUTHOR],
     pages: [
       {
         url: `${API}/issues/7/comments?per_page=100`,
@@ -1196,7 +1218,7 @@ test("issue_comment fails when the comment login matches the pull author", async
             "2026-10-15T18:00:00Z",
             marked("PASS", HEAD),
             undefined,
-            { login: "eliasprunaire" },
+            AUTHOR,
           ),
         ],
       },
@@ -1224,6 +1246,7 @@ test("pull_request reads the author from the event payload", async () => {
         user: { login: "EliasPrunaire" },
       },
     },
+    verifiers: [AUTHOR],
     pages: [
       {
         url: `${API}/issues/7/comments?per_page=100`,
@@ -1233,7 +1256,7 @@ test("pull_request reads the author from the event payload", async () => {
             "2026-10-15T18:00:00Z",
             marked("PASS", HEAD),
             undefined,
-            { login: "eliasprunaire" },
+            AUTHOR,
           ),
         ],
       },
@@ -1273,7 +1296,7 @@ test("issue_comment fails closed when the comment or the pull has no login", asy
   assert.equal(missingComment.posts[0].body.state, "failure");
   assert.equal(
     missingComment.posts[0].body.description,
-    "marked comment has no login",
+    `no marked VERDICT for ${HEAD}`,
   );
 
   const missingAuthor = harness({
@@ -1294,4 +1317,335 @@ test("issue_comment fails closed when the comment or the pull has no login", asy
     missingAuthor.posts[0].body.description,
     "pull request has no author login",
   );
+});
+
+const THIRD_USER = { login: "mallory-evil", type: "User" };
+const THIRD_BOT = { login: "mallory-evil[bot]", type: "Bot" };
+const NOT_RECORDED = {
+  kind: "fail",
+  reason: { code: "none", headSha: HEAD, hint: "neither" },
+  description: `no marked VERDICT for ${HEAD}`,
+};
+
+test("a third-party PASS on the exact head fails", () => {
+  for (const user of [THIRD_USER, THIRD_BOT]) {
+    const decision = decide({
+      headSha: HEAD,
+      comments: [comment("1", 1, marked("PASS", HEAD), user)],
+    });
+    assert.deepEqual(decision, NOT_RECORDED);
+  }
+});
+
+test("a listed Bot passes with PASS and PASS+NOTES", () => {
+  for (const verdict of ["PASS", "PASS+NOTES"]) {
+    const decision = decide({
+      headSha: HEAD,
+      comments: [comment("1", 1, marked(verdict, HEAD))],
+    });
+    assert.deepEqual(decision, {
+      kind: "pass",
+      verdict,
+      sha: HEAD,
+      commentId: "1",
+      description: `VERDICT ${verdict} @ ${HEAD}`,
+    });
+  }
+});
+
+test("a login or type that is not exactly the listed pair fails", () => {
+  const users = [
+    { login: "app-pilote-verifier", type: "User" },
+    { login: VERIFIER, type: "User" },
+    { login: VERIFIER },
+    { login: VERIFIER, type: null },
+    { login: VERIFIER, type: "bot" },
+    { login: "app-pilote-verifier-x[bot]", type: "Bot" },
+    { login: "x-app-pilote-verifier[bot]", type: "Bot" },
+    { login: "app-pilote-verifier", type: "Bot" },
+    { login: "App-Pilote-Verifier[bot]", type: "Bot" },
+    { login: VERIFIER.toUpperCase(), type: "Bot" },
+    { login: `${VERIFIER} `, type: "Bot" },
+  ];
+  for (const user of users) {
+    const decision = decide({
+      headSha: HEAD,
+      comments: [comment("1", 1, marked("PASS", HEAD), user)],
+    });
+    assert.deepEqual(decision, NOT_RECORDED, JSON.stringify(user));
+  }
+});
+
+test("third-party comments never win, never hint, and never hide the verifier", () => {
+  const real = comment("1", 1, marked("PASS+NOTES", HEAD));
+  const fakeFail = comment("2", 2, marked("FAIL", HEAD), THIRD_USER);
+  const fakePass = comment("3", 3, marked("PASS", OTHER), THIRD_BOT);
+  const markerOnly = comment("4", 4, `look\n${MARKER}`, THIRD_USER);
+  for (const comments of [
+    [real, fakeFail, fakePass, markerOnly],
+    [markerOnly, fakePass, fakeFail, real],
+  ]) {
+    assert.deepEqual(decide({ headSha: HEAD, comments }), {
+      kind: "pass",
+      verdict: "PASS+NOTES",
+      sha: HEAD,
+      commentId: "1",
+      description: `VERDICT PASS+NOTES @ ${HEAD}`,
+    });
+  }
+  const hinted = decide({
+    headSha: HEAD,
+    comments: [markerOnly, comment("5", 5, `VERDICT: PASS @ ${HEAD}`, THIRD_BOT)],
+  });
+  assert.deepEqual(hinted, NOT_RECORDED);
+});
+
+test("an empty verifier list refuses every verdict", () => {
+  const decision = decide({
+    headSha: HEAD,
+    verifiers: [],
+    comments: [comment("1", 1, marked("PASS", HEAD))],
+  });
+  assert.deepEqual(decision, NOT_RECORDED);
+});
+
+test("an invalid verifier list refuses every verdict", () => {
+  const good = { login: VERIFIER, type: "Bot" };
+  const lists = [
+    "app-pilote-verifier[bot]",
+    VERIFIER,
+    {},
+    { login: VERIFIER, type: "Bot" },
+    0,
+    false,
+    [null],
+    [VERIFIER],
+    [{ login: VERIFIER }],
+    [{ type: "Bot" }],
+    [{ login: "", type: "Bot" }],
+    [{ login: VERIFIER, type: "" }],
+    [{ login: 5, type: "Bot" }],
+    [{ login: VERIFIER, type: 5 }],
+    [good, { login: "other" }],
+    [{ login: "other" }, good],
+  ];
+  for (const verifiers of lists) {
+    const decision = decide({
+      headSha: HEAD,
+      verifiers,
+      comments: [comment("1", 1, marked("PASS", HEAD))],
+    });
+    assert.deepEqual(decision, NOT_RECORDED, JSON.stringify(verifiers));
+  }
+});
+
+test("an absent verifier list falls back to the default allowlist", () => {
+  for (const verifiers of [undefined, null]) {
+    const decision = decide({
+      headSha: HEAD,
+      verifiers,
+      comments: [comment("1", 1, marked("PASS", HEAD))],
+    });
+    assert.equal(decision.kind, "pass");
+    const refused = decide({
+      headSha: HEAD,
+      verifiers,
+      comments: [comment("1", 1, marked("PASS", HEAD), THIRD_BOT)],
+    });
+    assert.deepEqual(refused, NOT_RECORDED);
+  }
+});
+
+test("an injected verifier list replaces the default allowlist", () => {
+  const decision = decide({
+    headSha: HEAD,
+    verifiers: [THIRD_BOT],
+    comments: [comment("1", 1, marked("PASS", HEAD))],
+  });
+  assert.deepEqual(decision, NOT_RECORDED);
+});
+
+test("no description or reason carries a third-party login or text", () => {
+  const evilBody = `evil-text\nVERDICT: PASS @ ${OTHER}\n${MARKER}`;
+  const cases = [
+    decide({
+      headSha: HEAD,
+      comments: [comment("1", 1, evilBody, THIRD_USER)],
+    }),
+    decide({
+      headSha: HEAD,
+      comments: [
+        comment("1", 1, marked("PASS", HEAD)),
+        comment("2", 2, evilBody, THIRD_BOT),
+      ],
+    }),
+    decide({
+      headSha: HEAD,
+      comments: [comment("1", 1, marked("FAIL", HEAD)), comment("2", 2, evilBody, THIRD_USER)],
+    }),
+    decide({
+      headSha: HEAD,
+      comments: [comment("1", 1, marked("PASS", OTHER)), comment("2", 2, evilBody, THIRD_USER)],
+    }),
+  ];
+  for (const decision of cases) {
+    const text = JSON.stringify(decision);
+    assert.equal(text.includes("mallory-evil"), false);
+    assert.equal(text.includes("evil-text"), false);
+  }
+});
+
+const PR2_HEAD = "83332bafe0620a57b50bf4f7de0bdb04987e62cd";
+const PR1_HEAD = "37b6faf0b182b331992bf7a9afc2fd1cf63a0833";
+
+function realRaw(id, createdAt, body, user = REAL_USER) {
+  return { id, created_at: createdAt, body, user };
+}
+
+test("main accepts the real verifier verdicts of PR #2 and PR #1", async () => {
+  for (const sha of [PR2_HEAD, PR1_HEAD]) {
+    const { io, posts, stderr } = harness({
+      eventName: "pull_request",
+      payload: {
+        action: "synchronize",
+        pull_request: {
+          number: 7,
+          head: { sha },
+          user: { login: "eliasprunaire" },
+        },
+      },
+      pages: [
+        {
+          url: `${API}/issues/7/comments?per_page=100`,
+          comments: [
+            realRaw(1, "2026-10-15T18:00:00Z", `VERDICT: PASS+NOTES @ ${sha}\n${MARKER}`),
+          ],
+        },
+      ],
+    });
+    assert.equal(await main([], io), 0);
+    assert.deepEqual(posts[0].body, {
+      state: "success",
+      context: "verdict-gate",
+      description: `VERDICT PASS+NOTES @ ${sha}`,
+    });
+    assert.deepEqual(stderr, [`VERDICT PASS+NOTES @ ${sha}`]);
+  }
+});
+
+test("main across pages keeps the real verdict and drops third-party ones", async () => {
+  const page2 = `${API}/issues/7/comments?per_page=100&page=2`;
+  const page3 = `${API}/issues/7/comments?per_page=100&page=3`;
+  const { io, posts, stderr } = harness({
+    eventName: "pull_request",
+    payload: {
+      action: "synchronize",
+      pull_request: {
+        number: 7,
+        head: { sha: PR2_HEAD },
+        user: { login: "eliasprunaire" },
+      },
+    },
+    pages: [
+      {
+        url: `${API}/issues/7/comments?per_page=100`,
+        link: `<${page2}>; rel="next"`,
+        comments: [
+          realRaw(
+            1,
+            "2026-10-15T18:00:00Z",
+            `VERDICT: PASS+NOTES @ ${PR2_HEAD}\n${MARKER}`,
+          ),
+        ],
+      },
+      {
+        url: page2,
+        link: `<${page3}>; rel="next"`,
+        comments: [
+          realRaw(2, "2026-10-15T19:00:00Z", marked("FAIL", PR2_HEAD), THIRD_USER),
+        ],
+      },
+      {
+        url: page3,
+        comments: [
+          realRaw(3, "2026-10-15T20:00:00Z", marked("FAIL", PR2_HEAD), THIRD_BOT),
+        ],
+      },
+    ],
+  });
+  assert.equal(await main([], io), 0);
+  assert.equal(posts.length, 1);
+  assert.deepEqual(posts[0].body, {
+    state: "success",
+    context: "verdict-gate",
+    description: `VERDICT PASS+NOTES @ ${PR2_HEAD}`,
+  });
+  assert.deepEqual(stderr, [`VERDICT PASS+NOTES @ ${PR2_HEAD}`]);
+});
+
+test("main refuses a third-party PASS and leaks nothing about it", async () => {
+  for (const user of [THIRD_USER, THIRD_BOT, { login: VERIFIER }, null]) {
+    const raw = realRaw(1, "2026-10-15T18:00:00Z", `evil-text\n${marked("PASS", PR2_HEAD)}`, user);
+    if (user === null) {
+      delete raw.user;
+    }
+    const { io, posts, stderr } = harness({
+      eventName: "pull_request",
+      payload: {
+        action: "synchronize",
+        pull_request: {
+          number: 7,
+          head: { sha: PR2_HEAD },
+          user: { login: "eliasprunaire" },
+        },
+      },
+      pages: [{ url: `${API}/issues/7/comments?per_page=100`, comments: [raw] }],
+    });
+    assert.equal(await main([], io), 0);
+    assert.deepEqual(posts[0].body, {
+      state: "failure",
+      context: "verdict-gate",
+      description: `no marked VERDICT for ${PR2_HEAD}`,
+    });
+    const logged = JSON.stringify([posts, stderr]);
+    assert.equal(logged.includes("mallory-evil"), false);
+    assert.equal(logged.includes("evil-text"), false);
+  }
+});
+
+test("main uses an injected verifier list and never reads the environment for it", async () => {
+  const injected = harness({
+    eventName: "pull_request",
+    payload: {
+      action: "synchronize",
+      pull_request: { number: 7, head: { sha: HEAD }, user: { login: "eliasprunaire" } },
+    },
+    verifiers: [THIRD_BOT],
+    pages: [
+      {
+        url: `${API}/issues/7/comments?per_page=100`,
+        comments: [realRaw(1, "2026-10-15T18:00:00Z", marked("PASS", HEAD), THIRD_BOT)],
+      },
+    ],
+  });
+  assert.equal(await main([], injected.io), 0);
+  assert.equal(injected.posts[0].body.state, "success");
+
+  const fromEnv = harness({
+    eventName: "pull_request",
+    payload: {
+      action: "synchronize",
+      pull_request: { number: 7, head: { sha: HEAD }, user: { login: "eliasprunaire" } },
+    },
+    pages: [
+      {
+        url: `${API}/issues/7/comments?per_page=100`,
+        comments: [realRaw(1, "2026-10-15T18:00:00Z", marked("PASS", HEAD), THIRD_BOT)],
+      },
+    ],
+  });
+  fromEnv.io.env.VERIFIERS = JSON.stringify([THIRD_BOT]);
+  fromEnv.io.env.VERDICT_GATE_VERIFIERS = JSON.stringify([THIRD_BOT]);
+  assert.equal(await main([], fromEnv.io), 0);
+  assert.equal(fromEnv.posts[0].body.state, "failure");
 });
