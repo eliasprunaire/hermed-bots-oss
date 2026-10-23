@@ -139,3 +139,54 @@ test("a missing head SHA stays a visible error, not a clean pass", () => {
   assert.doesNotMatch(result.stdout, /infra-guard: clean/);
   assert.match(`${result.stderr}\n${result.stdout}`, /fatal|Not a valid object|unknown revision|bad revision|merge-base/i);
 });
+
+test("a rewritten default-branch tip still scans the tree when origin matches the head", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ig-push-"));
+  git(dir, ["init", "-b", "main"]);
+  git(dir, ["config", "user.name", "dev"]);
+  git(dir, ["config", "user.email", "dev@example.com"]);
+  write(dir, "keep.txt", "ok\n");
+  commit(dir, "base");
+  write(dir, "flagged.txt", `${secretLine}\n`);
+  const after = commit(dir, "rewrite default branch");
+  git(dir, ["update-ref", "refs/remotes/origin/main", after]);
+  const result = runPush(dir, {
+    before: missing,
+    after,
+    commits: [{ id: after, message: "rewrite default branch" }],
+    repository: { default_branch: "main" },
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.match(result.stdout, /flagged\.txt:\d+: HOME_PATH/);
+  assert.doesNotMatch(result.stdout, /infra-guard: clean/);
+});
+
+test("an orphan first push scans against the empty tree instead of crashing", () => {
+  const dir = initRepo();
+  git(dir, ["checkout", "--orphan", "orphan"]);
+  git(dir, ["reset"]);
+  write(dir, "flagged.txt", `${secretLine}\n`);
+  const after = commit(dir, "orphan root");
+  const bad = runPush(dir, {
+    before: "0".repeat(40),
+    after,
+    commits: [{ id: after, message: "orphan root" }],
+    repository: { default_branch: "main" },
+  });
+  assert.equal(bad.status, 1, bad.stderr);
+  assert.match(bad.stdout, /flagged\.txt:\d+: HOME_PATH/);
+
+  const cleanDir = initRepo();
+  git(cleanDir, ["checkout", "--orphan", "orphan"]);
+  git(cleanDir, ["reset"]);
+  write(cleanDir, "note.txt", "later\n");
+  const cleanAfter = commit(cleanDir, "orphan root");
+  const good = runPush(cleanDir, {
+    before: "0".repeat(40),
+    after: cleanAfter,
+    commits: [{ id: cleanAfter, message: "orphan root" }],
+    repository: { default_branch: "main" },
+  });
+  assert.equal(good.status, 0, good.stderr);
+  assert.match(good.stdout, /infra-guard: clean/);
+});

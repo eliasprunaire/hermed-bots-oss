@@ -46,9 +46,11 @@ function scanDiff(diff) {
   return findings;
 }
 
-function git(args) {
-  return execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 28 });
+function git(args, extra = {}) {
+  return execFileSync("git", args, { encoding: "utf8", maxBuffer: 1 << 28, ...extra });
 }
+
+const FROM_EMPTY = { empty: true };
 
 function defaultBranchRef(event, env = process.env) {
   const name = (event && event.repository && event.repository.default_branch)
@@ -69,8 +71,31 @@ function commitMissing(sha) {
   }
 }
 
+function commitId(name) {
+  return git(["rev-parse", "--verify", `${name}^{commit}`]).trim();
+}
+
+function emptyTree() {
+  return git(["mktree"], { input: "" }).trim();
+}
+
+function fallbackFrom(head, event, env) {
+  const headSha = commitId(head);
+  let mergeBase;
+  try {
+    mergeBase = git(["merge-base", defaultBranchRef(event, env), headSha]).trim();
+  } catch (err) {
+    commitId(defaultBranchRef(event, env));
+    if (err && (err.status === 1 || err.status === 128)) return FROM_EMPTY;
+    throw err;
+  }
+  if (mergeBase === headSha) return FROM_EMPTY;
+  return mergeBase;
+}
+
 function gitDiff(base, head, event, env = process.env) {
-  const from = commitMissing(base) ? git(["merge-base", defaultBranchRef(event, env), head]).trim() : base;
+  const from = commitMissing(base) ? fallbackFrom(head, event, env) : base;
+  if (from === FROM_EMPTY) return git(["diff", "--no-color", "-U0", emptyTree(), head]);
   return git(["diff", "--no-color", "-U0", `${from}...${head}`]);
 }
 
