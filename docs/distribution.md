@@ -213,6 +213,36 @@ Les réglages d'hôte et d'utilisateur persistent automatiquement.
 Le tunnel expose l'API distante uniquement sur la boucle locale.
 Une mise à jour ne modifie pas ces réglages.
 
+## Prouver la mise à jour de N vers N+1 sans publier
+
+Le script `scripts/sparkle-update-proof.sh` prouve le passage de la version N à la version N+1 par le flux Sparkle signé.
+N est le contenu de `VERSION`. N+1 est la version de patch suivante.
+Le script ne publie rien et ne lit aucune clé de production.
+
+1. Il crée une paire Ed25519 jetable dans un dossier temporaire.
+2. Il construit N puis N+1 en Release, avec le même flux local et la même clé publique.
+3. Il génère l'appcast des deux builds et contrôle sa signature avec `sign_update --verify`.
+4. Il sert le flux sur la boucle locale.
+5. Il démarre N. L'app trouve N+1, vérifie la signature du flux, télécharge l'archive et l'installe à sa fermeture.
+6. Il relance le bundle installé et lit ses deux champs de version. Ils doivent valoir N+1.
+7. Il refait la passe avec une signature de flux altérée, puis avec une archive altérée. L'app doit refuser et rester en N.
+8. Il supprime la paire de clés, les builds et les caches de la passe.
+
+Les builds de la preuve ont leur propre identifiant de bundle, `com.hermedbots.HermedBots.updateproof`.
+Ils ne touchent ni les réglages ni le Trousseau d'une app installée.
+Le script démarre les apps et exige une session graphique macOS.
+Sur le Mac de développement, la passe tourne dans la VM jetable :
+
+```bash
+zsh ~/<INFRA>/vm.sh exec bash -c 'PROOF_OUT=$HOME/<WORK>/evidence/sparkle-update-proof SOURCE_PACKAGES=$HOME/<WORK>/sp bash scripts/sparkle-update-proof.sh'
+```
+
+`PROOF_OUT` désigne le dossier des preuves. Il reste hors du dépôt.
+`SOURCE_PACKAGES` désigne des paquets Swift déjà résolus, pour une construction sans réseau.
+La dernière ligne de sortie commence par `SPARKLE-PROOF` et donne N, N+1 et le résultat de chaque contrôle.
+`bash scripts/sparkle-update-proof.sh prepare` construit et signe sans démarrer d'app.
+Cette passe `prepare` ne prouve pas l'installation.
+
 ## Recetter dans Tart
 
 Les signatures Apple exigent les clés configurées et une publication approuvée.
