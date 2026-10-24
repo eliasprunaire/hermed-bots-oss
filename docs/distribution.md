@@ -349,15 +349,32 @@ Cette preuve a sept limites.
    La commande de l'utilisateur n'a pas besoin de cette option.
 7. La passe de fixtures (42 tests UI ignorés, 118 captures exportées, 80 comparaisons visuelles réussies) ne prouve ni l'installation Homebrew ni la mise à jour Sparkle.
 
-## Mise à jour de 0.1.0 vers 0.1.1 : preuve en attente
+## Mise à jour de 0.1.1 vers 0.1.2 : preuve locale
 
-La mise à jour de 0.1.0 vers 0.1.1 n'est pas prouvée.
-La publication de 0.1.1 démarre quand le changement de `VERSION` à `0.1.1` arrive sur `main`.
+La passe `scripts/sparkle-update-proof.sh` a réussi le 24/10/2026 sur le commit `56bffa32` de `main`.
+Elle a tourné dans la VM de recette jetable, avec le code de sortie 0.
+
+```text
+SPARKLE-PROOF N=0.1.1 N1=0.1.2 feed-signature=pass install=pass installed-after-relaunch=0.1.2 altered-feed=refused altered-archive=refused
+```
+
+Cette preuve est locale. Elle ne prouve pas la mise à jour depuis le flux publié.
+
+1. Les builds sont signés ad hoc, avec leur propre identifiant de bundle.
+2. Le flux est servi sur la boucle locale, en HTTP. L'archive 0.1.2 vient du même serveur local.
+3. La paire Ed25519 est jetable. Le script la supprime à la fin de la passe.
+4. La release `v0.1.2` n'existe pas. La dernière release publiée est `v0.1.1`.
+
+## Mise à jour depuis le flux publié : preuve en attente
+
+La mise à jour d'une version publiée vers la version publiée suivante n'est pas prouvée.
+Cette preuve exige l'archive et `appcast.xml` d'une release 0.1.2 publiée par la chaîne automatique.
+La publication de 0.1.2 démarre quand le changement de `VERSION` à `0.1.2` arrive sur `main`.
 **Freeze version** crée alors le tag, puis **Release macOS** publie la release sans clic.
 
 L'app lit le flux à une adresse GitHub en HTTPS.
 Le flux public de la release courante répond HTTP 200 sans authentification, contrôlé depuis le poste de développement.
 La VM bloque cette adresse. Le miroir local sert seulement la disposition de Homebrew, en HTTP.
-La preuve de mise à jour exige donc un transport de recette approuvé vers le flux HTTPS et vers l'archive de 0.1.1.
+La preuve de mise à jour exige donc un transport de recette approuvé vers le flux HTTPS et vers l'archive de la version publiée.
 
-Cette pull request laisse l'issue #19 ouverte. La pull request suivante enregistre la preuve de mise à jour dans ce fichier, puis ferme l'issue.
+L'issue #19 reste ouverte jusqu'à cette preuve.
