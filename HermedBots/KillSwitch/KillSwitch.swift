@@ -66,16 +66,15 @@ final class KillSwitch {
         let id: String
     }
 
-    enum State: Equatable {
-        case ready
-        case stopping
-        case settled(Int, Int)
-        case unavailable(String)
+    static let partialStop = "Le tunnel est coupé, mais le service distant tourne peut-être encore."
+
+    private struct ConnectionStop {
+        var failed = false
+        var unavailable = false
+        var stopping = false
     }
 
-    static let fallback = "Couper le tunnel n'arrête pas la VM. K3 : Ayo arrête le gateway du profil sur la VM. Voir docs/runbook/kill-switch.md."
-    private(set) var state = State.ready
-    private var stateConnection = ""
+    private var connections: [String: ConnectionStop] = [:]
     private let endpoint: @MainActor () -> KillSwitchAPI?
     private let connection: @MainActor () -> String
     private let runs: @MainActor () -> [Run]
@@ -84,12 +83,14 @@ final class KillSwitch {
     private let pending: @MainActor () -> Bool
     private let setStopping: @MainActor (Bool) -> Void
     private let cancel: @MainActor (KillSwitchAPI, Run) async throws -> String
+    private let canCancel: @MainActor (KillSwitchAPI, String) async throws -> Bool
 
     init(endpoint: @escaping @MainActor () -> KillSwitchAPI?, connection: @escaping @MainActor () -> String,
          runs: @escaping @MainActor () -> [Run], profiles: @escaping @MainActor () -> [String],
          confirmed: @escaping @MainActor (Run, String) -> Void,
          pending: @escaping @MainActor () -> Bool = { false }, setStopping: @escaping @MainActor (Bool) -> Void = { _ in },
-         cancel: @escaping @MainActor (KillSwitchAPI, Run) async throws -> String = { try await $0.cancel($1) }) {
+         cancel: @escaping @MainActor (KillSwitchAPI, Run) async throws -> String = { try await $0.cancel($1) },
+         canCancel: @escaping @MainActor (KillSwitchAPI, String) async throws -> Bool = { try await $0.supportsCancel(profile: $1) }) {
         self.endpoint = endpoint
         self.connection = connection
         self.runs = runs
@@ -98,81 +99,82 @@ final class KillSwitch {
         self.pending = pending
         self.setStopping = setStopping
         self.cancel = cancel
+        self.canCancel = canCancel
     }
 
-    var isStopping: Bool { state == .stopping }
+    var isStopping: Bool { connections[connection()]?.stopping == true }
     var isDisabled: Bool {
         if endpoint() == nil || isStopping { return true }
-        if stateConnection == connection(), case .unavailable = state { return true }
-        return false
+        return connections[connection()]?.unavailable == true
     }
     var message: String {
-        guard endpoint() != nil else { return Self.fallback }
-        guard stateConnection == connection() else { return Self.fallback }
-        switch state {
-        case .ready: return Self.fallback
-        case .stopping: return "Annulation demandée. Attente de la confirmation serveur…"
-        case .settled(0, 0): return "Aucun tour en cours. Aucune annulation envoyée."
-        case .settled(let cancelled, let other):
-            return "Annulation confirmée par Hermes pour \(cancelled) tour(s). \(other) tour(s) déjà terminé(s)."
-        case .unavailable(let reason): return "\(reason) \(Self.fallback)"
-        }
+        connections[connection()]?.failed == true ? Self.partialStop : ""
+    }
+
+    private func update(_ host: String, _ body: (inout ConnectionStop) -> Void) {
+        var value = connections[host] ?? ConnectionStop()
+        body(&value)
+        connections[host] = value
+        setStopping(connections.values.contains(where: \.stopping))
     }
 
     func checkSupport() async {
-        guard !isStopping else { return }
         let host = connection()
-        stateConnection = host
-        guard let api = endpoint() else { state = .unavailable("Liaison indisponible."); return }
+        guard connections[host]?.stopping != true else { return }
+        guard let api = endpoint() else {
+            update(host) { $0.unavailable = true }
+            return
+        }
         do {
             for profile in Set(profiles() + runs().map(\.profile)) {
-                guard try await api.supportsCancel(profile: profile) else {
-                    if host == connection(), !isStopping { state = .unavailable("cancel_run est désactivée pour \(profile).") }
+                guard try await canCancel(api, profile) else {
+                    if host == connection(), connections[host]?.stopping != true {
+                        update(host) { $0.unavailable = true }
+                    }
                     return
                 }
-                guard host == connection(), !isStopping else { return }
+                guard host == connection(), connections[host]?.stopping != true else { return }
             }
-            if case .unavailable = state { state = .ready }
+            if host == connection() { update(host) { $0.unavailable = false } }
         } catch {
-            if host == connection(), !isStopping { state = .unavailable("Hermes ne répond pas.") }
+            if host == connection(), connections[host]?.stopping != true {
+                update(host) { $0.unavailable = true }
+            }
         }
     }
 
     func stopAll() async {
-        guard !isDisabled, let api = endpoint() else { return }
         let host = connection()
-        stateConnection = host
-        state = .stopping
-        setStopping(true)
-        defer { setStopping(false) }
-        let deadline = ContinuousClock.now + .seconds(5)
-        while pending(), host == connection(), ContinuousClock.now < deadline {
-            do { try await Task.sleep(for: .milliseconds(20)) } catch { break }
-        }
-        guard host == connection() else { state = .ready; return }
-        let unstarted = pending()
-        let targets = Set(runs())
-        guard !targets.isEmpty else {
-            state = unstarted ? .unavailable("Un démarrage reste sans réponse.") : .settled(0, 0)
+        guard connections[host]?.stopping != true else { return }
+        guard let api = endpoint(), connections[host]?.unavailable != true else {
+            update(host) { $0.failed = true }
             return
         }
-        var cancelled = 0
-        var other = 0
+        update(host) { $0.stopping = true }
+        defer { update(host) { $0.stopping = false } }
+        var targets = Set(runs())
+        let deadline = ContinuousClock.now + .seconds(5)
+        while pending(), connection() == host, ContinuousClock.now < deadline {
+            do { try await Task.sleep(for: .milliseconds(20)) } catch { break }
+        }
+        let stayed = connection() == host
+        if stayed { targets = Set(runs()) }
+        let unstarted = stayed && pending()
+        guard !targets.isEmpty else {
+            update(host) { $0.failed = !stayed || unstarted }
+            return
+        }
         var failed = unstarted
         let tasks = targets.map { run in
             Task { @MainActor in
-                guard host == self.connection() else { return (run, Optional<String>.none) }
-                return (run, try? await self.cancel(api, run))
+                (run, try? await self.cancel(api, run))
             }
         }
         for task in tasks {
             let (run, result) = await task.value
-            guard host == connection() else { continue }
             guard let result else { failed = true; continue }
             confirmed(run, result)
-            if result == "cancelled" { cancelled += 1 } else { other += 1 }
         }
-        guard host == connection() else { state = .ready; return }
-        state = failed ? .unavailable("L'arrêt de tous les tours n'est pas confirmé.") : .settled(cancelled, other)
+        update(host) { $0.failed = failed }
     }
 }

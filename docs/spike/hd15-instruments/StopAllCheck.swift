@@ -18,14 +18,16 @@ struct StopAllCheck {
         _ = await (first, second)
         assert(Set(sent) == Set(runs) && sent.count == 3)
         assert(confirmed.count == 3)
-        assert(model.message.contains("confirmée"))
+        assert(model.message.isEmpty)
         targets = []
         await model.stopAll()
-        assert(sent.count == 3 && model.message.contains("Aucun tour"))
+        assert(sent.count == 3 && model.message.isEmpty)
         targets = runs
-        let dropped = KillSwitch(endpoint: { endpoint }, connection: { "test" }, runs: { targets }, profiles: { [] }, confirmed: { _, _ in }, cancel: { _, _ in throw URLError(.cannotConnectToHost) })
+        let dropped = KillSwitch(endpoint: { endpoint }, connection: { "test" }, runs: { targets }, profiles: { [] }, confirmed: { _, _ in }, cancel: { _, _ in throw URLError(.cannotConnectToHost) }, canCancel: { _, _ in true })
         await dropped.stopAll()
-        assert(dropped.isDisabled && dropped.message.contains("K3"))
+        assert(dropped.message == KillSwitch.partialStop)
+        await dropped.checkSupport()
+        assert(dropped.message == KillSwitch.partialStop)
         var starting = true
         targets = []
         sent = []
@@ -40,16 +42,19 @@ struct StopAllCheck {
         }
         await late.stopAll()
         assert(sent == [runs[0]])
+        let unsupported = KillSwitch(endpoint: { endpoint }, connection: { "test" }, runs: { runs }, profiles: { ["p0"] }, confirmed: { _, _ in }, canCancel: { _, _ in false })
+        await unsupported.checkSupport()
+        assert(unsupported.isDisabled && unsupported.message.isEmpty)
         let disconnected = KillSwitch(endpoint: { nil }, connection: { "test" }, runs: { runs }, profiles: { [] }, confirmed: { _, _ in })
         await disconnected.stopAll()
-        assert(disconnected.isDisabled && disconnected.message.contains("K3"))
+        assert(disconnected.isDisabled && disconnected.message == KillSwitch.partialStop)
         var mixedResults = 0
         let mixed = KillSwitch(endpoint: { endpoint }, connection: { "test" }, runs: { runs }, profiles: { [] }, confirmed: { _, _ in mixedResults += 1 }, cancel: { _, run in
             if run == runs[0] { throw URLError(.cannotConnectToHost) }
             return "cancelled"
         })
         await mixed.stopAll()
-        assert(mixedResults == 2 && mixed.isDisabled)
+        assert(mixedResults == 2 && mixed.message == KillSwitch.partialStop)
         var machine = ConversationMachine()
         _ = machine.handle(.select(bot: "p0"))
         _ = machine.handle(.send("premier tour"))

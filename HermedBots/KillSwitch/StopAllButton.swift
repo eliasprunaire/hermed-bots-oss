@@ -11,10 +11,12 @@ struct StopAllButton: View {
             }
             .accessibilityID(inApproval ? .approvalStopAll : .stopAll)
             .disabled(model.isDisabled)
-            Text(model.message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .accessibilityID(inApproval ? .approvalStopStatus : .stopAllStatus)
+            if !model.message.isEmpty {
+                Text(model.message)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityID(inApproval ? .approvalStopStatus : .stopAllStatus)
+            }
         }
     }
 }
