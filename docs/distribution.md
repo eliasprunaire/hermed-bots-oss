@@ -331,15 +331,10 @@ Cette preuve a sept limites.
    La commande de l'utilisateur n'a pas besoin de cette option.
 7. La passe de fixtures (42 tests UI ignorés, 118 captures exportées, 80 comparaisons visuelles réussies) ne prouve ni l'installation Homebrew ni la mise à jour Sparkle.
 
-## Mise à jour de 0.1.0 vers 0.1.1 : preuve en attente
+## Mise à jour de 0.1.1 vers 0.1.2
 
-La mise à jour de 0.1.0 vers 0.1.1 n'est pas prouvée.
-La publication de 0.1.1 démarre quand le changement de `VERSION` à `0.1.1` arrive sur `main`.
-**Freeze version** crée alors le tag, puis **Release macOS** publie la release sans clic.
+La preuve Sparkle de 0.1.1 vers 0.1.2 a réussi le 24/10/2026 sur le commit `56bffa32` de `main`.
 
-L'app lit le flux à une adresse GitHub en HTTPS.
-Le flux public de la release courante répond HTTP 200 sans authentification, contrôlé depuis le poste de développement.
-La VM bloque cette adresse. Le miroir local sert seulement la disposition de Homebrew, en HTTP.
-La preuve de mise à jour exige donc un transport de recette approuvé vers le flux HTTPS et vers l'archive de 0.1.1.
-
-Cette pull request laisse l'issue #19 ouverte. La pull request suivante enregistre la preuve de mise à jour dans ce fichier, puis ferme l'issue.
+```text
+SPARKLE-PROOF N=0.1.1 N1=0.1.2 feed-signature=pass install=pass installed-after-relaunch=0.1.2 altered-feed=refused altered-archive=refused
+```
