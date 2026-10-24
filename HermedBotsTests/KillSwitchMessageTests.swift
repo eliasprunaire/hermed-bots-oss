@@ -12,7 +12,7 @@ final class KillSwitchMessageTests: XCTestCase {
             connection: { "test" },
             runs: { self.runs },
             profiles: { ["p0"] },
-            confirmed: { _, _ in }
+            confirmed: { _, _, _ in }
         )
         XCTAssertEqual(model.message, "")
     }
@@ -23,7 +23,7 @@ final class KillSwitchMessageTests: XCTestCase {
             connection: { "test" },
             runs: { self.runs },
             profiles: { [] },
-            confirmed: { _, _ in }
+            confirmed: { _, _, _ in }
         )
         XCTAssertTrue(model.isDisabled)
         XCTAssertEqual(model.message, "")
@@ -36,7 +36,7 @@ final class KillSwitchMessageTests: XCTestCase {
             connection: { "test" },
             runs: { targets },
             profiles: { ["p0"] },
-            confirmed: { _, _ in },
+            confirmed: { _, _, _ in },
             cancel: { _, _ in "cancelled" }
         )
         await model.stopAll()
@@ -53,7 +53,7 @@ final class KillSwitchMessageTests: XCTestCase {
             connection: { "test" },
             runs: { self.runs },
             profiles: { [] },
-            confirmed: { _, _ in },
+            confirmed: { _, _, _ in },
             cancel: { _, _ in throw URLError(.cannotConnectToHost) }
         )
         await model.stopAll()
@@ -67,7 +67,7 @@ final class KillSwitchMessageTests: XCTestCase {
             connection: { "test" },
             runs: { self.runs },
             profiles: { [] },
-            confirmed: { _, _ in confirmed += 1 },
+            confirmed: { _, _, _ in confirmed += 1 },
             cancel: { _, run in
                 if run == self.runs[0] { throw URLError(.cannotConnectToHost) }
                 return "cancelled"
@@ -84,7 +84,7 @@ final class KillSwitchMessageTests: XCTestCase {
             connection: { "test" },
             runs: { self.runs },
             profiles: { ["p0"] },
-            confirmed: { _, _ in },
+            confirmed: { _, _, _ in },
             canCancel: { _, _ in false }
         )
         await model.checkSupport()
@@ -98,7 +98,7 @@ final class KillSwitchMessageTests: XCTestCase {
             connection: { "test" },
             runs: { self.runs },
             profiles: { ["p0"] },
-            confirmed: { _, _ in },
+            confirmed: { _, _, _ in },
             cancel: { _, _ in throw URLError(.cannotConnectToHost) },
             canCancel: { _, _ in true }
         )
@@ -118,7 +118,7 @@ final class KillSwitchMessageTests: XCTestCase {
             connection: { host },
             runs: { host == "A" ? [runA] : [runB] },
             profiles: { [host == "A" ? "pA" : "pB"] },
-            confirmed: { _, _ in },
+            confirmed: { _, _, _ in },
             cancel: { _, run in
                 if run == runA { throw URLError(.cannotConnectToHost) }
                 cancelled.append(run.id)
@@ -144,7 +144,7 @@ final class KillSwitchMessageTests: XCTestCase {
             connection: { host },
             runs: { self.runs },
             profiles: { ["p0"] },
-            confirmed: { _, _ in },
+            confirmed: { _, _, _ in },
             cancel: { _, _ in throw URLError(.cannotConnectToHost) },
             canCancel: { _, _ in true }
         )
@@ -167,7 +167,7 @@ final class KillSwitchMessageTests: XCTestCase {
             connection: { host },
             runs: { [runA] },
             profiles: { ["pA"] },
-            confirmed: { _, _ in confirmed += 1 },
+            confirmed: { _, _, _ in confirmed += 1 },
             cancel: { _, _ in
                 inCancel = true
                 while host == "A" {
@@ -197,7 +197,7 @@ final class KillSwitchMessageTests: XCTestCase {
             connection: { host },
             runs: { [] },
             profiles: { ["pA"] },
-            confirmed: { _, _ in },
+            confirmed: { _, _, _ in },
             pending: {
                 waiting = true
                 return true
@@ -214,5 +214,64 @@ final class KillSwitchMessageTests: XCTestCase {
         await stopping.value
         host = "A"
         XCTAssertEqual(model.message, hint)
+    }
+
+    func testLeavingWithAKnownRunAndAPendingStartKeepsTheFailedStop() async {
+        var host = "A"
+        var waiting = false
+        let runA = KillSwitch.Run(profile: "pA", id: "rA")
+        let model = KillSwitch(
+            endpoint: { self.endpoint },
+            connection: { host },
+            runs: { [runA] },
+            profiles: { ["pA"] },
+            confirmed: { _, _, _ in },
+            pending: {
+                waiting = true
+                return true
+            },
+            cancel: { _, _ in "cancelled" }
+        )
+        let stopping = Task { await model.stopAll() }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !waiting, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(waiting)
+        host = "B"
+        await stopping.value
+        host = "A"
+        XCTAssertEqual(model.message, hint)
+    }
+
+    func testAConfirmationKeepsTheConnectionThatStartedTheStop() async {
+        var host = "A"
+        let run = KillSwitch.Run(profile: "p", id: "r0")
+        var confirmedOn: [String] = []
+        var inCancel = false
+        let model = KillSwitch(
+            endpoint: { self.endpoint },
+            connection: { host },
+            runs: { [run] },
+            profiles: { ["p"] },
+            confirmed: { _, _, origin in confirmedOn.append(origin) },
+            cancel: { _, _ in
+                inCancel = true
+                while host == "A" {
+                    try await Task.sleep(for: .milliseconds(10))
+                }
+                return "cancelled"
+            }
+        )
+        let stopping = Task { await model.stopAll() }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !inCancel, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(inCancel)
+        host = "B"
+        await stopping.value
+        XCTAssertEqual(confirmedOn, ["A"])
+        XCTAssertEqual(model.message, "")
     }
 }

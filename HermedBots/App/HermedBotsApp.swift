@@ -66,7 +66,7 @@ final class AppModel {
         connection: { [unowned self] in self.connection },
         runs: { [unowned self] in self.conversation.runningTurns },
         profiles: { [unowned self] in (self.bots.list.shown ?? []).map(\.id) },
-        confirmed: { [unowned self] in self.conversation.confirmStopped($0, status: $1) },
+        confirmed: { [unowned self] in self.conversation.confirmStopped($0, status: $1, on: $2) },
         pending: { [unowned self] in self.conversation.hasStartingTurn },
         setStopping: { [unowned self] in self.conversation.stopInProgress = $0 }
     )

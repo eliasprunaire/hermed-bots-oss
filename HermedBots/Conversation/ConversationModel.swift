@@ -63,8 +63,7 @@ final class ConversationModel {
         Array(activeRuns[connection(), default: [:]].keys)
     }
 
-    func confirmStopped(_ run: KillSwitch.Run, status: String) {
-        let host = connection()
+    func confirmStopped(_ run: KillSwitch.Run, status: String, on host: String) {
         guard let thread = activeRuns[host]?[run] else { return }
         activeRuns[host]?[run] = nil
         forget(RunKey(connection: host, thread: thread), run: run.id)

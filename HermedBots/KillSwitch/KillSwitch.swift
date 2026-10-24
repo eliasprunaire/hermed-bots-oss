@@ -79,7 +79,7 @@ final class KillSwitch {
     private let connection: @MainActor () -> String
     private let runs: @MainActor () -> [Run]
     private let profiles: @MainActor () -> [String]
-    private let confirmed: @MainActor (Run, String) -> Void
+    private let confirmed: @MainActor (Run, String, String) -> Void
     private let pending: @MainActor () -> Bool
     private let setStopping: @MainActor (Bool) -> Void
     private let cancel: @MainActor (KillSwitchAPI, Run) async throws -> String
@@ -87,7 +87,7 @@ final class KillSwitch {
 
     init(endpoint: @escaping @MainActor () -> KillSwitchAPI?, connection: @escaping @MainActor () -> String,
          runs: @escaping @MainActor () -> [Run], profiles: @escaping @MainActor () -> [String],
-         confirmed: @escaping @MainActor (Run, String) -> Void,
+         confirmed: @escaping @MainActor (Run, String, String) -> Void,
          pending: @escaping @MainActor () -> Bool = { false }, setStopping: @escaping @MainActor (Bool) -> Void = { _ in },
          cancel: @escaping @MainActor (KillSwitchAPI, Run) async throws -> String = { try await $0.cancel($1) },
          canCancel: @escaping @MainActor (KillSwitchAPI, String) async throws -> Bool = { try await $0.supportsCancel(profile: $1) }) {
@@ -153,18 +153,19 @@ final class KillSwitch {
         update(host) { $0.stopping = true }
         defer { update(host) { $0.stopping = false } }
         var targets = Set(runs())
+        let waiting = pending()
         let deadline = ContinuousClock.now + .seconds(5)
         while pending(), connection() == host, ContinuousClock.now < deadline {
             do { try await Task.sleep(for: .milliseconds(20)) } catch { break }
         }
         let stayed = connection() == host
         if stayed { targets = Set(runs()) }
-        let unstarted = stayed && pending()
+        let incomplete = (stayed && pending()) || (!stayed && waiting)
         guard !targets.isEmpty else {
-            update(host) { $0.failed = !stayed || unstarted }
+            update(host) { $0.failed = incomplete }
             return
         }
-        var failed = unstarted
+        var failed = incomplete
         let tasks = targets.map { run in
             Task { @MainActor in
                 (run, try? await self.cancel(api, run))
@@ -173,7 +174,7 @@ final class KillSwitch {
         for task in tasks {
             let (run, result) = await task.value
             guard let result else { failed = true; continue }
-            confirmed(run, result)
+            confirmed(run, result, host)
         }
         update(host) { $0.failed = failed }
     }
