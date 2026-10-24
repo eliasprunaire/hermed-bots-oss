@@ -58,7 +58,18 @@ final class ConversationModel {
     private let onAPIRecovered: @MainActor () -> Void
     private var activeRuns: [String: [KillSwitch.Run: ConversationMachine.Key]] = [:]
     var stopInProgress = false
-    var hasStartingTurn: Bool { machine.threads.values.contains { $0.step == .sending && $0.run == nil } }
+    // un id par tour qui démarre : le fil non créé change de clé à la création de sa session, l'id le suit jusqu'au run
+    // shortcut: l'id d'un démarrage échoué reste sur son fil et un tour suivant du même fil le reprend, purger si cela compte
+    private var startIDs: [RunKey: String] = [:]
+    func startingTurns() -> [String] {
+        let host = connection()
+        return machine.threads.compactMap { key, thread in
+            guard thread.step == .sending, thread.run == nil else { return nil }
+            let id = RunKey(connection: host, thread: key)
+            if startIDs[id] == nil { startIDs[id] = UUID().uuidString }
+            return startIDs[id]
+        }
+    }
     var runningTurns: [KillSwitch.Run] {
         Array(activeRuns[connection(), default: [:]].keys)
     }
@@ -334,7 +345,10 @@ final class ConversationModel {
         guard await permits(key, on: connection) else { return }
         guard let client = client(connection) else { return apply(.failed(key, Self.unreachable), on: connection) }
         do {
-            apply(.created(key, session: try await client.newSession(profile: key.bot).id, message: message), on: connection)
+            let session = try await client.newSession(profile: key.bot).id
+            apply(.created(key, session: session, message: message), on: connection)
+            let saved = ConversationMachine.Key(bot: key.bot, thread: .session(session))
+            startIDs[RunKey(connection: connection, thread: saved)] = startIDs.removeValue(forKey: RunKey(connection: connection, thread: key))
         } catch {
             if connection == self.connection() { reportAPIError(error) }
             apply(.failed(key, Self.message(error)), on: connection)
@@ -401,7 +415,7 @@ final class ConversationModel {
 
     private func follow(_ key: ConversationMachine.Key, run: String, on connection: String, restoring: Bool = false) async {
         let runKey = RunKey(connection: connection, thread: key)
-        let stopTarget = KillSwitch.Run(profile: key.bot, id: run)
+        let stopTarget = KillSwitch.Run(profile: key.bot, id: run, turn: startIDs.removeValue(forKey: runKey) ?? "")
         activeRuns[connection, default: [:]][stopTarget] = key
         replay[runKey] = ReplayCursor(replayed: restoring)
         loopEvents[runKey] = []

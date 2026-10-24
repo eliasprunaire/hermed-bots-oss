@@ -64,13 +64,15 @@ final class KillSwitch {
     struct Run: Hashable, Sendable {
         let profile: String
         let id: String
+        // le tour qui a lancé ce run, vide s'il est inconnu
+        var turn = ""
     }
 
     static let partialStop = "Le tunnel est coupé, mais le service distant tourne peut-être encore."
 
     private enum Turn: Hashable {
         case run(Run)
-        case start(UUID)
+        case start(String)
     }
 
     private struct ConnectionStop {
@@ -85,7 +87,8 @@ final class KillSwitch {
     private let runs: @MainActor () -> [Run]
     private let profiles: @MainActor () -> [String]
     private let confirmed: @MainActor (Run, String, String) -> Void
-    private let pending: @MainActor () -> Bool
+    private let pending: @MainActor () -> [String]
+    private let startWait: Duration
     private let setStopping: @MainActor (Bool) -> Void
     private let cancel: @MainActor (KillSwitchAPI, Run) async throws -> String
     private let canCancel: @MainActor (KillSwitchAPI, String) async throws -> Bool
@@ -93,7 +96,8 @@ final class KillSwitch {
     init(endpoint: @escaping @MainActor () -> KillSwitchAPI?, connection: @escaping @MainActor () -> String,
          runs: @escaping @MainActor () -> [Run], profiles: @escaping @MainActor () -> [String],
          confirmed: @escaping @MainActor (Run, String, String) -> Void,
-         pending: @escaping @MainActor () -> Bool = { false }, setStopping: @escaping @MainActor (Bool) -> Void = { _ in },
+         pending: @escaping @MainActor () -> [String] = { [] }, startWait: Duration = .seconds(5),
+         setStopping: @escaping @MainActor (Bool) -> Void = { _ in },
          cancel: @escaping @MainActor (KillSwitchAPI, Run) async throws -> String = { try await $0.cancel($1) },
          canCancel: @escaping @MainActor (KillSwitchAPI, String) async throws -> Bool = { try await $0.supportsCancel(profile: $1) }) {
         self.endpoint = endpoint
@@ -102,6 +106,7 @@ final class KillSwitch {
         self.profiles = profiles
         self.confirmed = confirmed
         self.pending = pending
+        self.startWait = startWait
         self.setStopping = setStopping
         self.cancel = cancel
         self.canCancel = canCancel
@@ -154,7 +159,7 @@ final class KillSwitch {
         guard let api = endpoint(), connections[host]?.unavailable != true else {
             update(host) {
                 for run in runs() { $0.unconfirmed.insert(.run(run)) }
-                if pending() { $0.unconfirmed.insert(.start(UUID())) }
+                for turn in pending() { $0.unconfirmed.insert(.start(turn)) }
             }
             return
         }
@@ -162,26 +167,29 @@ final class KillSwitch {
         defer { update(host) { $0.stopping = false } }
         var targets = Set(runs())
         let waiting = pending()
-        let start = waiting ? UUID() : nil
-        let deadline = ContinuousClock.now + .seconds(5)
-        while pending(), connection() == host, ContinuousClock.now < deadline {
+        let deadline = ContinuousClock.now + startWait
+        while !pending().isEmpty, connection() == host, ContinuousClock.now < deadline {
             do { try await Task.sleep(for: .milliseconds(20)) } catch { break }
         }
         let stayed = connection() == host
         if stayed { targets = Set(runs()) }
-        if let start, !stayed || pending() {
-            update(host) { $0.unconfirmed.insert(.start(start)) }
-        }
+        let unresolved = stayed ? pending() : waiting
+        if !unresolved.isEmpty { update(host) { for turn in unresolved { $0.unconfirmed.insert(.start(turn)) } } }
         let tasks = targets.map { run in
-            Task { @MainActor in
-                (run, try? await self.cancel(api, run))
+            Task { @MainActor () -> (Run, String?) in
+                // le port local du tunnel peut servir une autre connexion : rien ne part si l'écran a changé
+                guard host == self.connection() else { return (run, nil) }
+                return (run, try? await self.cancel(api, run))
             }
         }
         for task in tasks {
             let (run, result) = await task.value
             if let result {
                 confirmed(run, result, host)
-                update(host) { $0.unconfirmed.remove(.run(run)) }
+                update(host) {
+                    $0.unconfirmed.remove(.run(run))
+                    $0.unconfirmed.remove(.start(run.turn))
+                }
             } else {
                 update(host) { $0.unconfirmed.insert(.run(run)) }
             }

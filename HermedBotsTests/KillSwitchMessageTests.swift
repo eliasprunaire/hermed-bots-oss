@@ -201,7 +201,7 @@ final class KillSwitchMessageTests: XCTestCase {
             confirmed: { _, _, _ in },
             pending: {
                 waiting = true
-                return true
+                return ["t1"]
             },
             cancel: { _, _ in "cancelled" }
         )
@@ -230,7 +230,7 @@ final class KillSwitchMessageTests: XCTestCase {
             confirmed: { _, _, _ in },
             pending: {
                 waiting = true
-                return true
+                return ["t1"]
             },
             cancel: { _, _ in "cancelled" }
         )
@@ -242,6 +242,40 @@ final class KillSwitchMessageTests: XCTestCase {
         XCTAssertTrue(waiting)
         host = "B"
         await stopping.value
+        XCTAssertEqual(model.message, "")
+        host = "A"
+        XCTAssertEqual(model.message, hint)
+    }
+
+    func testLeavingBeforeTheSendDoesNotSendTheStopToTheNewConnection() async {
+        var host = "A"
+        var waiting = false
+        var cancelled: [String] = []
+        let runA = KillSwitch.Run(profile: "pA", id: "rA")
+        let model = KillSwitch(
+            endpoint: { self.endpoint },
+            connection: { host },
+            runs: { [runA] },
+            profiles: { ["pA"] },
+            confirmed: { _, _, _ in },
+            pending: {
+                waiting = true
+                return ["t1"]
+            },
+            cancel: { _, run in
+                cancelled.append(run.id)
+                return "cancelled"
+            }
+        )
+        let stopping = Task { await model.stopAll() }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !waiting, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(waiting)
+        host = "B"
+        await stopping.value
+        XCTAssertEqual(cancelled, [])
         XCTAssertEqual(model.message, "")
         host = "A"
         XCTAssertEqual(model.message, hint)
@@ -288,7 +322,7 @@ final class KillSwitchMessageTests: XCTestCase {
             runs: { [] },
             profiles: { ["pA"] },
             confirmed: { _, _, _ in },
-            pending: { host == "A" && starting },
+            pending: { host == "A" && starting ? ["t1"] : [] },
             cancel: { _, _ in
                 cancelled += 1
                 return "cancelled"
@@ -322,7 +356,7 @@ final class KillSwitchMessageTests: XCTestCase {
             runs: { host == "A" ? runsA : [] },
             profiles: { ["pA"] },
             confirmed: { _, _, _ in },
-            pending: { host == "A" && starting },
+            pending: { host == "A" && starting ? ["t1"] : [] },
             cancel: { _, run in
                 cancelled.append(run.id)
                 return "cancelled"
@@ -343,6 +377,33 @@ final class KillSwitchMessageTests: XCTestCase {
         await model.stopAll()
         XCTAssertEqual(cancelled, ["other"])
         XCTAssertEqual(model.message, hint)
+    }
+
+    func testCancellingTheTurnOfALateStartClearsItsMarker() async {
+        var starting = true
+        var runsA: [KillSwitch.Run] = []
+        var cancelled: [String] = []
+        let model = KillSwitch(
+            endpoint: { self.endpoint },
+            connection: { "A" },
+            runs: { runsA },
+            profiles: { ["pA"] },
+            confirmed: { _, _, _ in },
+            pending: { starting ? ["t1"] : [] },
+            startWait: .milliseconds(50),
+            cancel: { _, run in
+                cancelled.append(run.id)
+                return "cancelled"
+            }
+        )
+        await model.stopAll()
+        XCTAssertEqual(cancelled, [])
+        XCTAssertEqual(model.message, hint)
+        starting = false
+        runsA = [KillSwitch.Run(profile: "pA", id: "late", turn: "t1")]
+        await model.stopAll()
+        XCTAssertEqual(cancelled, ["late"])
+        XCTAssertEqual(model.message, "")
     }
 
     func testAnEmptyClickDoesNotClearAFailedStop() async {

@@ -361,6 +361,43 @@ final class ConversationModelTests: XCTestCase {
         XCTAssertTrue(model.canSend)
     }
 
+    func testAStartingTurnKeepsItsIdForTheRunItStarts() async throws {
+        let model = makeModel()
+        try await openEmptyThread(model, session: "s")
+        model.draft = "message"
+        model.send()
+        let start = try await held(1, "POST", "/v1/runs")
+        let starting = model.startingTurns()
+        XCTAssertEqual(starting.count, 1)
+        start.reply(#"{"run_id":"r1"}"#)
+        await eventually("run suivi") { !model.runningTurns.isEmpty }
+        XCTAssertEqual(model.startingTurns(), [])
+        XCTAssertEqual(model.runningTurns.map(\.turn), starting)
+        try await held(2, "GET", "/v1/runs/r1/events").reply(completedTurn("réponse"))
+        // la fin du tour relit le fil : la relecture ne doit pas déborder sur le test suivant
+        try await held(3, "GET", "/api/sessions/s/messages").reply(transcript((1, "user", "message"), (2, "assistant", "réponse")))
+        await eventually("transcript relu") { !model.isLoading }
+    }
+
+    func testAStartingTurnKeepsItsIdWhenItsThreadIsCreated() async throws {
+        let model = makeModel()
+        model.select(bot: bot)
+        model.draft = "premier message"
+        model.send()
+        let creation = try await held(0, "POST", "/api/sessions")
+        let starting = model.startingTurns()
+        XCTAssertEqual(starting.count, 1)
+        creation.reply(#"{"session":{"id":"new"}}"#)
+        let start = try await held(1, "POST", "/v1/runs")
+        XCTAssertEqual(model.startingTurns(), starting, "le fil créé garde l'id du tour qui démarre")
+        start.reply(#"{"run_id":"r1"}"#)
+        await eventually("run suivi") { !model.runningTurns.isEmpty }
+        XCTAssertEqual(model.runningTurns.map(\.turn), starting)
+        try await held(2, "GET", "/v1/runs/r1/events").reply(completedTurn("réponse"))
+        try await held(3, "GET", "/api/sessions/new/messages").reply(transcript((1, "user", "premier message"), (2, "assistant", "réponse")))
+        await eventually("transcript relu") { !model.isLoading }
+    }
+
     func testANewSessionStartedWhileTheFirstSendCreatesItsThreadLeavesTheMessageInThatThread() async throws {
         let model = makeModel()
         model.select(bot: bot)
