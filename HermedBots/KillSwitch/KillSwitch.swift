@@ -90,19 +90,19 @@ final class KillSwitch {
     private let pending: @MainActor () -> [String]
     private let startWait: Duration
     private let setStopping: @MainActor (Bool) -> Void
-    private let cancel: @MainActor (KillSwitchAPI, Run, @MainActor () -> Bool) async throws -> String
-    private let canCancel: @MainActor (KillSwitchAPI, String, @MainActor () -> Bool) async throws -> Bool
+    private let cancel: @MainActor (KillSwitchAPI, Run, @escaping @MainActor () -> Bool) async throws -> String
+    private let canCancel: @MainActor (KillSwitchAPI, String, @escaping @MainActor () -> Bool) async throws -> Bool
 
     init(endpoint: @escaping @MainActor () -> KillSwitchAPI?, connection: @escaping @MainActor () -> String,
          runs: @escaping @MainActor () -> [Run], profiles: @escaping @MainActor () -> [String],
          confirmed: @escaping @MainActor (Run, String, String) -> Void,
          pending: @escaping @MainActor () -> [String] = { [] }, startWait: Duration = .seconds(5),
          setStopping: @escaping @MainActor (Bool) -> Void = { _ in },
-         cancel: @escaping @MainActor (KillSwitchAPI, Run, @MainActor () -> Bool) async throws -> String = { api, run, allow in
-             try await api.cancel(run, allow: { await MainActor.run { allow() } })
+         cancel: @escaping @MainActor (KillSwitchAPI, Run, @escaping @MainActor () -> Bool) async throws -> String = { api, run, allow in
+             try await api.cancel(run, allow: allow)
          },
-         canCancel: @escaping @MainActor (KillSwitchAPI, String, @MainActor () -> Bool) async throws -> Bool = { api, profile, allow in
-             try await api.supportsCancel(profile: profile, allow: { await MainActor.run { allow() } })
+         canCancel: @escaping @MainActor (KillSwitchAPI, String, @escaping @MainActor () -> Bool) async throws -> Bool = { api, profile, allow in
+             try await api.supportsCancel(profile: profile, allow: allow)
          }) {
         self.endpoint = endpoint
         self.connection = connection
@@ -139,7 +139,7 @@ final class KillSwitch {
             update(host) { $0.unavailable = true }
             return
         }
-        let onHost = { self.connection() == host }
+        let onHost: @MainActor @Sendable () -> Bool = { self.connection() == host }
         do {
             for profile in Set(profiles() + runs().map(\.profile)) {
                 guard try await canCancel(api, profile, onHost) else {
@@ -180,10 +180,12 @@ final class KillSwitch {
         if stayed { targets = Set(runs()) }
         let unresolved = stayed ? pending() : waiting
         if !unresolved.isEmpty { update(host) { for turn in unresolved { $0.unconfirmed.insert(.start(turn)) } } }
-        let onHost = { self.connection() == host }
+        let onHost: @MainActor @Sendable () -> Bool = { self.connection() == host }
         let tasks = targets.map { run in
             Task { @MainActor () -> (Run, String?) in
-                (run, try? await self.cancel(api, run, onHost))
+                // le port local du tunnel peut servir une autre connexion : rien ne part si l'écran a changé
+                guard onHost() else { return (run, nil) }
+                return (run, try? await self.cancel(api, run, onHost))
             }
         }
         for task in tasks {
