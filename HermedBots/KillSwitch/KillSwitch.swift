@@ -70,8 +70,20 @@ final class KillSwitch {
 
     private struct ConnectionStop {
         var failed = false
+        var unconfirmedStarts = 0
         var unavailable = false
         var stopping = false
+
+        mutating func finish(stayed: Bool, waiting: Bool, stillPending: Bool, cancelFailed: Bool, cancelledTargets: Bool) {
+            if !stayed && waiting { unconfirmedStarts += 1 }
+            if stayed && waiting && !stillPending { unconfirmedStarts = max(0, unconfirmedStarts - 1) }
+            let complete = !cancelFailed && !stillPending && unconfirmedStarts == 0
+            if !complete {
+                failed = true
+            } else if cancelledTargets || (stayed && waiting) || !failed {
+                failed = false
+            }
+        }
     }
 
     private var connections: [String: ConnectionStop] = [:]
@@ -160,12 +172,18 @@ final class KillSwitch {
         }
         let stayed = connection() == host
         if stayed { targets = Set(runs()) }
-        let incomplete = (stayed && pending()) || (!stayed && waiting)
+        let stillPending = stayed && pending()
+        func finish(cancelFailed: Bool, cancelledTargets: Bool) {
+            update(host) {
+                $0.finish(stayed: stayed, waiting: waiting, stillPending: stillPending, cancelFailed: cancelFailed, cancelledTargets: cancelledTargets)
+            }
+        }
         guard !targets.isEmpty else {
-            if incomplete { update(host) { $0.failed = true } }
+            finish(cancelFailed: false, cancelledTargets: false)
             return
         }
-        var failed = incomplete
+        var cancelFailed = false
+        var cancelledTargets = false
         let tasks = targets.map { run in
             Task { @MainActor in
                 (run, try? await self.cancel(api, run))
@@ -173,9 +191,10 @@ final class KillSwitch {
         }
         for task in tasks {
             let (run, result) = await task.value
-            guard let result else { failed = true; continue }
+            guard let result else { cancelFailed = true; continue }
+            cancelledTargets = true
             confirmed(run, result, host)
         }
-        update(host) { $0.failed = failed }
+        finish(cancelFailed: cancelFailed, cancelledTargets: cancelledTargets)
     }
 }
