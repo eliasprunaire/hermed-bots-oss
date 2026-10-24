@@ -68,22 +68,15 @@ final class KillSwitch {
 
     static let partialStop = "Le tunnel est coupé, mais le service distant tourne peut-être encore."
 
+    private enum Turn: Hashable {
+        case run(Run)
+        case start(UUID)
+    }
+
     private struct ConnectionStop {
-        var failed = false
-        var unconfirmedStarts = 0
+        var unconfirmed: Set<Turn> = []
         var unavailable = false
         var stopping = false
-
-        mutating func finish(stayed: Bool, waiting: Bool, stillPending: Bool, cancelFailed: Bool, cancelledTargets: Bool) {
-            if !stayed && waiting { unconfirmedStarts += 1 }
-            if stayed && waiting && !stillPending { unconfirmedStarts = max(0, unconfirmedStarts - 1) }
-            let complete = !cancelFailed && !stillPending && unconfirmedStarts == 0
-            if !complete {
-                failed = true
-            } else if cancelledTargets || (stayed && waiting) || !failed {
-                failed = false
-            }
-        }
     }
 
     private var connections: [String: ConnectionStop] = [:]
@@ -120,7 +113,7 @@ final class KillSwitch {
         return connections[connection()]?.unavailable == true
     }
     var message: String {
-        connections[connection()]?.failed == true ? Self.partialStop : ""
+        connections[connection()]?.unconfirmed.isEmpty == false ? Self.partialStop : ""
     }
 
     private func update(_ host: String, _ body: (inout ConnectionStop) -> Void) {
@@ -159,31 +152,26 @@ final class KillSwitch {
         let host = connection()
         guard connections[host]?.stopping != true else { return }
         guard let api = endpoint(), connections[host]?.unavailable != true else {
-            update(host) { $0.failed = true }
+            update(host) {
+                for run in runs() { $0.unconfirmed.insert(.run(run)) }
+                if pending() { $0.unconfirmed.insert(.start(UUID())) }
+            }
             return
         }
         update(host) { $0.stopping = true }
         defer { update(host) { $0.stopping = false } }
         var targets = Set(runs())
         let waiting = pending()
+        let start = waiting ? UUID() : nil
         let deadline = ContinuousClock.now + .seconds(5)
         while pending(), connection() == host, ContinuousClock.now < deadline {
             do { try await Task.sleep(for: .milliseconds(20)) } catch { break }
         }
         let stayed = connection() == host
         if stayed { targets = Set(runs()) }
-        let stillPending = stayed && pending()
-        func finish(cancelFailed: Bool, cancelledTargets: Bool) {
-            update(host) {
-                $0.finish(stayed: stayed, waiting: waiting, stillPending: stillPending, cancelFailed: cancelFailed, cancelledTargets: cancelledTargets)
-            }
+        if let start, !stayed || pending() {
+            update(host) { $0.unconfirmed.insert(.start(start)) }
         }
-        guard !targets.isEmpty else {
-            finish(cancelFailed: false, cancelledTargets: false)
-            return
-        }
-        var cancelFailed = false
-        var cancelledTargets = false
         let tasks = targets.map { run in
             Task { @MainActor in
                 (run, try? await self.cancel(api, run))
@@ -191,10 +179,12 @@ final class KillSwitch {
         }
         for task in tasks {
             let (run, result) = await task.value
-            guard let result else { cancelFailed = true; continue }
-            cancelledTargets = true
-            confirmed(run, result, host)
+            if let result {
+                confirmed(run, result, host)
+                update(host) { $0.unconfirmed.remove(.run(run)) }
+            } else {
+                update(host) { $0.unconfirmed.insert(.run(run)) }
+            }
         }
-        finish(cancelFailed: cancelFailed, cancelledTargets: cancelledTargets)
     }
 }
