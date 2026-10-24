@@ -274,4 +274,36 @@ final class KillSwitchMessageTests: XCTestCase {
         XCTAssertEqual(confirmedOn, ["A"])
         XCTAssertEqual(model.message, "")
     }
+
+    func testASecondClickAfterALateStartOnALeftConnectionKeepsTheFailedStop() async {
+        var host = "A"
+        var starting = true
+        var cancelled = 0
+        let model = KillSwitch(
+            endpoint: { self.endpoint },
+            connection: { host },
+            runs: { [] },
+            profiles: { ["pA"] },
+            confirmed: { _, _, _ in },
+            pending: { host == "A" && starting },
+            cancel: { _, _ in
+                cancelled += 1
+                return "cancelled"
+            }
+        )
+        let first = Task { await model.stopAll() }
+        let deadline = ContinuousClock.now + .seconds(2)
+        while !model.isStopping, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertTrue(model.isStopping)
+        host = "B"
+        starting = false
+        await first.value
+        host = "A"
+        XCTAssertEqual(model.message, hint)
+        await model.stopAll()
+        XCTAssertEqual(cancelled, 0)
+        XCTAssertEqual(model.message, hint)
+    }
 }

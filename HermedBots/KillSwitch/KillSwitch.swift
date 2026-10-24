@@ -162,7 +162,7 @@ final class KillSwitch {
         if stayed { targets = Set(runs()) }
         let incomplete = (stayed && pending()) || (!stayed && waiting)
         guard !targets.isEmpty else {
-            update(host) { $0.failed = incomplete }
+            if incomplete { update(host) { $0.failed = true } }
             return
         }
         var failed = incomplete
