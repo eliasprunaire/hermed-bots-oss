@@ -48,7 +48,42 @@ test("the update proof refuses a machine that is not macOS and an unknown mode",
     assert.match(linux.stderr, /needs macOS/);
     const mode = spawnSync("bash", [PROOF, "publish"], { encoding: "utf8", env });
     assert.equal(mode.status, 2);
-    assert.match(mode.stderr, /Usage/);
+    assert.match(mode.stderr, /Usage: sparkle-update-proof\.sh \[prepare\|run\|published\]/);
+    const published = spawnSync("bash", [PROOF, "published"], { encoding: "utf8", env });
+    assert.equal(published.status, 2);
+    assert.match(published.stderr, /needs macOS/);
+    assert.doesNotMatch(published.stderr, /Usage/);
+    const def = spawnSync("bash", [PROOF], { encoding: "utf8", env });
+    assert.equal(def.status, 2);
+    assert.match(def.stderr, /needs macOS/);
+    assert.doesNotMatch(def.stderr, /published feed|SHA256SUMS|No HTTPS/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("published archive downloads follow GitHub redirects and fail on HTTP errors", () => {
+  const source = fs.readFileSync(PROOF, "utf8").replace(/\\\n/g, " ");
+  const downloads = [...source.matchAll(/\bcurl\b[^;\n]+releases\/download[^;\n]+/g)].map((match) => match[0]);
+  assert.equal(downloads.length, 2);
+  for (const call of downloads) {
+    assert.match(call, /(?:^|\s)--location(?:\s|$)/);
+    assert.match(call, /(?:^|\s)--fail(?:\s|$)/);
+  }
+});
+
+test("published mode refuses when github.com is not reachable over HTTPS", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-proof-pub-"));
+  try {
+    fs.writeFileSync(path.join(root, "uname"), "#!/bin/sh\necho Darwin\n", { mode: 0o755 });
+    fs.writeFileSync(path.join(root, "curl"), "#!/bin/sh\nexit 7\n", { mode: 0o755 });
+    const env = { PATH: `${root}:${process.env.PATH}` };
+    const res = spawnSync("bash", [PROOF, "published"], { encoding: "utf8", env });
+    assert.equal(res.status, 3);
+    assert.match(res.stderr, /No HTTPS connection to github\.com/);
+    assert.doesNotMatch(`${res.stdout}\n${res.stderr}`, /\/Users\/|\/home\/[^/\s]+/);
+    assert.doesNotMatch(`${res.stdout}\n${res.stderr}`, /Usage/);
+    assert.doesNotMatch(res.stdout, /SPARKLE-PROOF[^-]/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

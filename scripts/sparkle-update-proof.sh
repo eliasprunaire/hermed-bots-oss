@@ -3,6 +3,7 @@
 # created for this run and discarded at exit. Nothing is published and no production key is read.
 #   bash scripts/sparkle-update-proof.sh prepare   builds both versions, signs the feed, checks the signatures; launches nothing
 #   bash scripts/sparkle-update-proof.sh           also starts the builds: needs a macOS GUI session, run it in a disposable VM
+#   bash scripts/sparkle-update-proof.sh published no build: installs the previous published release, then the next through the public feed
 # Optional environment: PROOF_OUT (parent of the evidence folder), SOURCE_PACKAGES (resolved SwiftPM folder for an offline build)
 set -euo pipefail
 set +x
@@ -11,10 +12,179 @@ unset SPARKLE_PRIVATE_KEY
 
 cd "$(dirname "$0")/.."
 mode=${1:-run}
-case "$mode" in prepare|run) ;; *) echo 'Usage: sparkle-update-proof.sh [prepare|run]' >&2; exit 2 ;; esac
+case "$mode" in prepare|run|published) ;; *) echo 'Usage: sparkle-update-proof.sh [prepare|run|published]' >&2; exit 2 ;; esac
 if [ "$(uname -s)" != Darwin ]; then
   echo 'The update proof needs macOS with the Xcode toolchain' >&2
   exit 2
+fi
+
+prove_published() {
+  local from='' to='' expected_from='' feed=fail install=fail installed_after=none codesign_verdict=fail spctl_verdict=fail
+  local work app bundle_id python zip extract releases_repo published_feed
+  # Same public releases repository as scripts/release-macos.sh and docs/distribution.md
+  releases_repo=eliasprunaire/hermed-bots-releases
+  published_feed="https://github.com/$releases_repo/releases/latest/download/appcast.xml"
+  # Distinct from usage (2) and from a failed proof (1): the mode does not run offline
+  if ! curl -fsS -o /dev/null --max-time 15 --max-redirs 5 https://github.com/; then
+    echo 'No HTTPS connection to github.com' >&2
+    exit 3
+  fi
+  python=/usr/bin/python3
+  [ -x "$python" ] || python=python3
+  work=$(mktemp -d "${TMPDIR:-/tmp}/sparkle-proof-published.XXXXXX")
+  work=$(cd "$work" && pwd -P)
+  app="$work/run/HermedBots.app"
+  cleanup_published() {
+    if [ -d "$app" ]; then
+      local pids
+      pids=$(pgrep -f "$app/Contents/MacOS/HermedBots" || true)
+      if [ -n "$pids" ]; then
+        # shellcheck disable=SC2086
+        kill -TERM $pids 2>/dev/null || true
+        sleep 1
+        pids=$(pgrep -f "$app/Contents/MacOS/HermedBots" || true)
+        # shellcheck disable=SC2086
+        [ -z "$pids" ] || kill -KILL $pids 2>/dev/null || true
+      fi
+    fi
+    [ -z "${bundle_id:-}" ] || defaults delete "$bundle_id" >/dev/null 2>&1 || true
+    [ -z "${bundle_id:-}" ] || rm -rf "${HOME:?}/Library/Caches/${bundle_id:?}"
+    rm -rf "${work:?}"
+  }
+  trap cleanup_published EXIT
+  trap 'exit 130' INT TERM HUP
+  report_published() {
+    printf '%s\n' "SPARKLE-PROOF-PUBLISHED from=${from:-none} to=${to:-none} feed=$feed install=$install installed-after-relaunch=$installed_after codesign=$codesign_verdict spctl=$spctl_verdict"
+    if [ "$feed" = published ] && [ "$install" = pass ] && [ "$installed_after" = "$to" ] && [ "$codesign_verdict" = pass ] && [ "$spctl_verdict" = pass ]; then
+      exit 0
+    fi
+    exit 1
+  }
+  plist_published() { /usr/libexec/PlistBuddy -c "Print :$2" "$1/Contents/Info.plist" 2>/dev/null; }
+  wait_published() { local limit=$1; shift; for _ in $(seq 1 "$limit"); do "$@" && return 0; sleep 1; done; return 1; }
+  version_published() { [ "$(plist_published "$1" CFBundleShortVersionString)" = "$2" ] && [ "$(plist_published "$1" CFBundleVersion)" = "$2" ]; }
+  app_running() { [ -n "$(pgrep -f "$1/Contents/MacOS/HermedBots" || true)" ]; }
+  launch_published() {
+    open -n -g -j "$1" >/dev/null 2>&1 || true
+    wait_published 20 app_running "$1" && return 0
+    nohup "$1/Contents/MacOS/HermedBots" >/dev/null 2>&1 &
+    wait_published 20 app_running "$1"
+  }
+  stop_published() {
+    local pids
+    pids=$(pgrep -f "$1/Contents/MacOS/HermedBots" || true)
+    [ -n "$pids" ] || return 0
+    # shellcheck disable=SC2086
+    kill -TERM $pids 2>/dev/null || true
+    for _ in $(seq 1 30); do
+      [ -z "$(pgrep -f "$1/Contents/MacOS/HermedBots" || true)" ] && return 0
+      sleep 0.5
+    done
+    pids=$(pgrep -f "$1/Contents/MacOS/HermedBots" || true)
+    # shellcheck disable=SC2086
+    [ -z "$pids" ] || kill -KILL $pids 2>/dev/null || true
+  }
+  installer_published() { ps -Ao command= | grep -F Autoupdate | grep -F "$bundle_id" >/dev/null; }
+  sparkle_progress() {
+    local cache="${HOME:?}/Library/Caches/${bundle_id:?}"
+    version_published "$app" "$to" && return 0
+    installer_published && return 0
+    [ -d "$cache" ] || return 1
+    [ "$(find "$cache" -type f 2>/dev/null | wc -l)" -gt 0 ]
+  }
+  if ! curl -fsS -o "$work/releases.json" --max-time 30 --max-redirs 5 \
+    -H 'Accept: application/vnd.github+json' \
+    "https://api.github.com/repos/$releases_repo/releases"; then
+    echo 'The published releases list could not be downloaded' >&2
+    exit 1
+  fi
+  if ! "$python" - "$work/releases.json" > "$work/versions.txt" 2>/dev/null <<'PY'
+import json, re, sys
+pattern = re.compile(r"^v([0-9]+)\.([0-9]+)\.([0-9]+)$")
+releases = json.load(open(sys.argv[1], encoding="utf-8"))
+versions = []
+for item in releases:
+    if item.get("draft") or item.get("prerelease"):
+        continue
+    match = pattern.match(item.get("tag_name") or "")
+    if match:
+        versions.append((int(match.group(1)), int(match.group(2)), int(match.group(3))))
+versions = sorted(set(versions))
+if len(versions) < 2:
+    sys.exit(1)
+previous, latest = versions[-2], versions[-1]
+print(".".join(map(str, previous)))
+print(".".join(map(str, latest)))
+PY
+  then
+    echo 'Need two published releases' >&2
+    exit 1
+  fi
+  expected_from=$(sed -n 1p "$work/versions.txt")
+  to=$(sed -n 2p "$work/versions.txt")
+  from=$expected_from
+  mkdir -p "$work/download" "$work/run"
+  if ! curl --fail --location -sS -o "$work/download/SHA256SUMS" --max-time 60 --max-redirs 5 \
+    "https://github.com/$releases_repo/releases/download/v$expected_from/SHA256SUMS"; then
+    echo 'SHA256SUMS could not be downloaded' >&2
+    report_published
+  fi
+  zip="$work/download/HermedBots-$expected_from.zip"
+  if ! curl --fail --location -sS -o "$zip" --max-time 120 --max-redirs 5 \
+    "https://github.com/$releases_repo/releases/download/v$expected_from/HermedBots-$expected_from.zip"; then
+    echo 'The previous published archive could not be downloaded' >&2
+    report_published
+  fi
+  if ! (cd "$work/download" && grep -F "HermedBots-$expected_from.zip" SHA256SUMS | shasum -a 256 -c - >/dev/null); then
+    echo 'The archive does not match SHA256SUMS' >&2
+    report_published
+  fi
+  extract="$work/extract"
+  mkdir "$extract"
+  if ! ditto -x -k "$zip" "$extract" >/dev/null 2>&1; then
+    echo 'The archive could not be unpacked' >&2
+    report_published
+  fi
+  if [ ! -d "$extract/HermedBots.app" ]; then
+    echo 'The archive has no app bundle' >&2
+    report_published
+  fi
+  ditto "$extract/HermedBots.app" "$app" >/dev/null 2>&1
+  xattr -dr com.apple.quarantine "$app" >/dev/null 2>&1 || true
+  from=$(plist_published "$app" CFBundleShortVersionString)
+  [ -n "$from" ] || { echo 'The installed app has no short version' >&2; from=none; report_published; }
+  [ "$from" = "$expected_from" ] || { echo 'The installed app version is not the previous published release' >&2; report_published; }
+  [ "$(plist_published "$app" CFBundleVersion)" = "$from" ] || { echo 'The installed app reports mismatched versions' >&2; report_published; }
+  bundle_id=$(plist_published "$app" CFBundleIdentifier)
+  [ -n "$bundle_id" ] || { echo 'The installed app has no bundle identifier' >&2; report_published; }
+  if [ "$(plist_published "$app" SUFeedURL)" = "$published_feed" ]; then
+    feed=published
+  else
+    echo 'The installed app does not use the published feed' >&2
+    report_published
+  fi
+  defaults delete "$bundle_id" >/dev/null 2>&1 || true
+  rm -rf "${HOME:?}/Library/Caches/${bundle_id:?}"
+  launch_published "$app" || { echo 'The previous published app did not start' >&2; report_published; }
+  wait_published 180 sparkle_progress || true
+  sleep 30
+  stop_published "$app"
+  if wait_published 120 version_published "$app" "$to"; then
+    install=pass
+  fi
+  launch_published "$app" || { echo 'The installed bundle did not start again' >&2; installed_after=$(plist_published "$app" CFBundleShortVersionString || true); installed_after=${installed_after:-none}; report_published; }
+  sleep 5
+  installed_after=$(plist_published "$app" CFBundleShortVersionString || true)
+  installed_after=${installed_after:-none}
+  stop_published "$app"
+  if codesign --verify --deep --strict "$app" >/dev/null 2>&1; then codesign_verdict=pass; fi
+  if spctl -a --type execute "$app" >/dev/null 2>&1; then spctl_verdict=pass; fi
+  report_published
+}
+
+if [ "$mode" = published ]; then
+  prove_published
+  exit 1
 fi
 
 # Own bundle identifier: the proof builds never touch the preferences or the Keychain items of an installed app
