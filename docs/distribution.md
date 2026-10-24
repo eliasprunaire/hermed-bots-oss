@@ -241,6 +241,24 @@ La dernière ligne de sortie commence par `SPARKLE-PROOF` et donne N, N+1 et le 
 `bash scripts/sparkle-update-proof.sh prepare` construit et signe sans démarrer d'app.
 Cette passe `prepare` ne prouve pas l'installation.
 
+## Prouver la mise à jour depuis le flux publié
+
+Le même script accepte l'argument `published`. Sans argument, le comportement local ci-dessus ne change pas.
+
+```bash
+bash scripts/sparkle-update-proof.sh published
+```
+
+Cette passe ne construit rien. Elle installe la release publiée précédente du dépôt public des archives, décrit dans « Dépôts de publication » : elle télécharge son ZIP, le contrôle contre `SHA256SUMS`, puis lit la version source dans l'app installée. Elle exige que `SUFeedURL` soit le flux publié (`releases/latest/download/appcast.xml`). Elle démarre l'app, laisse Sparkle lire ce flux, télécharger puis installer la version suivante, et attend avec un délai borné. Après fermeture puis relance, elle relit la version installée, `codesign --verify` et le verdict `spctl`.
+
+La dernière ligne de sortie a la forme suivante, avec le code 0 seulement si chaque champ passe.
+
+```text
+SPARKLE-PROOF-PUBLISHED from=<x> to=<y> feed=published install=pass|fail installed-after-relaunch=<v> codesign=pass|fail spctl=pass|fail
+```
+
+Sans connexion HTTPS vers github.com, le mode refuse de tourner : message explicite, code distinct de l'usage et d'un échec de preuve. La passe a besoin d'une session graphique macOS. Comme la preuve locale, elle tourne dans la VM jetable. Elle n'affiche aucun chemin local, nom d'hôte ni identifiant.
+
 ## Recetter dans Tart
 
 Les signatures Apple exigent les clés configurées et une publication approuvée.
