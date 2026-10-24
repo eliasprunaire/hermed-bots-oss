@@ -14,7 +14,8 @@ struct KillSwitchAPI: Sendable {
         struct Features: Decodable { let run_stop: Bool? }
     }
 
-    private func request(_ profile: String, run: String? = nil, stop: Bool = false) async throws -> (Int, Reply) {
+    private func request(_ profile: String, run: String? = nil, stop: Bool = false, allow: @escaping @Sendable () async -> Bool = { true }) async throws -> (Int, Reply) {
+        guard await allow() else { throw URLError(.cancelled) }
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else { throw URLError(.badURL) }
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._~")
@@ -37,19 +38,19 @@ struct KillSwitchAPI: Sendable {
         return (status, reply)
     }
 
-    func supportsCancel(profile: String) async throws -> Bool {
-        let (status, reply) = try await request(profile)
+    func supportsCancel(profile: String, allow: @escaping @Sendable () async -> Bool = { true }) async throws -> Bool {
+        let (status, reply) = try await request(profile, allow: allow)
         if status >= 500 || status == 401 || status == 403 { throw URLError(.cannotConnectToHost) }
         return status == 200 && reply.features?.run_stop == true
     }
 
-    func cancel(_ run: KillSwitch.Run) async throws -> String {
-        let (status, reply) = try await request(run.profile, run: run.id, stop: true)
+    func cancel(_ run: KillSwitch.Run, allow: @escaping @Sendable () async -> Bool = { true }) async throws -> String {
+        let (status, reply) = try await request(run.profile, run: run.id, stop: true, allow: allow)
         guard (200..<300).contains(status), reply.run_id == run.id,
               ["stopping", "cancelled", "completed", "failed", "interrupted"].contains(reply.status) else { throw URLError(.badServerResponse) }
         let deadline = ContinuousClock.now + .seconds(10)
         while ContinuousClock.now < deadline {
-            let (code, state) = try await request(run.profile, run: run.id, stop: false)
+            let (code, state) = try await request(run.profile, run: run.id, stop: false, allow: allow)
             guard code == 200, state.run_id == run.id, let value = state.status else { throw URLError(.badServerResponse) }
             if ["cancelled", "completed", "failed", "interrupted"].contains(value) { return value }
             try await Task.sleep(for: .milliseconds(100))
@@ -64,7 +65,6 @@ final class KillSwitch {
     struct Run: Hashable, Sendable {
         let profile: String
         let id: String
-        // le tour qui a lancé ce run, vide s'il est inconnu
         var turn = ""
     }
 
@@ -90,16 +90,20 @@ final class KillSwitch {
     private let pending: @MainActor () -> [String]
     private let startWait: Duration
     private let setStopping: @MainActor (Bool) -> Void
-    private let cancel: @MainActor (KillSwitchAPI, Run) async throws -> String
-    private let canCancel: @MainActor (KillSwitchAPI, String) async throws -> Bool
+    private let cancel: @MainActor (KillSwitchAPI, Run, @MainActor () -> Bool) async throws -> String
+    private let canCancel: @MainActor (KillSwitchAPI, String, @MainActor () -> Bool) async throws -> Bool
 
     init(endpoint: @escaping @MainActor () -> KillSwitchAPI?, connection: @escaping @MainActor () -> String,
          runs: @escaping @MainActor () -> [Run], profiles: @escaping @MainActor () -> [String],
          confirmed: @escaping @MainActor (Run, String, String) -> Void,
          pending: @escaping @MainActor () -> [String] = { [] }, startWait: Duration = .seconds(5),
          setStopping: @escaping @MainActor (Bool) -> Void = { _ in },
-         cancel: @escaping @MainActor (KillSwitchAPI, Run) async throws -> String = { try await $0.cancel($1) },
-         canCancel: @escaping @MainActor (KillSwitchAPI, String) async throws -> Bool = { try await $0.supportsCancel(profile: $1) }) {
+         cancel: @escaping @MainActor (KillSwitchAPI, Run, @MainActor () -> Bool) async throws -> String = { api, run, allow in
+             try await api.cancel(run, allow: { await MainActor.run { allow() } })
+         },
+         canCancel: @escaping @MainActor (KillSwitchAPI, String, @MainActor () -> Bool) async throws -> Bool = { api, profile, allow in
+             try await api.supportsCancel(profile: profile, allow: { await MainActor.run { allow() } })
+         }) {
         self.endpoint = endpoint
         self.connection = connection
         self.runs = runs
@@ -135,19 +139,20 @@ final class KillSwitch {
             update(host) { $0.unavailable = true }
             return
         }
+        let onHost = { self.connection() == host }
         do {
             for profile in Set(profiles() + runs().map(\.profile)) {
-                guard try await canCancel(api, profile) else {
-                    if host == connection(), connections[host]?.stopping != true {
+                guard try await canCancel(api, profile, onHost) else {
+                    if onHost(), connections[host]?.stopping != true {
                         update(host) { $0.unavailable = true }
                     }
                     return
                 }
-                guard host == connection(), connections[host]?.stopping != true else { return }
+                guard onHost(), connections[host]?.stopping != true else { return }
             }
-            if host == connection() { update(host) { $0.unavailable = false } }
+            if onHost() { update(host) { $0.unavailable = false } }
         } catch {
-            if host == connection(), connections[host]?.stopping != true {
+            if onHost(), connections[host]?.stopping != true {
                 update(host) { $0.unavailable = true }
             }
         }
@@ -175,11 +180,10 @@ final class KillSwitch {
         if stayed { targets = Set(runs()) }
         let unresolved = stayed ? pending() : waiting
         if !unresolved.isEmpty { update(host) { for turn in unresolved { $0.unconfirmed.insert(.start(turn)) } } }
+        let onHost = { self.connection() == host }
         let tasks = targets.map { run in
             Task { @MainActor () -> (Run, String?) in
-                // le port local du tunnel peut servir une autre connexion : rien ne part si l'écran a changé
-                guard host == self.connection() else { return (run, nil) }
-                return (run, try? await self.cancel(api, run))
+                (run, try? await self.cancel(api, run, onHost))
             }
         }
         for task in tasks {
