@@ -124,13 +124,13 @@ PY
   to=$(sed -n 2p "$work/versions.txt")
   from=$expected_from
   mkdir -p "$work/download" "$work/run"
-  if ! curl -fsS -o "$work/download/SHA256SUMS" --max-time 60 --max-redirs 5 \
+  if ! curl --fail --location -sS -o "$work/download/SHA256SUMS" --max-time 60 --max-redirs 5 \
     "https://github.com/$releases_repo/releases/download/v$expected_from/SHA256SUMS"; then
     echo 'SHA256SUMS could not be downloaded' >&2
     report_published
   fi
   zip="$work/download/HermedBots-$expected_from.zip"
-  if ! curl -fsS -o "$zip" --max-time 120 --max-redirs 5 \
+  if ! curl --fail --location -sS -o "$zip" --max-time 120 --max-redirs 5 \
     "https://github.com/$releases_repo/releases/download/v$expected_from/HermedBots-$expected_from.zip"; then
     echo 'The previous published archive could not be downloaded' >&2
     report_published

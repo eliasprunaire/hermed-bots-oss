@@ -62,6 +62,16 @@ test("the update proof refuses a machine that is not macOS and an unknown mode",
   }
 });
 
+test("published archive downloads follow GitHub redirects and fail on HTTP errors", () => {
+  const source = fs.readFileSync(PROOF, "utf8").replace(/\\\n/g, " ");
+  const downloads = [...source.matchAll(/\bcurl\b[^;\n]+releases\/download[^;\n]+/g)].map((match) => match[0]);
+  assert.equal(downloads.length, 2);
+  for (const call of downloads) {
+    assert.match(call, /(?:^|\s)--location(?:\s|$)/);
+    assert.match(call, /(?:^|\s)--fail(?:\s|$)/);
+  }
+});
+
 test("published mode refuses when github.com is not reachable over HTTPS", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-proof-pub-"));
   try {
