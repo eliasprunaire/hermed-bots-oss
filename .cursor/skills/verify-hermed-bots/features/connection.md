@@ -40,7 +40,7 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 
 ## Transport
 
-- Résolution : `/usr/bin/ssh -G -vv <alias>`.
+- Résolution : `/usr/bin/ssh -G -vv` suivi des arguments de chaque lancement de `ssh` (tunnel, liste des profils, détection de Hermes Desktop). Un bloc `Match sessiontype none` ne vaut que pour le tunnel, un bloc `Match command` que pour une commande distante : chaque lancement est résolu et validé avec ses propres arguments. Le tunnel fournit l'aperçu affiché.
 - Tunnel : `/usr/bin/ssh` + alias, `-N -T`, `-L 127.0.0.1:<port libre>:127.0.0.1:<remotePort>`, `BatchMode=yes`, `ExitOnForwardFailure=yes`, `ForwardAgent=no`, `ControlMaster=no`, `ControlPath=none`, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, `ConnectTimeout`, `ServerAliveInterval`, `ServerAliveCountMax`.
 - `SSH_AUTH_SOCK` vient de la session. `IdentityAgent` de la config ssh a priorité.
 - Liste des profils : second `/usr/bin/ssh` avec l'alias, commande `hermes profile list`.
@@ -56,11 +56,14 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 | Serveur refuse l'identité | Le serveur refuse l'identité SSH. |
 | Clé d'hôte changée | La clé de l'hôte a changé. |
 | Hôte injoignable | Hôte injoignable. |
-| `perso-hermes` en mode test, sur l'alias ou l'hôte résolu ; l'alias tapé est refusé avant `ssh -G`. Tout `ProxyJump` ou `ProxyCommand` est refusé en mode test | Cet hôte est refusé en mode test. |
+| `perso-hermes` en mode test, sur l'alias ou sur l'hôte résolu d'un lancement ; l'alias tapé est refusé avant `ssh -G`. Tout `ProxyJump` ou `ProxyCommand` vu par un lancement est refusé en mode test | Cet hôte est refusé en mode test. |
 
 ## Vérification unitaire
 
 - Parser `ssh -G` simulé : cas `Include` (alias `lab` → `gateway.invalid`) et cas alias inconnu (`unknown-alias.invalid`, port 22).
+- Arguments exacts de la résolution : `-G -vv` plus ceux du lancement réel, pour les trois lancements.
+- Relais vu par un seul lancement (tunnel, liste des profils, détection) : refusé en mode test, accepté hors mode test.
 - Arguments exacts du tunnel : alias, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, pas de `-F`, `-i`, `-l`, `-p`, agent privé ni `known_hosts` temporaire.
+- Recette HD-07 : `new_alias` (`docs/spike/hd07-instruments/lib.sh`) crée une clé éphémère et les alias `hv-hd07` (clé installée dans le conteneur) et `hv-hd07-refused` (clé jamais installée). Il les écrit dans un bloc `Include` marqué en tête de `~/.ssh/config` du compte qui lance la lane. `drop_alias` retire le bloc et les clés. L'app n'a plus de variable de clé ni d'utilisateur.
 - Affichage en lecture seule sans secret.
 - Le magasin de secrets ne lit plus de clé SSH dans le Trousseau.

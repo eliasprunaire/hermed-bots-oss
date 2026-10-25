@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # lanes-all.sh <dossier-de-preuves> : les dix lanes de HD-07 à la suite, contre hv-hermes-test, sur le Mac
 # Le conteneur doit tourner avec son sshd (hv-ssh-endpoint.sh up). HV_XCTESTRUN et HV_XCTESTRUN_TRUNK donnent les deux builds de tests
-# La lane 5 exige HV_SSH_REFUSED_ALIAS : un alias de la config OpenSSH de l'opérateur dont le sshd du conteneur refuse l'identité (voir lane-wrongkey.sh)
 # La lane 10 entoure les autres : hv-guard.sh snapshot au début, check à la fin, sur les chemins protégés
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"

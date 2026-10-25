@@ -7,10 +7,11 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 EVD=${1:?usage: lane-reopen.sh <dossier> kill|network}; MODE=${2:?kill|network}
 mkdir -p "$EVD"
-new_keys || exit 1
+new_alias || exit 1
+trap drop_alias EXIT
 sshd_before=$(sshd_accepts)
 start_app "$EVD/app-$MODE.log"
-trap 'stop_app "$APP_PID"' EXIT
+trap 'stop_app "$APP_PID"; drop_alias' EXIT
 say "app pid=$APP_PID, tunnel demandé vers $SSH_HOST"
 
 # le tunnel s'ouvre

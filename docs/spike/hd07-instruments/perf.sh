@@ -9,7 +9,8 @@ EVD=${1:?usage: perf.sh <dossier-de-preuves> [nombre]}; N=${2:-5}
 mkdir -p "$EVD"
 TRUNK_RUN=${HV_XCTESTRUN_TRUNK:-$(ls "$HVW"/dd-trunk/Build/Products/*.xctestrun | head -1)}
 HEAD_RUN=${HV_XCTESTRUN:-$(ls "$HVW"/dd/Build/Products/*.xctestrun | head -1)}
-[ -n "${HV_TEST_SSH_KEY:-}" ] || new_keys || exit 1
+new_alias || exit 1
+trap drop_alias EXIT
 : > "$EVD/perf.txt"
 one() { # $1 trunk|head, $2 numéro
   local run rc
@@ -18,7 +19,7 @@ one() { # $1 trunk|head, $2 numéro
     TEST_RUNNER_HV_API_URL=http://127.0.0.1:18642 xcodebuild test-without-building -xctestrun "$run" -destination 'platform=macOS' \
       -only-testing:HermedBotsUITests/ColdLaunchProbe -resultBundlePath "$EVD/$1-$2.xcresult" > "$EVD/$1-$2.log" 2>&1
   else
-    TEST_RUNNER_HV_SSH_HOST=$SSH_HOST TEST_RUNNER_HV_SSH_USER=hvssh TEST_RUNNER_HV_TEST_SSH_KEY=$HV_TEST_SSH_KEY \
+    TEST_RUNNER_HV_SSH_HOST=${HV_SSH_ALIAS:-$SSH_ALIAS} \
       xcodebuild test-without-building -xctestrun "$run" -destination 'platform=macOS' \
       -only-testing:HermedBotsUITests/ColdLaunchProbe -resultBundlePath "$EVD/$1-$2.xcresult" > "$EVD/$1-$2.log" 2>&1
   fi

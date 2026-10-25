@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # lane-secret.sh <dossier-de-preuves> : lane 7, la valeur de la clé n'apparaît ni dans ps, ni dans les preuves, ni dans le dépôt
-# 1. lance l'app à la main avec la clé de test, lit `ps -o args=` de chaque processus enfant (gardien, agent, ssh) et leur environnement
-# 2. lance la suite des tests UI avec les mêmes clés : elle produit captures, xcresult et journaux dans le dossier de preuves
+# La clé existe sur le disque, dans $KEYDIR, le temps de la lane : ssh la lit par l'IdentityFile de l'alias. La lane cherche sa valeur partout ailleurs
+# 1. lance l'app à la main avec l'alias de test, lit `ps -o args=` de chaque processus enfant (gardien, ssh) et leur environnement
+# 2. lance la suite des tests UI avec le même alias : elle produit captures, xcresult et journaux dans le dossier de preuves
 # 3. cherche des fragments de la clé dans tout le dossier de preuves de HD-07 et dans le dépôt (arbre de travail et historique)
 # Les fragments passent par un descripteur de fichier, jamais en argument : un grep -F "fragment" les montrerait dans ps
 # Une recherche témoin cherche une chaîne connue dans un dossier témoin, pour prouver que la recherche ne reste pas aveugle
@@ -9,16 +10,17 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 EVD=${1:?usage: lane-secret.sh <dossier-de-preuves>}
 mkdir -p "$EVD"
-new_keys || exit 1
+new_alias || exit 1
+trap drop_alias EXIT
 # fragments : 40 caractères du début et de la fin du corps base64 de chaque clé privée (hors lignes -----)
 fragments() { printf '%s\n' "$1" | grep -v -- '-----' | tr -d '\n' | awk '{print substr($0,1,40); print substr($0,length($0)-39,40)}'; }
-FRAGS=$( { fragments "$HV_TEST_SSH_KEY"; fragments "$HV_TEST_SSH_WRONG_KEY"; } )
+FRAGS=$( { fragments "$(cat "$KEYDIR/good")"; fragments "$(cat "$KEYDIR/bad")"; } )
 [ "$(printf '%s\n' "$FRAGS" | grep -c .)" -eq 4 ] || { say "FAIL: fragments de clé inattendus"; exit 1; }
 found() { grep -qFf <(printf '%s\n' "$FRAGS") ; }
 
 say "1. processus enfants de l'app, arguments (ps -o args=)"
 start_app "$EVD/app-secret.log"
-trap 'stop_app "$APP_PID"' EXIT
+trap 'stop_app "$APP_PID"; drop_alias' EXIT
 for _ in $(seq 1 40); do S=$(ssh_child "$APP_PID"); [ -n "$S" ] && break; sleep 0.25; done
 sleep 1
 leaks=0
@@ -28,12 +30,12 @@ while read -r pid; do
   # ps eww montre l'environnement des processus de l'utilisateur
   ps eww -o command= -p "$pid" | found && { echo "  FUITE dans l'environnement de $pid"; leaks=$((leaks + 1)); }
 done < <(app_children "$APP_PID" | awk '{print $1}')
-echo "contrôle : l'environnement de l'app elle-même contient la clé (mode test, variable HV_TEST_SSH_KEY) : $(ps eww -o command= -p "$APP_PID" | found && echo oui || echo non)"
+echo "contrôle : l'environnement de l'app elle-même ne contient pas la clé : $(ps eww -o command= -p "$APP_PID" | found && echo FUITE || echo oui)"
 say "arguments du ssh enfant en entier :"; ps -o args= -p "$S" | fold -w 150
-stop_app "$APP_PID"; trap - EXIT
+stop_app "$APP_PID"; trap drop_alias EXIT
 
-say "2. suite des tests UI avec les mêmes clés, dans le dossier de preuves"
-HV_TEST_SSH_KEY=$HV_TEST_SSH_KEY HV_TEST_SSH_WRONG_KEY=$HV_TEST_SSH_WRONG_KEY "$HERE/run-ui.sh" "$EVD/ui" 2>&1 | tail -12
+say "2. suite des tests UI avec le même alias, dans le dossier de preuves"
+"$HERE/run-ui.sh" "$EVD/ui" 2>&1 | tail -12
 
 say "3. recherche des fragments de clé"
 # témoin : une chaîne connue dans un dossier témoin

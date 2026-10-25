@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """perf-setup.py [nombre] : du lancement de l'app (exec) à la première réponse de GET /health par le port local du tunnel
 Mesure de l'extérieur, sans XCUITest : elle isole le coût de l'ouverture du tunnel (agent, ssh, poignée de main, redirection)
-Les clés viennent de l'environnement (HV_TEST_SSH_KEY) ; le conteneur doit tourner avec son sshd"""
+L'alias vient de HV_SSH_ALIAS (défaut hv-hd07, écrit par new_alias de lib.sh) ; le conteneur doit tourner avec son sshd"""
 import os
 import re
 import signal
@@ -13,7 +13,7 @@ import urllib.request
 
 APP = os.environ["APPD"]
 runs = int(sys.argv[1]) if len(sys.argv) > 1 else 5
-env = dict(os.environ, HV_TEST_MODE="1", HV_SSH_HOST="host.example", HV_SSH_USER="hvssh")
+env = dict(os.environ, HV_TEST_MODE="1", HV_SSH_HOST=os.environ.get("HV_SSH_ALIAS", "hv-hd07"))
 samples = []
 for i in range(runs):
     t0 = time.monotonic()

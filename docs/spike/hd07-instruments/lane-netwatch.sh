@@ -7,12 +7,13 @@ set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 EVD=${1:?usage: lane-netwatch.sh <dossier-de-preuves>}
 mkdir -p "$EVD"
-new_keys || exit 1
+new_alias || exit 1
+trap drop_alias EXIT
 # le nom .host.example donne une adresse d'OrbStack, pas celle du réseau bridge de docker
 CONTAINER_IP=$(python3 -c "import socket; print(socket.gethostbyname('$SSH_HOST'))")
 say "$SSH_HOST se résout en $CONTAINER_IP (la destination du tunnel)"
 start_app "$EVD/app-netwatch.log"
-trap 'stop_app "$APP_PID"' EXIT
+trap 'stop_app "$APP_PID"; drop_alias' EXIT
 # échantillonnage fin des sockets de toute la famille de l'app (app, gardien, agent, ssh), dès le lancement
 : > "$EVD/lsof-all.txt"
 (
