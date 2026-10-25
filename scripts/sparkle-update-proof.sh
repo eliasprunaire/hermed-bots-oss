@@ -18,6 +18,52 @@ if [ "$(uname -s)" != Darwin ]; then
   exit 2
 fi
 
+# Automatic Sparkle checks are off. The proof clicks the same app-menu command a user would.
+request_user_check() {
+  local pid=$1
+  [ -n "$pid" ] || return 1
+  osascript - "$pid" <<'APPLESCRIPT' >/dev/null
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set p to first application process whose unix id is targetPid
+    tell p
+      set frontmost to true
+      delay 0.4
+      click (first menu item of menu 1 of menu bar item 1 of menu bar 1 whose name contains "mises")
+    end tell
+  end tell
+end run
+APPLESCRIPT
+}
+
+confirm_sparkle_install() {
+  local pid=$1
+  [ -n "$pid" ] || return 0
+  osascript - "$pid" <<'APPLESCRIPT' >/dev/null || true
+on run argv
+  set targetPid to item 1 of argv as integer
+  tell application "System Events"
+    set p to first application process whose unix id is targetPid
+    repeat 45 times
+      tell p
+        repeat with w in windows
+          repeat with b in buttons of w
+            set n to name of b
+            if n contains "Install" or n contains "Installer" or n contains "Mettre" then
+              click b
+              return
+            end if
+          end repeat
+        end repeat
+      end tell
+      delay 1
+    end repeat
+  end tell
+end run
+APPLESCRIPT
+}
+
 prove_published() {
   local from='' to='' expected_from='' feed=fail install=fail installed_after=none codesign_verdict=fail spctl_verdict=fail
   local work app bundle_id python zip extract releases_repo published_feed
@@ -166,6 +212,8 @@ PY
   defaults delete "$bundle_id" >/dev/null 2>&1 || true
   rm -rf "${HOME:?}/Library/Caches/${bundle_id:?}"
   launch_published "$app" || { echo 'The previous published app did not start' >&2; report_published; }
+  request_user_check "$(pgrep -f "$app/Contents/MacOS/HermedBots" | head -1)" || true
+  confirm_sparkle_install "$(pgrep -f "$app/Contents/MacOS/HermedBots" | head -1)"
   wait_published 180 sparkle_progress || true
   sleep 30
   stop_published "$app"
@@ -396,6 +444,8 @@ pass() { # name, expect, feed file and N+1 archive file served in this pass, bot
   mark=$(wc -l < "$out/server.log")
   since=$(date '+%Y-%m-%d %H:%M:%S')
   launch_app "$app" || fail "$name: build $n did not start"
+  wait_until 20 request_user_check "$(app_pids "$app" | head -1)" || fail "$name: the check menu could not be clicked"
+  if [ "$name" != feed-signature ]; then confirm_sparkle_install "$(app_pids "$app" | head -1)"; fi
   wait_until 120 requested appcast.xml || fail "$name: build $n never asked for the feed"
   if [ "$name" = feed-signature ]; then
     sleep 30

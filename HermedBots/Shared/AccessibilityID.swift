@@ -69,6 +69,7 @@ enum AccessibilityID: String, CaseIterable {
     case connectionAPIKey = "hd.connection.api-key"
     case connectionAPISave = "hd.connection.api-save"
     case connectionAPIStatus = "hd.connection.api-status"
+    case updatesCheck = "hd.updates.check"
 
     static func botRow(_ profileID: String) -> String { "hd.bots.row.\(profileID)" }
     static func botLock(_ profileID: String) -> String { "\(botRow(profileID)).lock" }

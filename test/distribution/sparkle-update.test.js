@@ -12,13 +12,28 @@ function plistEntries(file) {
   return entries;
 }
 
+test("Release imposes the on-demand Sparkle policy before the updater starts", () => {
+  const app = fs.readFileSync("HermedBots/App/HermedBotsApp.swift", "utf8");
+  const driver = fs.readFileSync("HermedBots/Updates/SparkleUpdateDriver.swift", "utf8");
+  assert.match(driver, /UpdatePolicy\.imposed\(on: stored\)/);
+  assert.match(driver, /automaticallyChecksForUpdates = policy\.automaticallyChecks/);
+  assert.match(driver, /automaticallyDownloadsUpdates = policy\.automaticallyDownloads/);
+  const start = app.indexOf("SPUStandardUpdaterController(startingUpdater:");
+  const slice = app.slice(start, start + 400);
+  assert.match(slice, /startingUpdater: false/);
+  assert.ok(slice.indexOf("driver.attach") < slice.indexOf("startUpdater()"));
+});
+
 test("the app bundle carries the Sparkle feed, the public key and the signed-feed switches", () => {
   const plist = plistEntries("Config/Info.plist");
   // The release script fills these two build settings at archive time
   assert.equal(plist.SUFeedURL, "<string>$(SPARKLE_FEED_URL)</string>");
   assert.equal(plist.SUPublicEDKey, "<string>$(SPARKLE_PUBLIC_KEY)</string>");
-  for (const key of ["SURequireSignedFeed", "SUVerifyUpdateBeforeExtraction", "SUEnableAutomaticChecks"]) {
+  for (const key of ["SURequireSignedFeed", "SUVerifyUpdateBeforeExtraction"]) {
     assert.equal(plist[key], "<true/>", key);
+  }
+  for (const key of ["SUEnableAutomaticChecks", "SUAutomaticallyUpdate"]) {
+    assert.equal(plist[key], "<false/>", key);
   }
 });
 
@@ -27,6 +42,26 @@ const path = require("node:path");
 const { spawnSync } = require("node:child_process");
 
 const PROOF = "scripts/sparkle-update-proof.sh";
+
+test("the archive refusal pass confirms Sparkle then waits for the zip and rejects the installer", () => {
+  const source = fs.readFileSync(PROOF, "utf8");
+  const pass = source.slice(source.indexOf("pass() {"));
+  assert.match(pass, /if \[ "\$name" != feed-signature \]; then confirm_sparkle_install/);
+  const archiveArm = pass.slice(pass.indexOf("wait_until 120 requested \"HermedBots-$n1.zip\""));
+  assert.match(archiveArm, /if \[ "\$expect" = refuse \] && installer_up/);
+  assert.ok(pass.indexOf("confirm_sparkle_install") < pass.indexOf("requested \"HermedBots-$n1.zip\""));
+});
+
+test("the live proof starts a user-driven Sparkle check before it waits for the feed", () => {
+  const source = fs.readFileSync(PROOF, "utf8");
+  assert.match(source, /request_user_check/);
+  assert.match(source, /whose name contains "mises"/);
+  const pass = source.slice(source.indexOf("pass() {"));
+  assert.ok(pass.indexOf("request_user_check") < pass.indexOf("requested appcast.xml"));
+  const published = source.slice(0, source.indexOf("if [ \"$mode\" = published ]"));
+  assert.ok(published.includes("request_user_check"));
+  assert.ok(published.indexOf("request_user_check") < published.lastIndexOf("sparkle_progress"));
+});
 
 test("the update proof is valid shell and never expands the production signing key", () => {
   const syntax = spawnSync("bash", ["-n", PROOF], { encoding: "utf8" });

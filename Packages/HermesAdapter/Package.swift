@@ -7,13 +7,16 @@ let package = Package(
     products: [
         .library(name: "HermesAdapter", targets: ["HermesAdapter"]),
         .library(name: "LoopGuard", targets: ["LoopGuard"]),
+        .library(name: "UpdateCheck", targets: ["UpdateCheck"]),
         .executable(name: "hd-probe", targets: ["hd-probe"]),
     ],
     targets: [
         .target(name: "HermesAdapter"),
         .target(name: "LoopGuard"),
+        .target(name: "UpdateCheck"),
         .executableTarget(name: "hd-probe", dependencies: ["HermesAdapter", "LoopGuard"]),
         .testTarget(name: "HermesAdapterTests", dependencies: ["HermesAdapter"], exclude: ["Fixtures"]),
         .testTarget(name: "LoopGuardTests", dependencies: ["LoopGuard"], exclude: ["Fixtures"]),
+        .testTarget(name: "UpdateCheckTests", dependencies: ["UpdateCheck"]),
     ]
 )

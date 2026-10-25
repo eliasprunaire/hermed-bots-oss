@@ -87,8 +87,8 @@ Conserver la même paire entre les versions.
 
 Sparkle démarre dans les builds Release.
 Les builds Debug ne lancent aucun contrôle de mise à jour, notamment pendant XCUITest.
-Les contrôles et les téléchargements automatiques sont activés dans le bundle.
-Sparkle installe les mises à jour selon son cycle standard, notamment à la fermeture de l'app.
+Les contrôles et les téléchargements automatiques sont désactivés dans le bundle.
+L'utilisateur lance une recherche depuis le menu de l'app ou depuis le bouton équivalent dans Connexion.
 La première installation reste manuelle.
 Aucune compilation locale n'est nécessaire ensuite.
 Le réglage de connexion et les secrets du Trousseau restent hors du bundle remplacé.
@@ -221,7 +221,7 @@ Le script ne publie rien et ne lit aucune clé de production.
 2. Il construit N puis N+1 en Release, avec le même flux local et la même clé publique.
 3. Il génère l'appcast des deux builds et contrôle sa signature avec `sign_update --verify`.
 4. Il sert le flux sur la boucle locale.
-5. Il démarre N. L'app trouve N+1, vérifie la signature du flux, télécharge l'archive et l'installe à sa fermeture.
+5. Il démarre N, choisit Rechercher les mises à jour… dans le menu de l'app, puis confirme l'installation Sparkle. L'app vérifie la signature du flux, télécharge l'archive et l'installe.
 6. Il relance le bundle installé et lit ses deux champs de version. Ils doivent valoir N+1.
 7. Il refait la passe avec une signature de flux altérée, puis avec une archive altérée. L'app doit refuser et rester en N.
 8. Il supprime la paire de clés, les builds et les caches de la passe.
@@ -249,7 +249,7 @@ Le même script accepte l'argument `published`. Sans argument, le comportement l
 bash scripts/sparkle-update-proof.sh published
 ```
 
-Cette passe ne construit rien. Elle installe la release publiée précédente du dépôt public des archives, décrit dans « Dépôts de publication » : elle télécharge son ZIP, le contrôle contre `SHA256SUMS`, puis lit la version source dans l'app installée. Elle exige que `SUFeedURL` soit le flux publié (`releases/latest/download/appcast.xml`). Elle démarre l'app, laisse Sparkle lire ce flux, télécharger puis installer la version suivante, et attend avec un délai borné. Après fermeture puis relance, elle relit la version installée, `codesign --verify` et le verdict `spctl`.
+Cette passe ne construit rien. Elle installe la release publiée précédente du dépôt public des archives, décrit dans « Dépôts de publication » : elle télécharge son ZIP, le contrôle contre `SHA256SUMS`, puis lit la version source dans l'app installée. Elle exige que `SUFeedURL` soit le flux publié (`releases/latest/download/appcast.xml`). Elle démarre l'app, choisit Rechercher les mises à jour…, laisse Sparkle lire ce flux, télécharger puis installer la version suivante, et attend avec un délai borné. Après fermeture puis relance, elle relit la version installée, `codesign --verify` et le verdict `spctl`.
 
 La dernière ligne de sortie a la forme suivante, avec le code 0 seulement si chaque champ passe.
 
