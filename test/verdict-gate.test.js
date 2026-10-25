@@ -82,6 +82,28 @@ function assertApiHeaders(init) {
   assert.equal(init.headers["User-Agent"], "verdict-gate");
 }
 
+function historyPayload({ commits = [], force = [] }) {
+  return {
+    data: {
+      repository: {
+        pullRequest: {
+          commits: {
+            pageInfo: { hasNextPage: false },
+            nodes: commits.map((sha) => ({ commit: { oid: sha } })),
+          },
+          timelineItems: {
+            pageInfo: { hasNextPage: false },
+            nodes: force.map(([before, after]) => ({
+              beforeCommit: { oid: before },
+              afterCommit: { oid: after },
+            })),
+          },
+        },
+      },
+    },
+  };
+}
+
 function harness({
   eventName = "issue_comment",
   payload,
@@ -93,6 +115,7 @@ function harness({
   pages,
   postStatus = 201,
   verifiers,
+  routes = {},
 }) {
   const posts = [];
   const gets = [];
@@ -100,6 +123,13 @@ function harness({
   const pending = pages.slice();
   const fetch = async (url, init = {}) => {
     const method = init.method ?? "GET";
+    if (method === "POST" && url === "https://api.github.com/graphql") {
+      gets.push({ url, init });
+      if (!Object.prototype.hasOwnProperty.call(routes, "graphql")) {
+        throw new Error("unexpected GRAPHQL");
+      }
+      return response(200, routes.graphql);
+    }
     if (method === "POST") {
       posts.push({ url, init, body: JSON.parse(init.body) });
       return response(postStatus, {});
@@ -107,6 +137,18 @@ function harness({
     gets.push({ url, init });
     if (url === `${API}/pulls/7`) {
       return response(200, pull);
+    }
+    if (url === `${API}/pulls/7/commits?per_page=100`) {
+      if (!Object.prototype.hasOwnProperty.call(routes, "commits")) {
+        throw new Error(`unexpected GET ${url}`);
+      }
+      return response(200, routes.commits);
+    }
+    if (url === `${API}/issues/7/timeline?per_page=100`) {
+      if (!Object.prototype.hasOwnProperty.call(routes, "timeline")) {
+        throw new Error(`unexpected GET ${url}`);
+      }
+      return response(200, routes.timeline);
     }
     const page = pending.shift();
     if (!page || url !== page.url) {
@@ -162,15 +204,11 @@ test("a later unmarked verdict does not hide the newest qualifying comment", () 
     ],
   });
   assert.deepEqual(decision, {
-    kind: "fail",
-    reason: {
-      code: "sha-mismatch",
-      verdict: "PASS",
-      citedSha: OTHER,
-      headSha: HEAD,
-      commentId: "11",
-    },
-    description: `VERDICT PASS @ ${OTHER} does not match head ${HEAD}`,
+    kind: "pass",
+    verdict: "PASS",
+    sha: HEAD,
+    commentId: "10",
+    description: `VERDICT PASS @ ${HEAD}`,
   });
 });
 
@@ -206,12 +244,20 @@ test("comment array order does not change the decision", () => {
   assert.equal(forward.commentId, "11");
 });
 
-test("matchesHead is ignored: a cited SHA other than the head always mismatches", () => {
+test("matchesHead and a patch-id in the comment body do not make a foreign SHA match", () => {
+  const pid = "d".repeat(40);
   for (const verdict of ["PASS", "PASS+NOTES", "FAIL"]) {
     const decision = decide({
       headSha: HEAD,
-      comments: [comment("1", 1, marked(verdict, OTHER))],
+      comments: [
+        comment(
+          "1",
+          1,
+          `${marked(verdict, OTHER)}\npid ${pid}\nmatchesHead true`,
+        ),
+      ],
       matchesHead: () => true,
+      headPatchId: pid,
     });
     assert.deepEqual(decision, {
       kind: "fail",
@@ -238,13 +284,15 @@ test("a SHA that is a prefix of the head does not qualify", () => {
   }
 });
 
-test("the script does not import child_process", () => {
+test("git is invoked only through io.run as git argv, never from comment text", () => {
   const source = readFileSync(
     join(__dirname, "..", "scripts/verdict-gate.js"),
     "utf8",
   );
-  assert.equal(source.includes("child_process"), false);
-  assert.equal(source.includes("spawnSync"), false);
+  assert.equal(source.includes("io.run([\"git\""), true);
+  assert.equal(source.includes("patch-id"), true);
+  assert.equal(source.includes("comment.patchId"), false);
+  assert.equal(source.includes("PATCH_ID"), false);
 });
 
 test("PASS and PASS+NOTES at the head SHA pass", () => {
@@ -577,8 +625,16 @@ test("every description is at most 140 characters", () => {
     headSha: HEAD,
     comments: [comment("1", 1, marked("PASS+NOTES", OTHER))],
   });
+  const viaPatch = decide({
+    headSha: HEAD,
+    headPatchId: "d".repeat(40),
+    onPull: [OTHER],
+    patchIds: { [OTHER]: "d".repeat(40) },
+    comments: [comment("9", 9, marked("PASS+NOTES", OTHER))],
+  });
   const cases = [
     notesOnOther,
+    viaPatch,
     decide({ headSha: HEAD, comments: [] }),
     decide({
       headSha: HEAD,
@@ -606,6 +662,10 @@ test("every description is at most 140 characters", () => {
   assert.equal(
     notesOnOther.description,
     `VERDICT PASS+NOTES @ ${OTHER} does not match head ${HEAD}`,
+  );
+  assert.equal(
+    viaPatch.description,
+    `VERDICT PASS+NOTES @ ${OTHER} pid ${"d".repeat(40)}`,
   );
   for (const decision of cases) {
     assert.ok(decision.description.length <= 140);
@@ -915,41 +975,365 @@ test("the workflow records a status from record-verdict", () => {
   assert.match(prelude, /contents:\s*read/);
   assert.match(prelude, /pull-requests:\s*read/);
   assert.equal(prelude.includes("statuses:"), false);
-  assert.match(job, /node scripts\/verdict-gate\.js/);
+  assert.match(job, /node "\$checker"/);
+  assert.equal(job.includes("node scripts/verdict-gate.js"), false);
+  assert.match(job, /git show "\$BASE_SHA:scripts\/verdict-gate\.js"/);
   assert.match(job, /fetch-depth:\s*0/);
+  assert.match(job, /persist-credentials:\s*false/);
+  assert.equal(yaml.includes("pull_request_target"), false);
 });
 
-test("main fails on a cited SHA with the same patch as the head and runs no git", async () => {
+function initGitDir() {
   const dir = mkdtempSync(join(tmpdir(), "verdict-gate-git-"));
   const git = (args, input) =>
     spawnSync("git", args, { cwd: dir, encoding: "utf8", input });
+  assert.equal(git(["init", "-q"]).status, 0);
+  git(["config", "user.email", "dev@example.com"]);
+  git(["config", "user.name", "dev"]);
+  return { dir, git };
+}
+
+function patchIdAgainst(git, sha, base) {
+  const mergeBase = git(["merge-base", sha, base]).stdout.trim();
+  const diff = git(["diff", "--no-ext-diff", "--binary", mergeBase, sha]);
+  return git(["patch-id", "--stable"], diff.stdout).stdout.trim().split(/\s+/)[0];
+}
+
+function attachGit(io, dir) {
+  io.run = (argv, input) => {
+    assert.equal(argv[0], "git");
+    const result = spawnSync("git", argv.slice(1), {
+      cwd: dir,
+      encoding: "utf8",
+      input,
+    });
+    return { status: result.status ?? 1, stdout: result.stdout || "" };
+  };
+}
+
+function featureRepo() {
+  const { dir, git } = initGitDir();
+  writeFileSync(join(dir, "note.txt"), "base\n");
+  git(["add", "note.txt"]);
+  assert.equal(git(["commit", "-qm", "base"]).status, 0);
+  const baseSha = git(["rev-parse", "HEAD"]).stdout.trim();
+  writeFileSync(join(dir, "note.txt"), "hello\n");
+  git(["add", "note.txt"]);
+  assert.equal(git(["commit", "-qm", "feature"]).status, 0);
+  const sha1 = git(["rev-parse", "HEAD"]).stdout.trim();
+  assert.equal(git(["reset", "--soft", "HEAD~1"]).status, 0);
+  assert.equal(git(["commit", "-qm", "replay"]).status, 0);
+  const sha2 = git(["rev-parse", "HEAD"]).stdout.trim();
+  assert.notEqual(sha1, sha2);
+  const patchId = patchIdAgainst(git, sha1, baseSha);
+  assert.equal(patchId, patchIdAgainst(git, sha2, baseSha));
+  assert.equal(patchId.length, 40);
+  return { dir, git, baseSha, sha1, sha2, patchId };
+}
+
+async function gateOnReplay({
+  dir,
+  baseSha,
+  sha1,
+  sha2,
+  body,
+  commits,
+  force,
+  extraComments = [],
+}) {
+  const { io, posts, stderr } = harness({
+    eventName: "pull_request",
+    payload: {
+      action: "synchronize",
+      pull_request: {
+        number: 7,
+        head: { sha: sha2 },
+        base: { sha: baseSha },
+        user: { login: "eliasprunaire" },
+      },
+    },
+    pages: [
+      {
+        url: `${API}/issues/7/comments?per_page=100`,
+        comments: [
+          rawComment(1, "2026-10-15T18:00:00Z", body),
+          ...extraComments,
+        ],
+      },
+    ],
+    routes: {
+      commits: commits.map((sha) => ({ sha })),
+      timeline: force.map(([before, after]) => ({
+        event: "head_ref_force_pushed",
+        commit_id: after,
+        before,
+      })),
+      graphql: historyPayload({ commits, force }),
+    },
+  });
+  attachGit(io, dir);
+  const code = await main([], io);
+  return { code, posts, stderr };
+}
+
+const AUTHOR = { login: "eliasprunaire", type: "User" };
+const PID = "e".repeat(40);
+
+test("a clean rebase PASS with the same patch-id passes and names origin sha and patch-id", () => {
+  const decision = decide({
+    headSha: HEAD,
+    headPatchId: PID,
+    onPull: [OTHER, HEAD],
+    patchIds: { [OTHER]: PID },
+    comments: [comment("1", 1, marked("PASS+NOTES", OTHER))],
+  });
+  assert.deepEqual(decision, {
+    kind: "pass",
+    verdict: "PASS+NOTES",
+    sha: OTHER,
+    commentId: "1",
+    description: `VERDICT PASS+NOTES @ ${OTHER} pid ${PID}`,
+  });
+  assert.ok(decision.description.length <= 140);
+});
+
+test("a modified diff with a different patch-id is refused", () => {
+  const decision = decide({
+    headSha: HEAD,
+    headPatchId: PID,
+    onPull: [OTHER, HEAD],
+    patchIds: { [OTHER]: "f".repeat(40) },
+    comments: [comment("1", 1, marked("PASS", OTHER))],
+  });
+  assert.equal(decision.kind, "fail");
+  assert.equal(decision.reason.code, "sha-mismatch");
+  assert.equal(
+    decision.description,
+    `VERDICT PASS @ ${OTHER} does not match head ${HEAD}`,
+  );
+});
+
+test("author verdict is refused even with a matching patch-id", () => {
+  const decision = decide({
+    headSha: HEAD,
+    authorLogin: "eliasprunaire",
+    verifiers: [AUTHOR],
+    headPatchId: PID,
+    onPull: [OTHER],
+    patchIds: { [OTHER]: PID },
+    comments: [comment("1", 1, marked("PASS", OTHER), AUTHOR)],
+  });
+  assert.equal(decision.reason.code, "author-match");
+  assert.equal(decision.description, "author eliasprunaire wrote the marked VERDICT");
+});
+
+test("a SHA that is not on the pull is refused even with the same patch-id", () => {
+  const decision = decide({
+    headSha: HEAD,
+    headPatchId: PID,
+    onPull: [HEAD],
+    patchIds: { [OTHER]: PID },
+    comments: [comment("1", 1, marked("PASS", OTHER))],
+  });
+  assert.equal(decision.reason.code, "not-on-pull");
+  assert.equal(
+    decision.description,
+    `VERDICT PASS @ ${OTHER} is not on this pull`,
+  );
+});
+
+test("a later FAIL on the same patch-id or on the head wins", () => {
+  const older = comment("1", 1, marked("PASS", OTHER));
+  const failHead = decide({
+    headSha: HEAD,
+    headPatchId: PID,
+    onPull: [OTHER, HEAD],
+    patchIds: { [OTHER]: PID },
+    comments: [older, comment("2", 2, marked("FAIL", HEAD))],
+  });
+  assert.equal(failHead.kind, "fail");
+  assert.equal(failHead.reason.code, "verdict-fail");
+  assert.equal(failHead.description, `VERDICT FAIL @ ${HEAD}`);
+  const failPatch = decide({
+    headSha: HEAD,
+    headPatchId: PID,
+    onPull: [OTHER, HEAD],
+    patchIds: { [OTHER]: PID },
+    comments: [older, comment("3", 3, marked("FAIL", OTHER))],
+  });
+  assert.equal(failPatch.kind, "fail");
+  assert.equal(failPatch.reason.code, "verdict-fail");
+  assert.equal(failPatch.description, `VERDICT FAIL @ ${OTHER} pid ${PID}`);
+});
+
+test("an empty patch-id is refused even when both sides are empty", () => {
+  const decision = decide({
+    headSha: HEAD,
+    headPatchId: "",
+    onPull: [OTHER, HEAD],
+    patchIds: { [OTHER]: "" },
+    comments: [comment("1", 1, marked("PASS", OTHER))],
+  });
+  assert.equal(decision.description, `empty patch-id refused for ${OTHER}`);
+});
+
+test("main accepts a clean rebase with the same patch-id computed from git objects", async () => {
+  const repo = featureRepo();
   try {
-    assert.equal(git(["init", "-q"]).status, 0);
-    git(["config", "user.email", "dev@example.com"]);
-    git(["config", "user.name", "dev"]);
+    const { code, posts, stderr } = await gateOnReplay({
+      ...repo,
+      body: marked("PASS", repo.sha1),
+      commits: [repo.sha1, repo.sha2],
+      force: [[repo.sha1, repo.sha2]],
+    });
+    assert.equal(code, 0);
+    const description = `VERDICT PASS @ ${repo.sha1} pid ${repo.patchId}`;
+    assert.deepEqual(posts[0].body, {
+      state: "success",
+      context: "verdict-gate",
+      description,
+    });
+    assert.deepEqual(stderr, [description]);
+    assert.ok(description.includes(repo.sha1));
+    assert.ok(description.includes(repo.patchId));
+    assert.ok(description.length <= 140);
+  } finally {
+    rmSync(repo.dir, { recursive: true, force: true });
+  }
+});
+
+test("main refuses a cited SHA whose diff against the current base changed", async () => {
+  const repo = featureRepo();
+  try {
+    writeFileSync(join(repo.dir, "note.txt"), "changed\n");
+    repo.git(["add", "note.txt"]);
+    assert.equal(repo.git(["commit", "-qm", "edit"]).status, 0);
+    const head = repo.git(["rev-parse", "HEAD"]).stdout.trim();
+    const { io, posts } = harness({
+      eventName: "pull_request",
+      payload: {
+        action: "synchronize",
+        pull_request: {
+          number: 7,
+          head: { sha: head },
+          base: { sha: repo.baseSha },
+          user: { login: "eliasprunaire" },
+        },
+      },
+      pages: [
+        {
+          url: `${API}/issues/7/comments?per_page=100`,
+          comments: [rawComment(1, "2026-10-15T18:00:00Z", marked("PASS", repo.sha1))],
+        },
+      ],
+      routes: {
+        commits: [{ sha: repo.sha1 }, { sha: head }],
+        timeline: [],
+        graphql: historyPayload({
+          commits: [repo.sha1, head],
+          force: [[repo.sha1, head]],
+        }),
+      },
+    });
+    attachGit(io, repo.dir);
+    assert.equal(await main([], io), 0);
+    assert.equal(posts[0].body.state, "failure");
+    assert.equal(
+      posts[0].body.description,
+      `VERDICT PASS @ ${repo.sha1} does not match head ${head}`,
+    );
+  } finally {
+    rmSync(repo.dir, { recursive: true, force: true });
+  }
+});
+
+test("main refuses a matching patch-id from a SHA that never belonged to the pull", async () => {
+  const repo = featureRepo();
+  const other = initGitDir();
+  try {
+    writeFileSync(join(other.dir, "note.txt"), "base\n");
+    other.git(["add", "note.txt"]);
+    other.git(["commit", "-qm", "base"]);
+    writeFileSync(join(other.dir, "note.txt"), "hello\n");
+    other.git(["add", "note.txt"]);
+    other.git(["commit", "-qm", "copy"]);
+    const foreign = other.git(["rev-parse", "HEAD"]).stdout.trim();
+    repo.git(["fetch", "-q", other.dir, "HEAD"]);
+    const { io, posts } = harness({
+      eventName: "pull_request",
+      payload: {
+        action: "synchronize",
+        pull_request: {
+          number: 7,
+          head: { sha: repo.sha2 },
+          base: { sha: repo.baseSha },
+          user: { login: "eliasprunaire" },
+        },
+      },
+      pages: [
+        {
+          url: `${API}/issues/7/comments?per_page=100`,
+          comments: [rawComment(1, "2026-10-15T18:00:00Z", marked("PASS", foreign))],
+        },
+      ],
+      routes: {
+        commits: [{ sha: repo.sha2 }],
+        timeline: [],
+        graphql: historyPayload({ commits: [repo.sha2], force: [] }),
+      },
+    });
+    attachGit(io, repo.dir);
+    assert.equal(await main([], io), 0);
+    assert.equal(posts[0].body.state, "failure");
+    assert.equal(
+      posts[0].body.description,
+      `VERDICT PASS @ ${foreign} is not on this pull`,
+    );
+  } finally {
+    rmSync(repo.dir, { recursive: true, force: true });
+    rmSync(other.dir, { recursive: true, force: true });
+  }
+});
+
+test("main lets a later FAIL on the head beat an older same-patch PASS", async () => {
+  const repo = featureRepo();
+  try {
+    const { code, posts } = await gateOnReplay({
+      ...repo,
+      body: marked("PASS", repo.sha1),
+      extraComments: [
+        rawComment(2, "2026-10-15T19:00:00Z", marked("FAIL", repo.sha2)),
+      ],
+      commits: [repo.sha1, repo.sha2],
+      force: [[repo.sha1, repo.sha2]],
+    });
+    assert.equal(code, 0);
+    assert.equal(posts[0].body.state, "failure");
+    assert.equal(posts[0].body.description, `VERDICT FAIL @ ${repo.sha2}`);
+  } finally {
+    rmSync(repo.dir, { recursive: true, force: true });
+  }
+});
+
+test("main refuses an empty diff even when both patch-ids would match", async () => {
+  const { dir, git } = initGitDir();
+  try {
     writeFileSync(join(dir, "note.txt"), "base\n");
     git(["add", "note.txt"]);
-    assert.equal(git(["commit", "-qm", "base"]).status, 0);
-    writeFileSync(join(dir, "note.txt"), "hello\n");
-    git(["add", "note.txt"]);
-    assert.equal(git(["commit", "-qm", "feature"]).status, 0);
+    git(["commit", "-qm", "base"]);
+    const baseSha = git(["rev-parse", "HEAD"]).stdout.trim();
+    assert.equal(git(["commit", "--allow-empty", "-qm", "empty-one"]).status, 0);
     const sha1 = git(["rev-parse", "HEAD"]).stdout.trim();
-    assert.equal(git(["reset", "--soft", "HEAD~1"]).status, 0);
-    assert.equal(git(["commit", "-qm", "replay"]).status, 0);
+    assert.equal(git(["commit", "--allow-empty", "-qm", "empty-two"]).status, 0);
     const sha2 = git(["rev-parse", "HEAD"]).stdout.trim();
-    assert.notEqual(sha1, sha2);
-    const patchId = (sha) => {
-      const shown = git(["show", sha]);
-      return git(["patch-id", "--stable"], shown.stdout).stdout.trim().split(/\s+/)[0];
-    };
-    assert.equal(patchId(sha1), patchId(sha2));
-    const { io, posts, stderr } = harness({
+    const { io, posts } = harness({
       eventName: "pull_request",
       payload: {
         action: "synchronize",
         pull_request: {
           number: 7,
           head: { sha: sha2 },
+          base: { sha: baseSha },
           user: { login: "eliasprunaire" },
         },
       },
@@ -959,27 +1343,23 @@ test("main fails on a cited SHA with the same patch as the head and runs no git"
           comments: [rawComment(1, "2026-10-15T18:00:00Z", marked("PASS", sha1))],
         },
       ],
+      routes: {
+        commits: [{ sha: sha1 }, { sha: sha2 }],
+        timeline: [],
+        graphql: historyPayload({ commits: [sha1, sha2], force: [] }),
+      },
     });
-    const spawned = [];
-    io.run = (...call) => {
-      spawned.push(call);
-      return { status: 1, stdout: "" };
-    };
+    attachGit(io, dir);
     assert.equal(await main([], io), 0);
-    assert.deepEqual(spawned, []);
-    const description = `VERDICT PASS @ ${sha1} does not match head ${sha2}`;
-    assert.deepEqual(posts[0].body, {
-      state: "failure",
-      context: "verdict-gate",
-      description,
-    });
-    assert.deepEqual(stderr, [description]);
+    assert.equal(posts[0].body.state, "failure");
+    assert.equal(
+      posts[0].body.description,
+      `empty patch-id refused for ${sha1}`,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
-
-const AUTHOR = { login: "eliasprunaire", type: "User" };
 
 test("a marked PASS from the pull request author fails even when listed", () => {
   const decision = decide({
