@@ -19,11 +19,11 @@ _sparkle_python() {
   fi
 }
 
-# An update must replace the installed app, never leave a second copy of the identifier under test.
-# Union of Spotlight hits and Launch Services path: rows for SPARKLE_PROOF_BUNDLE_ID.
-# Skips missing paths and anything under the folders of SPARKLE_PROOF_BUILD_DIR (colon separated).
+# An update must replace the installed app, never leave a second copy of the identifier under test
+# Union of Spotlight hits and Launch Services path: rows for SPARKLE_PROOF_BUNDLE_ID
+# Skips missing paths and anything under the folders of SPARKLE_PROOF_BUILD_DIR (colon separated)
 # Prints the count and each copy's version with a redacted path. Exit 0 only when
-# there is exactly one remaining copy at SPARKLE_PROOF_TARGET_VERSION.
+# there is exactly one remaining copy at SPARKLE_PROOF_TARGET_VERSION
 count_hermedbots_copies() {
   local target=${SPARKLE_PROOF_TARGET_VERSION:?SPARKLE_PROOF_TARGET_VERSION is required}
   local bundle=${SPARKLE_PROOF_BUNDLE_ID:?SPARKLE_PROOF_BUNDLE_ID is required}
@@ -154,7 +154,7 @@ PY
 }
 
 # Live discovery on the machine that ran the install. Simulated files skip this.
-# A discovery tool that is missing or exits nonzero fails the check: its list would be incomplete.
+# A discovery tool that is missing or exits nonzero fails the check: its list would be incomplete
 prove_single_copy() {
   local target=$1 bundle=$2
   local tmp md dump lsregister=lsregister st=0 rc
