@@ -313,24 +313,94 @@ test("a harmless symlink exits 0", () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
-test("the workflow runs the checker from the base commit, not the PR branch", () => {
-  const workflow = readFileSync(join(root, ".github/workflows/protected-paths.yml"), "utf8");
-  assert.match(workflow, /git show "\$BASE_SHA:scripts\/check-protected-paths\.js"/);
-  assert.doesNotMatch(workflow, /node scripts\/check-protected-paths\.js/);
-  assert.match(workflow, /types: \[opened, synchronize, reopened, ready_for_review, labeled, unlabeled\]/);
+const workflowPath = join(root, ".github/workflows/protected-paths.yml");
+
+test("the workflow is read from the base branch and never checks out the pull", () => {
+  const workflow = readFileSync(workflowPath, "utf8");
+  // pull_request would load this file from the pull, which could add `if: false` to the job
+  assert.match(workflow, /\non:\n {2}pull_request_target:\n {4}types: \[opened, synchronize, reopened, ready_for_review, labeled, unlabeled\]\n/);
+  assert.doesNotMatch(workflow, /^ {2}pull_request:/m);
+  assert.doesNotMatch(workflow, /^\s+ref:/m);
+  assert.doesNotMatch(workflow, /refs\/pull\//);
+  assert.match(workflow, /git fetch --no-tags origin "\$HEAD_SHA"\n/);
+  assert.match(workflow, /node scripts\/check-protected-paths\.js --base "\$BASE_SHA" --head "\$HEAD_SHA"/);
+  assert.doesNotMatch(workflow, /cp scripts\/check-protected-paths\.js/);
   assert.match(workflow, /PR_AUTHOR_LOGIN:/);
   assert.match(workflow, /pull-requests:\s*read/);
 });
 
-test("the workflow fetches the head as git objects before the checker, without checking it out", () => {
-  const workflow = readFileSync(join(root, ".github/workflows/protected-paths.yml"), "utf8");
-  const fetchAt = workflow.indexOf('git fetch --no-tags origin "$HEAD_SHA"');
-  const checkerAt = workflow.indexOf('node "$checker"');
-  assert.ok(fetchAt !== -1, "the head SHA of a fork is not in the base clone: fetch it");
-  assert.ok(fetchAt < checkerAt, "fetch before the checker reads the head");
-  assert.doesNotMatch(workflow, /^\s+ref:/m);
-  assert.match(workflow, /^\s+pull_request:$/m);
-  assert.match(workflow, /^\s+pull_request_target:$/m);
+// runs the `run:` block of the workflow in a clone whose tree is the base; the pull head
+// exists only under refs/pull/34/head of origin, as on GitHub
+function runWorkflowStep(headFiles) {
+  const workflow = readFileSync(workflowPath, "utf8");
+  const step = /\n {8}run: \|\n([\s\S]*)$/.exec(workflow);
+  assert.ok(step, "the last step of the workflow is a run block");
+  const body = step[1].replace(/^ {10}/gm, "");
+  const origin = mkdtempSync(join(tmpdir(), "protected-paths-origin-"));
+  const clone = mkdtempSync(join(tmpdir(), "protected-paths-clone-"));
+  try {
+    git(origin, "init", "-q", "-b", "main");
+    git(origin, "config", "user.email", "t@example.test");
+    git(origin, "config", "user.name", "t");
+    git(origin, "config", "commit.gpgsign", "false");
+    git(origin, "config", "uploadpack.allowAnySHA1InWant", "true");
+    put(origin, "README.md", "x\n");
+    put(origin, "scripts/check-protected-paths.js", readFileSync(script, "utf8"));
+    git(origin, "add", "-A");
+    git(origin, "commit", "-q", "-m", "init");
+    const base = git(origin, "rev-parse", "HEAD");
+    git(origin, "switch", "-q", "-c", "topic");
+    for (const [file, text] of Object.entries(headFiles(workflow))) {
+      put(origin, file, text);
+    }
+    git(origin, "add", "-A");
+    git(origin, "commit", "-q", "-m", "topic");
+    const head = git(origin, "rev-parse", "HEAD");
+    git(origin, "update-ref", "refs/pull/34/head", head);
+    git(origin, "switch", "-q", "main");
+    git(origin, "branch", "-q", "-D", "topic");
+    const cloned = spawnSync("git", ["clone", "-q", "--no-local", origin, clone], { encoding: "utf8" });
+    assert.equal(cloned.status, 0, cloned.stderr);
+    const probe = spawnSync("git", ["cat-file", "-t", head], { cwd: clone, encoding: "utf8" });
+    assert.notEqual(probe.status, 0, "the clone starts without the pull head");
+    return spawnSync("bash", ["-e", "-c", body], {
+      cwd: clone,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        PATH: `${dirname(process.execPath)}:${process.env.PATH}`,
+        BASE_SHA: base,
+        HEAD_SHA: head,
+        PR_NUMBER: "34",
+        PR_AUTHOR_LOGIN: "pr-author",
+        GITHUB_REPOSITORY: "repo-owner/repo",
+        GITHUB_TOKEN: "",
+      },
+    });
+  } finally {
+    rmSync(origin, { recursive: true, force: true });
+    rmSync(clone, { recursive: true, force: true });
+  }
+}
+
+test("the workflow step reads a harmless pull from objects fetched into the base clone", () => {
+  const result = runWorkflowStep(() => ({ "server.js": "ok\n" }));
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), "ok");
+});
+
+test("a pull that disables its own workflow and checker is still refused by the base checker", () => {
+  const result = runWorkflowStep((workflow) => ({
+    ".github/workflows/protected-paths.yml": workflow.replace(
+      "    runs-on: ubuntu-latest",
+      () => "    if: ${{ false }}\n    runs-on: ubuntu-latest",
+    ),
+    "scripts/check-protected-paths.js": "process.exit(0)\n",
+  }));
+  assert.equal(result.status, 1, result.stdout);
+  assert.match(result.stderr, /\.github\/workflows\/protected-paths\.yml/);
+  assert.match(result.stderr, /scripts\/check-protected-paths\.js/);
+  assert.match(result.stderr, new RegExp(GATE_LABEL));
 });
 
 test("changing a gate file exits 1 without an owner label", () => {
