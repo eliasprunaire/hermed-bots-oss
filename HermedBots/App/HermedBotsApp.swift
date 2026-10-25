@@ -217,7 +217,6 @@ final class AppModel {
             tunnel.refuse(error as? SSHFailure ?? .invalidHost)
             return
         }
-        // le mode test ne touche pas aux réglages de l'utilisateur
         persistEndpoint()
         openTunnel(config)
     }

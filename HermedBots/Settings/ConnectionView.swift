@@ -5,7 +5,6 @@ extension SSHTunnel.State {
         switch self {
         case .idle: String(localized: "fermé")
         case .opening: String(localized: "ouverture")
-        // un port se lit sans séparateur de milliers : \(port) en mettrait un selon la langue, d'où la chaîne
         case .open: String(localized: "ouvert")
         case .reopening(let attempt): String(localized: "réouverture, essai \(attempt)")
         case .failed: String(localized: "en échec")

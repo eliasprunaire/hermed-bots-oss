@@ -1,16 +1,13 @@
 import AppSettings
 import Foundation
 
-/// Ce que l'app lit de son environnement au lancement : le magasin des clés, la cible de l'API et le tunnel SSH
 struct AppEnvironment {
     var secrets: SecretStore
     /// Adresse directe de l'API, mode test seulement, quand aucun hôte SSH n'est donné (faux serveur sans sshd)
     let baseURL: URL?
-    /// nil tant qu'aucun hôte n'est réglé : l'app n'ouvre alors aucun tunnel
     let ssh: SSHEndpoint?
     let isTestMode: Bool
     let defaults: UserDefaults
-    /// Mode test seulement : durée en ms du blocage que l'app s'inflige au départ d'un tour, pour prouver que la sonde de perf voit un blocage ; 0 sans blocage
     var testHangMilliseconds = 0
     var testProfileLocks = false
     var testResumeScope: String?
