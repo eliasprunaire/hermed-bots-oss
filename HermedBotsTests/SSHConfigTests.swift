@@ -189,6 +189,26 @@ final class SSHConfigTests: XCTestCase {
         }
     }
 
+    /// Un bloc `Match sessiontype none` ou `Match command` ne s'applique qu'à un lancement : `ssh -G` reçoit les arguments exacts de chaque lancement réel
+    func testEachSshInvocationIsResolvedWithTheArgumentsItIsLaunchedWith() throws {
+        let config = try SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refusePersoHermes: true)
+        let launched: [SSHInvocation: [String]] = [
+            .tunnel: config.arguments(localPort: 1),
+            .profileList: config.profileListArguments(),
+            .profileLocks: config.profileLocksArguments(),
+        ]
+        XCTAssertEqual(Set(launched.keys), Set(SSHInvocation.allCases))
+        for invocation in SSHInvocation.allCases {
+            XCTAssertEqual(
+                SystemSSHConfigResolver.arguments(alias: "lab.invalid", invocation: invocation),
+                ["-G", "-vv"] + launched[invocation]!,
+                "\(invocation)"
+            )
+        }
+        XCTAssertTrue(SystemSSHConfigResolver.arguments(alias: "lab.invalid", invocation: .tunnel).contains("-N"))
+        XCTAssertFalse(SystemSSHConfigResolver.arguments(alias: "lab.invalid", invocation: .profileList).contains("-N"))
+    }
+
 }
 
 @MainActor
@@ -263,6 +283,56 @@ final class SSHConnectorTests: XCTestCase {
         XCTAssertEqual(startedAfterInvalid, ["a.invalid"])
     }
 
+    private func dump(_ extra: String = "") -> SSHConfigDump {
+        SSHConfigDump(
+            stdout: "user operator\nhostname gateway.invalid\nport 22\nidentityfile /tmp/fake-id.invalid\n\(extra)",
+            stderr: "debug1: Applying options for lab.invalid\n"
+        )
+    }
+
+    func testEverySshInvocationIsDumpedAndAValidAliasOpensWithTheTunnelPreview() async {
+        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump(), .profileList: dump(), .profileLocks: dump()])
+        let connector = SSHConnector(resolver: resolver, localUser: "operator")
+        var opened: [String] = []
+        var refused: [SSHFailure] = []
+        connector.begin(alias: "lab.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        await eventually { opened == ["lab.invalid"] }
+        let asked = await resolver.asked
+        XCTAssertEqual(asked, [.tunnel, .profileList, .profileLocks])
+        XCTAssertEqual(refused, [])
+    }
+
+    /// Une route que seul un lancement voit (`Match sessiontype none` pour le tunnel, `Match command` pour les lectures) est refusée en mode test
+    func testTestModeRefusesARelayThatOnlyOneInvocationSees() async {
+        let relays: [(SSHInvocation, String)] = [
+            (.tunnel, "proxyjump perso-hermes.invalid"),
+            (.profileList, "proxycommand /usr/bin/nc bastion.invalid 22"),
+            (.profileLocks, "proxyjump bastion.invalid"),
+        ]
+        for (invocation, relay) in relays {
+            var dumps: [SSHInvocation: SSHConfigDump] = [.tunnel: dump(), .profileList: dump(), .profileLocks: dump()]
+            dumps[invocation] = dump(relay)
+            let connector = SSHConnector(resolver: ScriptedSSHResolver(dumps: dumps), localUser: "operator")
+            var opened: [String] = []
+            var refused: [SSHFailure] = []
+            connector.begin(alias: "lab.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+            await eventually { !refused.isEmpty || !opened.isEmpty }
+            XCTAssertEqual(refused, [.forbiddenHost], "\(invocation)")
+            XCTAssertEqual(opened, [], "\(invocation)")
+        }
+    }
+
+    func testOutsideTestModeARelayThatOnlyOneInvocationSeesIsAccepted() async {
+        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump(), .profileList: dump("proxycommand /usr/bin/nc bastion.invalid 22"), .profileLocks: dump()])
+        let connector = SSHConnector(resolver: resolver, localUser: "operator")
+        var opened: [String] = []
+        var refused: [SSHFailure] = []
+        connector.begin(alias: "lab.invalid", refusePersoHermes: false, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        await eventually { !refused.isEmpty || !opened.isEmpty }
+        XCTAssertEqual(opened, ["lab.invalid"])
+        XCTAssertEqual(refused, [])
+    }
+
     func testPersoHermesIsRefusedWithoutDumpingTheConfig() async {
         let resolver = GatedSSHResolver(dumps: [:])
         let connector = SSHConnector(resolver: resolver, localUser: "operator")
@@ -285,6 +355,7 @@ final class SSHConnectorTests: XCTestCase {
     }
 }
 
+/// Retient la résolution du tunnel jusqu'à `release` ; les deux autres lancements répondent tout de suite
 private actor GatedSSHResolver: SSHConfigResolving {
     private let dumps: [String: SSHConfigDump]
     private var gates: [String: CheckedContinuation<Void, Never>] = [:]
@@ -294,14 +365,31 @@ private actor GatedSSHResolver: SSHConfigResolving {
         self.dumps = dumps
     }
 
-    func dump(alias: String) async throws -> SSHConfigDump {
-        started.append(alias)
-        await withCheckedContinuation { gates[alias] = $0 }
+    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
+        if invocation == .tunnel {
+            started.append(alias)
+            await withCheckedContinuation { gates[alias] = $0 }
+        }
         return dumps[alias] ?? SSHConfigDump(stdout: "")
     }
 
     func release(_ alias: String) {
         gates[alias]?.resume()
         gates[alias] = nil
+    }
+}
+
+/// Une sortie par lancement, rendue tout de suite ; `asked` garde l'ordre des demandes
+private actor ScriptedSSHResolver: SSHConfigResolving {
+    private let dumps: [SSHInvocation: SSHConfigDump]
+    private(set) var asked: [SSHInvocation] = []
+
+    init(dumps: [SSHInvocation: SSHConfigDump]) {
+        self.dumps = dumps
+    }
+
+    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
+        asked.append(invocation)
+        return dumps[invocation] ?? SSHConfigDump(stdout: "")
     }
 }

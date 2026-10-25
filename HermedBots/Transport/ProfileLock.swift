@@ -68,8 +68,8 @@ final class ProfileLock {
     }
 
     // La commande reste fixe : aucun nom de profil ni argument utilisateur n'entre dans le shell distant
-    static var command: String { "python3 -c '" + probe.replacingOccurrences(of: "'", with: "'\\''") + "'" }
-    static let probe = #"""
+    nonisolated static var command: String { "python3 -c '" + probe.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+    nonisolated static let probe = #"""
 import json
 import os
 from pathlib import Path

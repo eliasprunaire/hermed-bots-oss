@@ -50,10 +50,10 @@ struct SSHConfigDump: Equatable, Sendable {
 }
 
 protocol SSHConfigResolving: Sendable {
-    func dump(alias: String) async throws -> SSHConfigDump
+    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump
 }
 
-/// `/usr/bin/ssh -G -vv <alias>` : stdout = config aplatie ; stderr nomme Host et Match (`match found` n'apparaît qu'à `-vv`)
+/// `/usr/bin/ssh -G -vv <arguments du lancement>` : stdout = config aplatie ; stderr nomme Host et Match (`match found` n'apparaît qu'à `-vv`)
 struct SystemSSHConfigResolver: SSHConfigResolving {
     let environment: [String: String]
 
@@ -61,12 +61,16 @@ struct SystemSSHConfigResolver: SSHConfigResolving {
         self.environment = environment
     }
 
-    func dump(alias: String) async throws -> SSHConfigDump {
+    static func arguments(alias: String, invocation: SSHInvocation) -> [String] {
+        ["-G", "-vv"] + SSHTunnelConfig.arguments(invocation, alias: alias)
+    }
+
+    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
         let output: Spawn.Output
         do {
             output = try await Spawn.run(
                 "/usr/bin/ssh",
-                ["-G", "-vv", alias],
+                Self.arguments(alias: alias, invocation: invocation),
                 environment: SSHChildEnvironment.make(environment),
                 timeout: .seconds(8),
                 stderrLimit: 65_536
@@ -371,13 +375,18 @@ final class SSHConnector {
     ) async {
         var preview: SSHConnectionPreview?
         do {
-            let dump = try await resolver.dump(alias: alias)
-            guard id == generation, !Task.isCancelled else { return }
-            let next = SSHConfig.parse(dump, alias: alias, localUser: localUser, authSock: authSock)
-            preview = next
-            let config = try SSHConnectionPlanner.config(from: next, refusePersoHermes: refusePersoHermes)
-            guard id == generation, !Task.isCancelled else { return }
-            opened(config, next)
+            var tunnel: (config: SSHTunnelConfig, preview: SSHConnectionPreview)?
+            // chaque lancement de ssh est validé avec ses propres arguments ; le tunnel (le premier) fournit l'aperçu
+            for invocation in SSHInvocation.allCases {
+                let dump = try await resolver.dump(alias: alias, invocation: invocation)
+                guard id == generation, !Task.isCancelled else { return }
+                let next = SSHConfig.parse(dump, alias: alias, localUser: localUser, authSock: authSock)
+                preview = next
+                let config = try SSHConnectionPlanner.config(from: next, refusePersoHermes: refusePersoHermes)
+                tunnel = tunnel ?? (config, next)
+            }
+            guard id == generation, !Task.isCancelled, let tunnel else { return }
+            opened(tunnel.config, tunnel.preview)
         } catch is CancellationError {
             return
         } catch {

@@ -32,6 +32,13 @@ final class SSHTunnelConfigTests: XCTestCase {
         }
     }
 
+    func testTheProfileLocksReadRunsOneFixedRemoteCommandWithNoForward() throws {
+        let args = try config().profileLocksArguments()
+        XCTAssertEqual(Array(args.suffix(2)), ["lab.invalid", ProfileLock.command])
+        for absent in ["-N", "-L", "-R", "-D", "-F", "-i", "-l", "-p"] { XCTAssertFalse(args.contains(absent), absent) }
+        XCTAssertEqual(Array(args.dropLast(2)), Array(try config().profileListArguments().dropLast(4)))
+    }
+
     func testPersoHermesIsRefusedInTestModeOnTheAliasAndOnTheResolvedHost() {
         for alias in ["perso-hermes.invalid", "PERSO-HERMES.INVALID", "perso-hermes-alias.invalid"] {
             XCTAssertThrowsError(try config(alias: alias, hostname: "gateway.invalid"), alias) { XCTAssertEqual($0 as? SSHFailure, .forbiddenHost, alias) }

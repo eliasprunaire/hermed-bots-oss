@@ -64,6 +64,14 @@ struct RemoteCommandFailure: Error, Equatable, Sendable {
     let detail: String
 }
 
+/// Les trois lancements de `/usr/bin/ssh` par l'app
+/// Un bloc `Match sessiontype none` ou `Match command …` ne vaut que pour l'un d'eux : chacun est résolu avec ses arguments
+enum SSHInvocation: CaseIterable, Sendable {
+    case tunnel
+    case profileList
+    case profileLocks
+}
+
 /// Là où le tunnel se connecte et ce qu'il redirige : un port local vers `127.0.0.1:remotePort` de l'hôte
 /// `alias` est le seul argument d'hôte passé à ssh ; `hostname` et `user` viennent de `ssh -G`
 struct SSHTunnelConfig: Equatable, Sendable {
@@ -93,15 +101,30 @@ struct SSHTunnelConfig: Equatable, Sendable {
 
     /// Les arguments de `ssh` : l'alias, jamais `-F`, `-i`, `-l` ni `-p`
     func arguments(localPort: Int) -> [String] {
-        common(["-N"]) + ["-L", "127.0.0.1:\(localPort):127.0.0.1:\(remotePort)", alias]
+        Self.arguments(.tunnel, alias: alias, localPort: localPort, remotePort: remotePort)
     }
 
     /// Les arguments de la lecture de la liste des profils (décision S6)
     func profileListArguments() -> [String] {
-        common([]) + [alias, "hermes", "profile", "list"]
+        Self.arguments(.profileList, alias: alias)
     }
 
-    private func common(_ mode: [String]) -> [String] {
+    /// Les arguments de la détection de Hermes Desktop
+    func profileLocksArguments() -> [String] {
+        Self.arguments(.profileLocks, alias: alias)
+    }
+
+    /// Une seule définition par lancement : `ssh -G` reçoit les mêmes arguments pour évaluer les mêmes blocs `Match`
+    /// Les ports ne servent qu'au tunnel ; `ssh -G` ne lie rien
+    static func arguments(_ invocation: SSHInvocation, alias: String, localPort: Int = 1, remotePort: Int = 8642) -> [String] {
+        switch invocation {
+        case .tunnel: common(["-N"]) + ["-L", "127.0.0.1:\(localPort):127.0.0.1:\(remotePort)", alias]
+        case .profileList: common([]) + [alias, "hermes", "profile", "list"]
+        case .profileLocks: common([]) + [alias, ProfileLock.command]
+        }
+    }
+
+    private static func common(_ mode: [String]) -> [String] {
         var args = mode + ["-T"]
         for option in [
             "BatchMode=yes", "ExitOnForwardFailure=yes", "ForwardAgent=no",
@@ -573,9 +596,8 @@ actor SystemSSHBackend: SSHBackend {
     func readProfileLocks(_ config: SSHTunnelConfig) async throws -> Data {
         try ensureLive()
         guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
-        let arguments = config.profileListArguments()
         let output = try await Spawn.run(
-            "/usr/bin/ssh", Array(arguments.dropLast(3)) + [ProfileLock.command],
+            "/usr/bin/ssh", config.profileLocksArguments(),
             environment: SSHChildEnvironment.make(environment),
             joining: watchdog.pid, timeout: .seconds(3)
         )
