@@ -3,7 +3,7 @@
 Guidance for coding agents working in this repository.
 
 - Read `README.md` and `docs/` before changing code. Plans live in `docs/plans/`.
-- Run `npm test` and `npm run lint` before every commit; Swift code: `swift test --package-path Packages/HermesAdapter` and the Xcode test plans.
+- Run `npm test` and `npm run lint` before every commit; Swift code: `swift test --package-path Packages/HermesAdapter --skip PerfTests` and the Xcode scheme `HermedBots` (probe classes skipped). Performance probes are a separate pass on scheme `HermedBotsPerf`, documented in `docs/perf-probes.md`.
 - Work on a branch and open a pull request against `main`; never push to `main` directly.
 - No infrastructure information in the repository, commits, issues, pull requests or comments: no local paths (`/Users/<name>`, `/home/<name>`), host names, internal domains (`*.local`), private IPs, internal ports, machine names, Apple Team ID or signing identity, personal e-mail addresses. Redact before posting (`~`/`<HOME>`, `<HOST>`, `<IP>`). The `infra-guard` workflow enforces this.
 - Evidence, raw logs and screenshots stay on the machine that produced them (see `.gitignore`); pull requests cite a redacted summary only.
