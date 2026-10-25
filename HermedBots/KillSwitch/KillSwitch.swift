@@ -1,6 +1,9 @@
 import Foundation
 import HermesAdapter
 import Observation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 struct KillSwitchAPI: Sendable {
     let baseURL: URL

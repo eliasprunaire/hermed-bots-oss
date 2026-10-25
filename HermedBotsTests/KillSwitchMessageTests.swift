@@ -6,7 +6,7 @@ final class KillSwitchMessageTests: XCTestCase {
     private let endpoint = KillSwitchAPI(baseURL: URL(string: "http://hermes.invalid")!, apiKey: nil)
     private let runs = (0..<3).map { KillSwitch.Run(profile: "p\($0)", id: "r\($0)") }
 
-    func testRestHasNoCaption() {
+    func testRestHasNoCaption() async {
         let model = KillSwitch(
             endpoint: { self.endpoint },
             connection: { "test" },
@@ -17,7 +17,7 @@ final class KillSwitchMessageTests: XCTestCase {
         XCTAssertEqual(model.message, "")
     }
 
-    func testAMissingEndpointAtRestHasNoCaption() {
+    func testAMissingEndpointAtRestHasNoCaption() async {
         let model = KillSwitch(
             endpoint: { nil },
             connection: { "test" },
@@ -285,6 +285,8 @@ final class KillSwitchMessageTests: XCTestCase {
         var host = "A"
         let shared = KillSwitch.Run(profile: "p", id: "r0")
         var sent: [String] = []
+        let firstSend = Handshake()
+        let proceed = Handshake()
         let model = KillSwitch(
             endpoint: { self.endpoint },
             connection: { host },
@@ -292,20 +294,19 @@ final class KillSwitchMessageTests: XCTestCase {
             profiles: { ["p"] },
             confirmed: { _, _, _ in },
             cancel: { _, _, allow in
-                while true {
-                    guard allow() else { throw URLError(.cancelled) }
-                    sent.append(host)
-                    try await Task.sleep(for: .milliseconds(10))
-                }
+                guard allow() else { throw URLError(.cancelled) }
+                sent.append(host)
+                firstSend.signal()
+                await proceed.wait()
+                guard allow() else { throw URLError(.cancelled) }
+                sent.append(host)
+                return "cancelled"
             }
         )
         let stopping = Task { await model.stopAll() }
-        let deadline = ContinuousClock.now + .seconds(2)
-        while sent.isEmpty, ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(10))
-        }
-        XCTAssertEqual(sent, ["A"])
+        await firstSend.wait()
         host = "B"
+        proceed.signal()
         await stopping.value
         XCTAssertFalse(sent.contains("B"))
         XCTAssertEqual(model.message, "")
@@ -440,6 +441,33 @@ final class KillSwitchMessageTests: XCTestCase {
         XCTAssertEqual(model.message, "")
     }
 
+    func testCancellingANewerStartDoesNotClearAnOlderUnconfirmedStart() async {
+        var starting = ["old"]
+        var runsA: [KillSwitch.Run] = []
+        var cancelled: [String] = []
+        let model = KillSwitch(
+            endpoint: { self.endpoint },
+            connection: { "A" },
+            runs: { runsA },
+            profiles: { ["pA"] },
+            confirmed: { _, _, _ in },
+            pending: { starting },
+            startWait: .milliseconds(50),
+            cancel: { _, run, _ in
+                cancelled.append(run.id)
+                return "cancelled"
+            }
+        )
+        await model.stopAll()
+        XCTAssertEqual(cancelled, [])
+        XCTAssertEqual(model.message, hint)
+        starting = []
+        runsA = [KillSwitch.Run(profile: "pA", id: "late", turn: "new")]
+        await model.stopAll()
+        XCTAssertEqual(cancelled, ["late"])
+        XCTAssertEqual(model.message, hint)
+    }
+
     func testAnEmptyClickDoesNotClearAFailedStop() async {
         var targets = runs
         let model = KillSwitch(
@@ -475,5 +503,30 @@ final class KillSwitchMessageTests: XCTestCase {
         failing = false
         await model.stopAll()
         XCTAssertEqual(model.message, "")
+    }
+}
+
+@MainActor
+private final class Handshake {
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+    private var signaled = false
+
+    func signal() {
+        signaled = true
+        let pending = waiting
+        waiting.removeAll()
+        for continuation in pending { continuation.resume() }
+    }
+
+    func wait() async {
+        await withCheckedContinuation { continuation in
+            MainActor.assumeIsolated {
+                if signaled {
+                    continuation.resume()
+                } else {
+                    waiting.append(continuation)
+                }
+            }
+        }
     }
 }

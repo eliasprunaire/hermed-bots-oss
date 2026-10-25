@@ -58,16 +58,12 @@ final class ConversationModel {
     private let onAPIRecovered: @MainActor () -> Void
     private var activeRuns: [String: [KillSwitch.Run: ConversationMachine.Key]] = [:]
     var stopInProgress = false
-    // un id par tour qui démarre : le fil non créé change de clé à la création de sa session, l'id le suit jusqu'au run
-    // shortcut: l'id d'un démarrage échoué reste sur son fil et un tour suivant du même fil le reprend, purger si cela compte
     private var startIDs: [RunKey: String] = [:]
     func startingTurns() -> [String] {
         let host = connection()
         return machine.threads.compactMap { key, thread in
             guard thread.step == .sending, thread.run == nil else { return nil }
-            let id = RunKey(connection: host, thread: key)
-            if startIDs[id] == nil { startIDs[id] = UUID().uuidString }
-            return startIDs[id]
+            return startIDs[RunKey(connection: host, thread: key)]
         }
     }
     var runningTurns: [KillSwitch.Run] {
@@ -290,7 +286,12 @@ final class ConversationModel {
         guard canSend else { return }
         let text = draft
         draft = ""
-        apply(.send(text), on: connection())
+        let host = connection()
+        apply(.send(text), on: host)
+        guard let key = machines[host]?.screen,
+              machines[host]?.threads[key]?.step == .sending,
+              machines[host]?.threads[key]?.run == nil else { return }
+        startIDs[RunKey(connection: host, thread: key)] = UUID().uuidString
     }
 
     /// « Nouvelle session » : un fil vide chez Hermes (`new_session`, S4), jamais `/reset` ; l'ancien fil reste dans la liste des fils passés

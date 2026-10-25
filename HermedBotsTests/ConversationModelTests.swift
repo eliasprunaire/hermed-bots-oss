@@ -398,6 +398,29 @@ final class ConversationModelTests: XCTestCase {
         await eventually("transcript relu") { !model.isLoading }
     }
 
+    func testTwoStartAttemptsKeepDistinctIdsAndOnlyTheConfirmedAttemptBindsTheRun() async throws {
+        let model = makeModel()
+        try await openEmptyThread(model, session: "thread")
+        model.draft = "first"
+        model.send()
+        let firstStart = try await held(1, "POST", "/v1/runs")
+        let first = try XCTUnwrap(model.startingTurns().first)
+        firstStart.reply(#"{"error":"hv"}"#, status: 500)
+        await eventually("échec affiché") { model.conversation.failure != nil }
+        model.draft = "again"
+        model.send()
+        let secondStart = try await held(2, "POST", "/v1/runs")
+        let second = try XCTUnwrap(model.startingTurns().first)
+        XCTAssertNotEqual(first, second)
+        secondStart.reply(#"{"run_id":"r2"}"#)
+        await eventually("run suivi") { !model.runningTurns.isEmpty }
+        XCTAssertEqual(model.startingTurns(), [])
+        XCTAssertEqual(model.runningTurns.map(\.turn), [second])
+        try await held(3, "GET", "/v1/runs/r2/events").reply(completedTurn("réponse"))
+        try await held(4, "GET", "/api/sessions/thread/messages").reply(transcript((1, "user", "again"), (2, "assistant", "réponse")))
+        await eventually("transcript relu") { !model.isLoading }
+    }
+
     func testANewSessionStartedWhileTheFirstSendCreatesItsThreadLeavesTheMessageInThatThread() async throws {
         let model = makeModel()
         model.select(bot: bot)
