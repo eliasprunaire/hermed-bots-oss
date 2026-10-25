@@ -160,6 +160,7 @@ enum SSHConfig {
     }
 
     /// Un alias est inconnu seulement s'il n'a pas de bloc Host/Match (stderr de `ssh -G -vv`) et que `ssh -G` reste aux valeurs standard
+    /// Une config sans aucune ligne « Applying options for » (fichier vide, ou seuls d'autres alias) ne couvre pas l'alias : il est inconnu
     /// Un bloc Host ou Match qui ne change aucune valeur reste un alias valide
     static func isUnknownAlias(
         alias: String,
@@ -181,8 +182,7 @@ enum SSHConfig {
         if let proxyCommand, !isNone(proxyCommand) { return false }
         if !certificates.isEmpty { return false }
         if let agent, !isNone(agent), agent != "SSH_AUTH_SOCK" { return false }
-        guard identityFiles.allSatisfy({ defaultIdentityNames.contains(URL(fileURLWithPath: $0).lastPathComponent) }) else { return false }
-        return debug.contains("Applying options for")
+        return identityFiles.allSatisfy { defaultIdentityNames.contains(URL(fileURLWithPath: $0).lastPathComponent) }
     }
 
     /// `debug2: checking match for 'host …' originally <alias>` puis `match found` (`-vv`)
@@ -302,6 +302,8 @@ enum SSHConfig {
 
 enum SSHConnectionPlanner {
     static func config(from preview: SSHConnectionPreview, refusePersoHermes: Bool, remotePort: Int = 8642) throws -> SSHTunnelConfig {
+        // un saut est un hôte que son nom ne permet pas de valider (un alias peut mener à perso-hermes) : le mode test n'en accepte aucun
+        if refusePersoHermes, preview.jumpCount > 0 || preview.proxyCommand != nil { throw SSHFailure.forbiddenHost }
         let config = try SSHTunnelConfig(
             alias: preview.alias,
             hostname: preview.hostname,

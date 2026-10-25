@@ -48,7 +48,7 @@ A key protected by a passphrase failed at step 2 in 0.01 s (`rc=1`, `Enter passp
 
 The app launches `/usr/bin/ssh` with the user's alias and the default user config. It does not start `ssh-agent`, does not run `ssh-add`, does not write `key.pub`, and does not keep a temporary `known_hosts`. Identity comes from the session `SSH_AUTH_SOCK` and from `IdentityAgent` in the user's config. Arguments force `ForkAfterAuthentication=no` and `LogLevel=ERROR`.
 
-Resolution uses `/usr/bin/ssh -G -vv <alias>`. Test mode refuses `perso-hermes` on the typed alias, the resolved host, ProxyJump hops and ProxyCommand, before any tunnel `ssh`.
+Resolution uses `/usr/bin/ssh -G -vv <alias>`. Test mode refuses `perso-hermes` on the typed alias, before any `ssh`. It refuses it on the resolved host and refuses any ProxyJump or ProxyCommand, before the tunnel `ssh`. The name of a hop does not prove where the hop leads: an alias can lead to `perso-hermes`.
 
 ## The forward
 

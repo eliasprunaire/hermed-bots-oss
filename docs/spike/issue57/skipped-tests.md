@@ -62,10 +62,10 @@ Les proxies spécialisés ne partagent pas le même serveur HTTP que la suite or
 | `SixActions/testWithoutNamesTheRowsShowTheProfileIdAndTheThreadsShowTheirId` | Réactivé | Le test configure sa fixture, puis rétablit la configuration après son exécution. |
 | `TunnelTests/testAHostThatNamesPersoHermesIsRefusedBeforeAnyConnection` | Maintenu | Ces tests exigent un sshd, des clés SSH éphémères et un échantillonneur de processus. Lane HD07 dédiée. |
 | `TunnelTests/testAPersoHermesHostInTheEnvironmentNeverStartsSsh` | Réactivé | Le refus intervient avant SSH. Aucun sshd n’est nécessaire. |
-| `TunnelTests/testAWrongKeyShowsOneClearMessageAndStopsWithoutARetryLoop` | Maintenu | Ces tests exigent un sshd, des clés SSH éphémères et un échantillonneur de processus. Lane HD07 dédiée. |
+| `TunnelTests/testARefusedIdentityShowsOneClearMessageAndStopsWithoutARetryLoop` | Maintenu | Ce test exige un sshd, un alias dont l’identité est refusée (`HV_SSH_REFUSED=1`) et un échantillonneur de processus. Lane HD07 dédiée. |
 | `TunnelTests/testQuittingWithCommandQClosesTheAppAndItsTunnel` | Maintenu | Ces tests exigent un sshd, des clés SSH éphémères et un échantillonneur de processus. Lane HD07 dédiée. |
 | `TunnelTests/testTerminateClosesTheAppAndItsTunnel` | Maintenu | Ces tests exigent un sshd, des clés SSH éphémères et un échantillonneur de processus. Lane HD07 dédiée. |
-| `TunnelTests/testTheConnectionViewShowsTheHostAndTheKeyStateButNeverTheKey` | Maintenu | Ces tests exigent un sshd, des clés SSH éphémères et un échantillonneur de processus. Lane HD07 dédiée. |
+| `TunnelTests/testTheConnectionViewShowsTheAliasAndDerivedFieldsButNeverASecret` | Maintenu | Ces tests exigent un sshd, des clés SSH éphémères et un échantillonneur de processus. Lane HD07 dédiée. |
 | `TunnelTests/testTheVersionComesThroughTheTunnelNotThroughTheDirectPort` | Maintenu | Ces tests exigent un sshd, des clés SSH éphémères et un échantillonneur de processus. Lane HD07 dédiée. |
 
 Le test `LiveTunnel/testRealTestProfilesThroughTheVMTunnel` reste réservé à `hv-vm-ui.py`.

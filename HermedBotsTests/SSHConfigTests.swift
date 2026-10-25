@@ -152,6 +152,43 @@ final class SSHConfigTests: XCTestCase {
         }
     }
 
+    /// `ssh -G -vv -F /dev/null nom` n'écrit aucune ligne « Applying options for » : aucun bloc ne couvre l'alias
+    func testAnAliasWithNoApplyingOptionsLineAtAllIsUnknown() {
+        let noBlockDebug = "debug1: Reading configuration data /dev/null\n"
+        for debug in [noBlockDebug, ""] {
+            let preview = parse(defaultDump, alias: "unknown-alias.invalid", debug: debug)
+            XCTAssertTrue(preview.isUnknownAlias, debug)
+            XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
+                XCTAssertEqual($0 as? SSHFailure, .unknownAlias)
+            }
+        }
+    }
+
+    /// Un saut est un hôte que l'app ne sait pas valider par son nom (il peut être un alias qui mène à perso-hermes) : le mode test refuse tout relais
+    func testTestModeRefusesAnyProxyJumpOrProxyCommand() {
+        let relays = [
+            "proxyjump bastion.invalid",
+            "proxyjump operator@bastion.invalid:2222,second.invalid",
+            "proxyjump perso-hermes.invalid",
+            "proxycommand /usr/bin/nc bastion.invalid 22",
+            "proxycommand /usr/bin/ssh -W %h:%p perso-hermes.invalid",
+        ]
+        for relay in relays {
+            let dump = """
+                user operator
+                hostname gateway.invalid
+                port 22
+                identityfile /tmp/fake-id.invalid
+                \(relay)
+                """
+            let preview = parse(dump, alias: "lab.invalid", debug: matchedDebug("lab.invalid"))
+            XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true), relay) {
+                XCTAssertEqual($0 as? SSHFailure, .forbiddenHost, relay)
+            }
+            XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: false), relay)
+        }
+    }
+
 }
 
 @MainActor
