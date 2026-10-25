@@ -31,6 +31,17 @@ const { spawnSync } = require("node:child_process");
 
 const PROOF = "scripts/sparkle-update-proof.sh";
 
+test("the live proof starts a user-driven Sparkle check before it waits for the feed", () => {
+  const source = fs.readFileSync(PROOF, "utf8");
+  assert.match(source, /request_user_check/);
+  assert.match(source, /whose name contains "mises"/);
+  const pass = source.slice(source.indexOf("pass() {"));
+  assert.ok(pass.indexOf("request_user_check") < pass.indexOf("requested appcast.xml"));
+  const published = source.slice(0, source.indexOf("if [ \"$mode\" = published ]"));
+  assert.ok(published.includes("request_user_check"));
+  assert.ok(published.indexOf("request_user_check") < published.lastIndexOf("sparkle_progress"));
+});
+
 test("the update proof is valid shell and never expands the production signing key", () => {
   const syntax = spawnSync("bash", ["-n", PROOF], { encoding: "utf8" });
   assert.equal(syntax.status, 0, syntax.stderr);
