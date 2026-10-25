@@ -240,6 +240,15 @@ function harvestShas(raw, set) {
   }
 }
 
+// referenced, closed and merged events also carry a commit_id, from any branch or repo
+const MEMBERSHIP_EVENTS = new Set(["committed", "head_ref_force_pushed"]);
+
+function harvestTimelineShas(raw, set) {
+  if (raw != null && typeof raw === "object" && MEMBERSHIP_EVENTS.has(raw.event)) {
+    harvestShas(raw, set);
+  }
+}
+
 function shaSet(value) {
   const out = new Set();
   if (value == null) {
@@ -669,7 +678,9 @@ function fetchCommit(io, sha) {
   if (!hasOrigin(io)) {
     return false;
   }
-  gitRun(io, ["fetch", "--no-tags", "--depth=1", "origin", sha]);
+  // no --depth: a cut history leaves merge-base without a common ancestor
+  // shortcut: a shallow clone whose base moved past the fork point still fails, the workflow uses fetch-depth 0
+  gitRun(io, ["fetch", "--no-tags", "origin", sha]);
   return hasCommit(io, sha);
 }
 
@@ -734,7 +745,7 @@ async function loadHistoryShas(io, token, owner, repo, number) {
     );
     for (const page of timelinePages) {
       for (const raw of page) {
-        harvestShas(raw, shas);
+        harvestTimelineShas(raw, shas);
       }
     }
   } catch {

@@ -1039,6 +1039,7 @@ async function gateOnReplay({
   body,
   commits,
   force,
+  timeline = [],
   extraComments = [],
 }) {
   const { io, posts, stderr } = harness({
@@ -1063,11 +1064,14 @@ async function gateOnReplay({
     ],
     routes: {
       commits: commits.map((sha) => ({ sha })),
-      timeline: force.map(([before, after]) => ({
-        event: "head_ref_force_pushed",
-        commit_id: after,
-        before,
-      })),
+      timeline: [
+        ...force.map(([before, after]) => ({
+          event: "head_ref_force_pushed",
+          commit_id: after,
+          before,
+        })),
+        ...timeline,
+      ],
       graphql: historyPayload({ commits, force }),
     },
   });
@@ -1405,6 +1409,89 @@ test("main refuses an ancestor of the head that never appears on the pull timeli
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("main refuses a SHA that only a referenced or closed timeline event names", async () => {
+  const repo = featureRepo();
+  try {
+    for (const event of ["referenced", "closed", "merged"]) {
+      const { code, posts } = await gateOnReplay({
+        ...repo,
+        body: marked("PASS", repo.sha1),
+        commits: [repo.sha2],
+        force: [],
+        timeline: [{ event, commit_id: repo.sha1 }],
+      });
+      assert.equal(code, 0);
+      assert.equal(posts[0].body.state, "failure", event);
+      assert.equal(
+        posts[0].body.description,
+        `VERDICT PASS @ ${repo.sha1} is not on this pull`,
+        event,
+      );
+    }
+  } finally {
+    rmSync(repo.dir, { recursive: true, force: true });
+  }
+});
+
+test("main accepts a SHA that a committed timeline event names", async () => {
+  const repo = featureRepo();
+  try {
+    const { code, posts } = await gateOnReplay({
+      ...repo,
+      body: marked("PASS", repo.sha1),
+      commits: [repo.sha2],
+      force: [],
+      timeline: [{ event: "committed", sha: repo.sha1 }],
+    });
+    assert.equal(code, 0);
+    assert.equal(posts[0].body.state, "success");
+    assert.equal(
+      posts[0].body.description,
+      `VERDICT PASS @ ${repo.sha1} pid ${repo.patchId}`,
+    );
+  } finally {
+    rmSync(repo.dir, { recursive: true, force: true });
+  }
+});
+
+test("main fetches the old head with its ancestors into a fresh clone", async () => {
+  const repo = featureRepo();
+  const cloneDir = mkdtempSync(join(tmpdir(), "verdict-gate-clone-"));
+  try {
+    assert.equal(
+      repo.git(["config", "uploadpack.allowAnySHA1InWant", "true"]).status,
+      0,
+    );
+    const clone = spawnSync(
+      "git",
+      ["clone", "-q", "--no-local", repo.dir, cloneDir],
+      { encoding: "utf8" },
+    );
+    assert.equal(clone.status, 0);
+    const probe = spawnSync("git", ["cat-file", "-t", repo.sha1], {
+      cwd: cloneDir,
+      encoding: "utf8",
+    });
+    assert.notEqual(probe.status, 0);
+    const { code, posts } = await gateOnReplay({
+      ...repo,
+      dir: cloneDir,
+      body: marked("PASS", repo.sha1),
+      commits: [repo.sha1, repo.sha2],
+      force: [[repo.sha1, repo.sha2]],
+    });
+    assert.equal(code, 0);
+    assert.equal(posts[0].body.state, "success");
+    assert.equal(
+      posts[0].body.description,
+      `VERDICT PASS @ ${repo.sha1} pid ${repo.patchId}`,
+    );
+  } finally {
+    rmSync(repo.dir, { recursive: true, force: true });
+    rmSync(cloneDir, { recursive: true, force: true });
   }
 });
 
