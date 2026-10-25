@@ -72,11 +72,9 @@ final class TunnelTests: XCTestCase {
         let expected = try XCTUnwrap(directVersion(), "HV_API_URL absent ou /health illisible")
         XCTAssertEqual(shown, expected)
         openConnection(app)
-        let state = wait(for: .connectionTunnelState, in: app, toContain: "127.0.0.1:")
-        XCTAssertTrue(state.contains("ouvert sur 127.0.0.1:"), state)
-        // le port local est pris au hasard par l'app : il ne peut pas être le port publié du conteneur
-        XCTAssertFalse(state.contains(":18642"), state)
-        XCTAssertNotNil(state.wholeMatch(of: /ouvert sur 127\.0\.0\.1:\d+/), "le port doit se lire sans séparateur de milliers : \(state)")
+        let state = wait(for: .connectionTunnelState, in: app, toContain: "ouvert")
+        XCTAssertTrue(state.contains("ouvert"), state)
+        XCTAssertFalse(state.contains("127.0.0.1"), state)
         print("HV-TUNNEL version=\(shown) direct=\(expected) tunnel-state=\(state)")
         HVShot.capture("hd07-tunnel", app)
     }

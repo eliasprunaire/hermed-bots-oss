@@ -194,7 +194,7 @@ La recette de développement reste limitée à `hv-hermes-test`.
 Aucune commande de cette PR ne se connecte à la production.
 
 1. Faire provisionner la clé SSH dans le Trousseau par l'administrateur de la connexion.
-2. Ouvrir **Connexion** dans l'app.
+2. Ouvrir **Réglages**, onglet **Connexion**.
 3. Saisir l'hôte et l'utilisateur SSH de production.
 4. Cliquer sur **Connecter**.
 5. Choisir chaque profil dans **Clé API par profil**.

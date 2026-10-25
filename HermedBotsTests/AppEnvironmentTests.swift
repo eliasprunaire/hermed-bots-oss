@@ -1,3 +1,4 @@
+import AppSettings
 import XCTest
 
 // compilé dans le paquet de tests lui-même, sans l'app comme hôte : lancer ces tests ne démarre pas l'app, donc ne lit jamais le Trousseau

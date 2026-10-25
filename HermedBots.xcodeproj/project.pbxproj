@@ -29,6 +29,8 @@
 		F16400000000000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = F16400000000000000000003 /* Sparkle */; };
 		F12300000000000000000001 /* UpdateCheck in Frameworks */ = {isa = PBXBuildFile; productRef = F12300000000000000000003 /* UpdateCheck */; };
 		F12300000000000000000002 /* UpdateCheck in Frameworks */ = {isa = PBXBuildFile; productRef = F12300000000000000000004 /* UpdateCheck */; };
+		F12500000000000000000001 /* AppSettings in Frameworks */ = {isa = PBXBuildFile; productRef = F12500000000000000000003 /* AppSettings */; };
+		F12500000000000000000002 /* AppSettings in Frameworks */ = {isa = PBXBuildFile; productRef = F12500000000000000000004 /* AppSettings */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -100,6 +102,7 @@
 				7BE33CD3E32FF1AAFD5E4768 /* HermesAdapter in Frameworks */,
 				F12100000000000000000001 /* LoopGuard in Frameworks */,
 				F12300000000000000000001 /* UpdateCheck in Frameworks */,
+				F12500000000000000000001 /* AppSettings in Frameworks */,
 				F16400000000000000000001 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -111,6 +114,7 @@
 				7BE33CD3E32FF1AAFD5E4769 /* HermesAdapter in Frameworks */,
 				F12100000000000000000002 /* LoopGuard in Frameworks */,
 				F12300000000000000000002 /* UpdateCheck in Frameworks */,
+				F12500000000000000000002 /* AppSettings in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -245,6 +249,7 @@
 				DA4C1C94CD32735911D411BC /* HermesAdapter */,
 				F12100000000000000000003 /* LoopGuard */,
 				F12300000000000000000003 /* UpdateCheck */,
+				F12500000000000000000003 /* AppSettings */,
 				F16400000000000000000003 /* Sparkle */,
 			);
 			productName = HermedBots;
@@ -293,6 +298,7 @@
 				DA4C1C94CD32735911D411BD /* HermesAdapter */,
 				F12100000000000000000004 /* LoopGuard */,
 				F12300000000000000000004 /* UpdateCheck */,
+				F12500000000000000000004 /* AppSettings */,
 			);
 			productName = HermedBotsTests;
 			productReference = 09F93F8C10FA034CD23BDE16 /* HermedBotsTests.xctest */;
@@ -730,6 +736,8 @@
 		F12100000000000000000004 /* LoopGuard */ = {isa = XCSwiftPackageProductDependency; productName = LoopGuard; };
 		F12300000000000000000003 /* UpdateCheck */ = {isa = XCSwiftPackageProductDependency; productName = UpdateCheck; };
 		F12300000000000000000004 /* UpdateCheck */ = {isa = XCSwiftPackageProductDependency; productName = UpdateCheck; };
+		F12500000000000000000003 /* AppSettings */ = {isa = XCSwiftPackageProductDependency; productName = AppSettings; };
+		F12500000000000000000004 /* AppSettings */ = {isa = XCSwiftPackageProductDependency; productName = AppSettings; };
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 359EED06494E38FF40D27457 /* Project object */;

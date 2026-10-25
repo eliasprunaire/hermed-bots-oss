@@ -6,7 +6,7 @@ extension SSHTunnel.State {
         case .idle: String(localized: "fermé")
         case .opening: String(localized: "ouverture")
         // un port se lit sans séparateur de milliers : \(port) en mettrait un selon la langue, d'où la chaîne
-        case .open(let port): String(localized: "ouvert sur 127.0.0.1:\(String(port))")
+        case .open: String(localized: "ouvert")
         case .reopening(let attempt): String(localized: "réouverture, essai \(attempt)")
         case .failed: String(localized: "en échec")
         }
@@ -77,14 +77,13 @@ struct ConnectionView: View {
                     .accessibilityID(.connectionAPISave)
                     Text(verbatim: apiStatus).accessibilityID(.connectionAPIStatus)
                 }
-                Button("Rechercher les mises à jour…") { model.checkForUpdates() }
-                    .disabled(!model.canCheckForUpdates)
-                    .accessibilityID(.updatesCheck)
                 if let message = model.tunnel.state.failureMessage {
                     Text(message).foregroundStyle(.red).accessibilityID(.connectionMessage)
                 }
             }
             .formStyle(.grouped)
+            .onChange(of: model.host) { model.persistEndpoint() }
+            .onChange(of: model.user) { model.persistEndpoint() }
             HStack {
                 Button("Tester la connexion") { Task { await model.refreshVersion() } }.accessibilityID(.connectionCheck)
                 Spacer()
