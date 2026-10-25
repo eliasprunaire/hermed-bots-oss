@@ -24,7 +24,7 @@ swift test --package-path Packages/HermesAdapter --skip PerfTests
 
 ## XCUITest probes
 
-The shared scheme skips `ApprovalPerfProbe`, `BannerPerfProbe`, `BotsPerfProbe`, `ColdLaunchProbe`, `ConversationPerfProbe`, and `ModelPerfProbe`. It also skips `ConcurrencyTests/testPerfFiveHolds`, `ConcurrencyTests/testPerfOneHold`, and `KillSwitchTests/testPerfFiveStops`.
+The shared scheme skips `ApprovalPerfProbe`, `BannerPerfProbe`, `BotsPerfProbe`, `ColdLaunchProbe`, `ConversationPerfProbe`, and `ModelPerfProbe`. It also skips `ConcurrencyTests/testPerfFiveHolds`, `ConcurrencyTests/testPerfOneHold`, `KillSwitchTests/testPerfFiveStops`, and `LaunchTests/testColdLaunchToVersionVisibleStaysUnderTwoSeconds`.
 
 Select one class with `-only-testing`. Example:
 

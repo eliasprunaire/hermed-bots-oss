@@ -28,6 +28,7 @@ const PERF_METHODS = [
   "ConcurrencyTests/testPerfFiveHolds",
   "ConcurrencyTests/testPerfOneHold",
   "KillSwitchTests/testPerfFiveStops",
+  "LaunchTests/testColdLaunchToVersionVisibleStaysUnderTwoSeconds",
 ];
 
 function skippedIdentifiers(xml) {
@@ -74,4 +75,5 @@ test("the how-to names both the skip and the filter", () => {
   for (const id of PROBES) {
     assert.match(DOCS, new RegExp(id));
   }
+  assert.match(DOCS, /LaunchTests\/testColdLaunchToVersionVisibleStaysUnderTwoSeconds/);
 });

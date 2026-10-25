@@ -88,6 +88,9 @@
                <Test
                   Identifier = "KillSwitchTests/testPerfFiveStops">
                </Test>
+               <Test
+                  Identifier = "LaunchTests/testColdLaunchToVersionVisibleStaysUnderTwoSeconds">
+               </Test>
             </SkippedTests>
          </TestableReference>
       </Testables>
