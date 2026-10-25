@@ -279,6 +279,10 @@ final class SSHConfigTests: XCTestCase {
             "proxyjump -",
             "proxyjump ssh://jump-alias.invalid,second.invalid",
             "proxyjump blocked@jump-alias.invalid",
+            // OpenSSH ne lit `none` seul que comme valeur entière : dans une liste, c'est le nom d'un saut
+            "proxyjump none,none",
+            "proxyjump NONE,NONE",
+            "proxyjump none,bastion.invalid",
             "proxycommand /usr/bin/nc bastion.invalid 22",
             "proxycommand /usr/bin/ssh -W %h:%p perso-hermes.invalid",
             "proxycommand true",

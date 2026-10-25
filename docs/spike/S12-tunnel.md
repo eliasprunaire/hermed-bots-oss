@@ -58,7 +58,7 @@ The app does not interpret SSH config criteria. It refuses what it cannot read w
 
 The real `ssh -G -vv -F` runs these rules in `RealSshConfigTests`: every form of `Match`, a `Match` in an included file or after another `Host`, a config cut at the limit, an unresolved `Include`, a config `ssh` cannot parse.
 
-The app refuses any alias whose resolved config holds a ProxyJump or a ProxyCommand, in every mode, before the tunnel `ssh`. The value does not matter, and any one of the three launches is enough to refuse. Only `none`, which removes an inherited relay, is not a relay. The name of a hop does not prove where the hop leads: an alias can lead to `perso-hermes`. The message tells the user to use an alias that connects directly.
+The app refuses any alias whose resolved config holds a ProxyJump or a ProxyCommand, in every mode, before the tunnel `ssh`. The value does not matter, and any one of the three launches is enough to refuse. Only `none` as the whole value, which removes an inherited relay, is not a relay. `none,none` is a list of two hops named `none`, so it is refused. The name of a hop does not prove where the hop leads: an alias can lead to `perso-hermes`. The message tells the user to use an alias that connects directly.
 
 Test mode also refuses `perso-hermes` on the typed alias, before any `ssh`, and on the resolved host of each launch.
 

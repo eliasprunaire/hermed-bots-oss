@@ -119,7 +119,7 @@ enum SSHConfig {
         let hostname = first(values["hostname"]) ?? alias
         let user = first(values["user"]) ?? localUser
         let port = Int(first(values["port"]) ?? "") ?? 22
-        // `none` supprime un relais hérité : toute autre valeur de ProxyJump ou de ProxyCommand est un relais
+        // `none` entier supprime un relais hérité ; `none,none` est une liste de sauts et reste un relais
         let hasRelay = ["proxyjump", "proxycommand"].contains { first(values[$0]).map { !isNone($0) } ?? false }
         let certificates = (values["certificatefile"] ?? []).filter { !isNone($0) }
         let identityFiles = values["identityfile"] ?? []
