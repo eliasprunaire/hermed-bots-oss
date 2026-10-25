@@ -47,6 +47,8 @@ final class AppEnvironmentTests: XCTestCase {
         XCTAssertEqual(try store.apiKey(profile: "cyber"), "replacement-test-key")
         XCTAssertEqual(try store.apiKey(profile: "ia"), "ia-test-key")
         XCTAssertEqual(try store.apiKey(profile: "default"), "default-test-key")
+        XCTAssertEqual(try store.resolvedAPIKey(profile: "missing"), "default-test-key")
+        XCTAssertEqual(try store.resolvedAPIKey(profile: "cyber"), "replacement-test-key")
     }
 
     func testTestModeLoadsDistinctProfileKeysWithoutTheKeychain() throws {

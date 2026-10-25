@@ -25,13 +25,10 @@ extension SSHTunnel.State {
     }
 }
 
-/// L'alias du tunnel et les champs déduits de `ssh -G` ; aucun secret
+/// L'alias du tunnel et les champs déduits de `ssh -G` ; aucun secret, aucune saisie de clé API
 struct ConnectionView: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    @State private var apiProfile = "default"
-    @State private var apiKey = ""
-    @State private var apiStatus = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -54,30 +51,6 @@ struct ConnectionView: View {
                 }
                 LabeledContent("Tunnel") { Text(model.tunnel.state.label).accessibilityID(.connectionTunnelState) }
                 LabeledContent("Version de Hermes") { model.version.text.accessibilityID(.connectionVersion) }
-                Section("Clé API par profil") {
-                    Picker("Profil", selection: $apiProfile) {
-                        ForEach(Array(Set(["default"] + (model.bots.list.shown ?? []).map(\.id))).sorted(), id: \.self) { profile in
-                            Text(verbatim: profile).tag(profile)
-                        }
-                    }
-                    .accessibilityID(.connectionAPIProfile)
-                    .onChange(of: apiProfile) { apiKey = ""; apiStatus = "" }
-                    SecureField("Nouvelle clé API", text: $apiKey).accessibilityID(.connectionAPIKey)
-                    Button("Enregistrer la clé") {
-                        do {
-                            try model.saveAPIKey(apiKey, profile: apiProfile)
-                            apiKey = ""
-                            apiStatus = String(localized: "Clé enregistrée.")
-                            Task { await model.retryAPI() }
-                        } catch {
-                            apiKey = ""
-                            apiStatus = String(localized: "La clé n’a pas pu être enregistrée.")
-                        }
-                    }
-                    .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityID(.connectionAPISave)
-                    Text(verbatim: apiStatus).accessibilityID(.connectionAPIStatus)
-                }
                 if let message = model.tunnel.state.failureMessage {
                     Text(message).foregroundStyle(.red).accessibilityID(.connectionMessage)
                 }

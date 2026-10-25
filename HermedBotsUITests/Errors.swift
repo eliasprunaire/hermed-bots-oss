@@ -26,7 +26,7 @@ final class Errors: HD12Harness {
         let start = Date().timeIntervalSince1970
         let app = launch(wrongKey: true)
         XCTAssertTrue(element("hd.banner.error").waitForExistence(timeout: 10))
-        XCTAssertTrue(text("hd.banner.error").contains("clé"))
+        XCTAssertTrue(text("hd.banner.error").localizedCaseInsensitiveContains("clé"))
         sleep(3)
         let attempts = request("/_hv/log").filter { ($0["s"] as? Int) == 401 && ($0["t"] as? Double ?? 0) >= start }
         XCTAssertEqual(attempts.count, 1)

@@ -197,10 +197,7 @@ Aucune commande de cette PR ne se connecte à la production.
 2. Ouvrir **Réglages**, onglet **Connexion**.
 3. Saisir uniquement l'alias SSH. L'app lit hôte, utilisateur, port et identité via `ssh -G`.
 4. Cliquer sur **Connecter**.
-5. Choisir chaque profil dans **Clé API par profil**.
-6. Saisir sa clé dans **Nouvelle clé API**.
-7. Cliquer sur **Enregistrer la clé**.
-8. Contrôler la liste des bots et la version Hermes affichée.
+5. Contrôler la liste des bots et la version Hermes affichée. L'app lit `API_SERVER_KEY` toute seule par SSH ; il n'y a aucune saisie de clé API.
 
 L'app ne lit plus de clé privée SSH dans le Trousseau.
 Elle lance `/usr/bin/ssh` avec l'alias et la config de l'utilisateur, sans `-F /dev/null` et sans agent privé.

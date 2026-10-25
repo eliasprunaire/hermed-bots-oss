@@ -120,6 +120,12 @@ struct SSHTunnelConfig: Equatable, Sendable {
         Self.arguments(.profileLocks, alias: alias)
     }
 
+    /// Les arguments de la lecture de `API_SERVER_KEY` d'un profil
+    /// La commande est écrite ici et non passée en paramètre : aucun appelant ne peut en lancer une autre
+    func apiKeyArguments(profile: String) throws -> [String] {
+        Self.common([]) + [alias] + HermesAPIKey.remoteCommand(profile: try HermesAPIKey.validate(profile))
+    }
+
     /// Une seule définition par lancement : `ssh -G` reçoit les mêmes arguments pour évaluer les mêmes blocs `Match`
     /// Les ports ne servent qu'au tunnel ; `ssh -G` ne lie rien
     static func arguments(_ invocation: SSHInvocation, alias: String, localPort: Int = 1, remotePort: Int = 8642) -> [String] {
@@ -440,6 +446,51 @@ struct SSHExit: Equatable, Sendable {
     let stderr: String
 }
 
+/// Nom de profil Hermes admis dans la commande figée, et lecture de `API_SERVER_KEY` sans jamais journaliser la valeur
+enum HermesAPIKey {
+    /// Commande CLI figée : `hermes -p <profil> config get API_SERVER_KEY --raw`
+    static func remoteCommand(profile: String) -> [String] {
+        ["hermes", "-p", profile, "config", "get", "API_SERVER_KEY", "--raw"]
+    }
+
+    static func validate(_ profile: String) throws -> String {
+        guard (1...64).contains(profile.count), profile.first != "-",
+              profile.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) }) else {
+            throw HermesProfileName.invalid
+        }
+        return profile
+    }
+
+    /// Une seule ligne, sans le reste de la sortie : la commande CLI ne doit rendre que la variable
+    static func parse(_ stdout: String) -> String? {
+        let line = stdout.split(whereSeparator: \.isNewline).first.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? ""
+        return line.isEmpty ? nil : line
+    }
+
+    static func missingMessage(profile: String) -> String {
+        String(localized: "Clé API introuvable sur l'hôte pour le profil \(profile).")
+    }
+}
+
+enum HermesProfileName: Error, Equatable {
+    case invalid
+}
+
+enum APIKeyRecovery {
+    /// Lit la clé du profil, puis celle de `default` si le profil n'en définit pas (même repli que `SecretStore.resolvedAPIKey`)
+    static func refresh(profile: String, into secrets: inout some SecretStore, fetch: (String) async throws -> String?) async throws -> String? {
+        let profile = try HermesAPIKey.validate(profile)
+        var names = [profile]
+        if profile != "default" { names.append("default") }
+        for name in names {
+            guard let value = try await fetch(name), let key = HermesAPIKey.parse(value) else { continue }
+            try secrets.setAPIKey(key, profile: name)
+            return key
+        }
+        return nil
+    }
+}
+
 /// Un ssh vivant : son port local est déjà ouvert quand la session existe
 struct SSHSession: Sendable {
     let localPort: Int
@@ -610,6 +661,31 @@ actor SystemSSHBackend: SSHBackend {
             throw RemoteCommandFailure(status: output.status, detail: output.stderr.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? "")
         }
         return output.stdout
+    }
+
+    /// Lit `API_SERVER_KEY` du profil par le même ssh que le tunnel ; la valeur ne quitte pas cette fonction que vers l'appelant
+    func readAPIKey(_ config: SSHTunnelConfig, profile: String) async throws -> String? {
+        try ensureLive()
+        guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
+        let output: Spawn.Output
+        do {
+            output = try await Spawn.run(
+                "/usr/bin/ssh",
+                try config.apiKeyArguments(profile: profile),
+                environment: SSHChildEnvironment.make(environment),
+                joining: watchdog.pid,
+                timeout: .seconds(15)
+            )
+        } catch SpawnError.timedOut {
+            throw SSHFailure.unreachable("délai dépassé")
+        } catch let error as HermesProfileName {
+            throw error
+        } catch {
+            throw SSHFailure.unreachable("ssh ne démarre pas")
+        }
+        if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr) }
+        guard output.status == 0 else { return nil }
+        return HermesAPIKey.parse(output.stdout)
     }
 
     func readProfileLocks(_ config: SSHTunnelConfig) async throws -> Data {

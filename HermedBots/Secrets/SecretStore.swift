@@ -30,7 +30,16 @@ struct KeychainError: Error, CustomStringConvertible {
     }
 }
 
-/// Clés dans le Trousseau de l'utilisateur ; la première saisie réelle reste manuelle (A3)
+extension SecretStore {
+    /// Clé du profil, sinon celle de `default` (y compris l'entrée héritée du compte unique)
+    func resolvedAPIKey(profile: String) throws -> String? {
+        if let key = try apiKey(profile: profile), !key.isEmpty { return key }
+        if profile != "default" { return try apiKey(profile: "default") }
+        return nil
+    }
+}
+
+/// Clés dans le Trousseau de l'utilisateur ; la valeur est mise en cache après une lecture SSH, appareil déverrouillé seulement
 struct KeychainSecretStore: SecretStore {
     static let service = "com.hermedbots.HermedBots"
     static let account = "hermes-api-key"

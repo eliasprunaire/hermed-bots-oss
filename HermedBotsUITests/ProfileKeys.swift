@@ -56,13 +56,14 @@ final class ProfileKeys: HD12Harness {
         HVShot.capture("hd17-crossed-key", app)
     }
 
-    func testConnectionOffersASecureFieldForEachProfile() {
+    func testConnectionHasNoAPIKeyEntry() {
         let app = launch()
         XCTAssertTrue(element(AccessibilityID.botRow("cyber")).waitForExistence(timeout: 20))
         click(AccessibilityID.connectionOpen.rawValue)
-        XCTAssertTrue(element(AccessibilityID.connectionAPIProfile.rawValue).waitForExistence(timeout: 10))
-        XCTAssertTrue(app.secureTextFields[AccessibilityID.connectionAPIKey.rawValue].exists)
-        XCTAssertFalse(element(AccessibilityID.connectionAPISave.rawValue).isEnabled)
+        XCTAssertTrue(element(AccessibilityID.connectionHost.rawValue).waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["Clé API par profil"].exists)
+        XCTAssertFalse(app.staticTexts["Nouvelle clé API"].exists)
+        XCTAssertEqual(app.secureTextFields.count, 0)
         let settings = app.windows.containing(.any, identifier: AccessibilityID.connectionConnect.rawValue).firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 10))
         XCTAssertEqual(settings.frame.width, 1024, accuracy: 1)

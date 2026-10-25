@@ -11,7 +11,7 @@
 | Tester la connexion | `hd.connection.check` | Relit la version Hermes. |
 | Fermer | `hd.connection.close` | Ferme la fenêtre Réglages. |
 
-Le champ Utilisateur n'est plus éditable.
+Le champ Utilisateur n'est plus éditable. Aucune saisie de clé API.
 
 ## Lecture seule, sans secret
 
@@ -26,16 +26,15 @@ Le champ Utilisateur n'est plus éditable.
 | Version | `hd.connection.version` | version Hermes |
 | Message | `hd.connection.message` | échec classé |
 
-Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
+Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché. Aucun `hd.connection.api-*`.
 
-## Clé API (inchangé)
+## Clé API
 
-| Contrôle | Identifiant |
-| --- | --- |
-| Profil | `hd.connection.api-profile` |
-| Nouvelle clé API | `hd.connection.api-key` |
-| Enregistrer la clé | `hd.connection.api-save` |
-| Statut | `hd.connection.api-status` |
+- Pas de champ, pas de section, pas de secours manuel.
+- Un HTTP 401 ou 403 déclenche une lecture SSH, même alias et même config que le tunnel.
+- Commande distante figée : `hermes -p <profil> config get API_SERVER_KEY --raw`. Le profil passe une liste blanche.
+- Si le profil n'a pas de valeur, repli sur `default` (`SecretStore.resolvedAPIKey`). Cache Trousseau `WhenUnlockedThisDeviceOnly`. Jamais affichée ni journalisée.
+- Échec : bandeau `Clé API introuvable sur l'hôte pour le profil <id>`.
 
 ## Transport
 
@@ -44,6 +43,7 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 - `SSH_AUTH_SOCK` vient de la session. `IdentityAgent` de la config ssh a priorité. `IdentityAgent none` désactive l'agent, socket de la session comprise : l'identité affichée est un fichier.
 - Liste des profils : second `/usr/bin/ssh` avec l'alias, commande `hermes profile list`.
 - Une nouvelle demande de connexion, y compris un refus local (alias vide ou invalide), invalide la génération en cours.
+- Clé API : second `/usr/bin/ssh` avec l'alias, commande figée ci-dessus.
 
 ## Échecs
 
@@ -59,6 +59,7 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 | Hôte injoignable | Hôte injoignable. |
 | `perso-hermes` en mode test, sur l'alias ou sur l'hôte résolu d'un lancement ; l'alias tapé est refusé avant `ssh -G` | Cet hôte est refusé en mode test. |
 | `ProxyJump` ou `ProxyCommand`, quelle que soit la valeur (hors `none` entier ; `none,none` est une liste de sauts), vu par l'un des trois lancements ; tous les modes | Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte. |
+| Clé API absente sur l'hôte | Clé API introuvable sur l'hôte pour le profil … |
 
 ## Vérification unitaire
 
@@ -68,5 +69,6 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 - Relais (`ProxyJump` ou `ProxyCommand`, valeurs de toute forme, y compris URI, `user@hop`, `none,none`, `NONE,NONE`) : refusé en mode test et hors mode test, y compris quand un seul lancement (tunnel, liste des profils, détection) le voit. Seul `none` comme valeur entière n'est pas un relais.
 - Arguments exacts du tunnel : alias, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, pas de `-F`, `-i`, `-l`, `-p`, agent privé ni `known_hosts` temporaire.
 - Recette HD-07 : `new_alias` (`docs/spike/hd07-instruments/lib.sh`) crée une clé éphémère et les alias `hv-hd07` (clé installée dans le conteneur) et `hv-hd07-refused` (clé jamais installée). Il les écrit dans un bloc `Include` marqué en tête de `~/.ssh/config` du compte qui lance la lane. `drop_alias` retire le bloc, puis les clés. Il réécrit la config à travers un lien symbolique et la laisse identique à l'octet près. Si le bloc ne part pas, il échoue avec un message et garde les clés. `new_alias` refuse un lien symbolique sans cible et une config illisible : il n'écrit rien et la config garde ses octets. Test : `test/hd07-alias-lib.test.js`. L'app n'a plus de variable de clé ni d'utilisateur.
-- Affichage en lecture seule sans secret.
-- Le magasin de secrets ne lit plus de clé SSH dans le Trousseau.
+- Arguments exacts de la commande de clé, profil invalide refusé, 401 → récupération, clé absente des messages.
+- Affichage en lecture seule sans secret ni saisie API.
+- Le magasin de secrets ne lit plus de clé SSH dans le Trousseau. Mode test : pas de `SecItem*`.

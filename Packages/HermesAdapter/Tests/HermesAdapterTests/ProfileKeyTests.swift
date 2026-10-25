@@ -26,17 +26,18 @@ final class ProfileKeyTests: XCTestCase {
         XCTAssertEqual(StubProtocol.seen.map(\.path), ["/p/hv-bot-a/health", "/p/hv-bot-b/health", "/p/hv-bot-a/health"])
     }
 
-    func testVersionWithoutAProfileKeyStopsBeforeSendingAndNeverUsesDefault() async {
-        for keys in [[:], ["hv-bot-a": ""]] {
-            StubProtocol.reset { _ in .http(200, Data(#"{"version":"wrong"}"#.utf8)) }
-            do {
-                _ = try await versionClient(keys: keys).readVersion(profile: "hv-bot-a")
-                XCTFail("La clé du profil est obligatoire")
-            } catch let error as HermesError {
-                XCTAssertEqual(error, .apiKeyMissing("hv-bot-a"))
-            } catch { XCTFail("Erreur inattendue") }
-            XCTAssertTrue(StubProtocol.seen.isEmpty)
+    func testVersionWithoutAProfileKeySendsNoBearerAndPropagates401() async {
+        StubProtocol.reset { request in
+            XCTAssertNil(request.authorization)
+            return .http(401, Data(#"{"error":"Invalid gateway API key"}"#.utf8))
         }
+        do {
+            _ = try await versionClient(keys: [:]).readVersion(profile: "hv-bot-a")
+            XCTFail("Sans clé, Hermes doit répondre 401")
+        } catch let error as HermesError {
+            guard case .http(contract: "version", status: 401, detail: _) = error else { return XCTFail("Erreur inattendue") }
+        } catch { XCTFail("Erreur inattendue") }
+        XCTAssertEqual(StubProtocol.seen.map(\.path), ["/p/hv-bot-a/health"])
     }
 
     func testVersionPropagates401WithoutRetryOrFallback() async {
