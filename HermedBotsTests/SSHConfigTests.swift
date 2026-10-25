@@ -597,3 +597,187 @@ final class RealSshConfigTests: XCTestCase {
         XCTAssertEqual(result, .unreadableConfig)
     }
 }
+
+#if DEBUG
+@MainActor
+final class AppModelConnectTests: XCTestCase {
+    private func isolatedDefaults() -> UserDefaults {
+        let name = "hd07-appmodel-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        addTeardownBlock { UserDefaults(suiteName: name)?.removePersistentDomain(forName: name) }
+        return defaults
+    }
+
+    private func knownDump(alias: String, hostname: String) -> SSHConfigDump {
+        SSHConfigDump(
+            stdout: """
+            user operator
+            hostname \(hostname)
+            port 22
+            identityfile /tmp/fake-id.invalid
+            proxyjump none
+            """,
+            stderr: "debug1: /tmp/config line 3: Applying options for \(alias)\n"
+        )
+    }
+
+    func testAnEmptySecondRequestOnAppModelNeverOpensTheFirstTunnel() async {
+        let resolver = GatedSSHResolver(dumps: [
+            "a.invalid": knownDump(alias: "a.invalid", hostname: "alpha.invalid"),
+        ])
+        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], defaults: isolatedDefaults(), keychain: { InMemorySecretStore(apiKey: nil) })
+        let model = AppModel(environment: environment, sshResolver: resolver)
+        model.host = "a.invalid"
+        model.connect()
+        await eventually { await resolver.started == ["a.invalid"] }
+        model.host = ""
+        model.connect()
+        if case .failed(let failure) = model.tunnel.state {
+            XCTAssertEqual(failure, .invalidHost)
+        } else {
+            XCTFail("attendu invalidHost, obtenu \(model.tunnel.state)")
+        }
+        await resolver.release("a.invalid")
+        try? await Task.sleep(for: .milliseconds(80))
+        if case .failed(let failure) = model.tunnel.state {
+            XCTAssertEqual(failure, .invalidHost)
+        } else {
+            XCTFail("A a ouvert un tunnel périmé : \(model.tunnel.state)")
+        }
+        let started = await resolver.started
+        XCTAssertEqual(started, ["a.invalid"])
+    }
+
+    func testPersoHermesOnAppModelNeverDumpsOrOpens() async {
+        let resolver = GatedSSHResolver(dumps: [
+            "perso-hermes.invalid": knownDump(alias: "perso-hermes.invalid", hostname: "perso-hermes.invalid"),
+        ])
+        let environment = AppEnvironment.resolve(
+            ["HV_TEST_MODE": "1", "HV_SSH_HOST": "perso-hermes.invalid"],
+            defaults: isolatedDefaults(),
+            keychain: { InMemorySecretStore(apiKey: nil) }
+        )
+        let model = AppModel(environment: environment, sshResolver: resolver)
+        try? await Task.sleep(for: .milliseconds(40))
+        let startedAtLaunch = await resolver.started
+        XCTAssertEqual(startedAtLaunch, [])
+        model.connect()
+        let startedAfterConnect = await resolver.started
+        XCTAssertEqual(startedAfterConnect, [])
+        if case .failed(let failure) = model.tunnel.state {
+            XCTAssertEqual(failure, .forbiddenHost)
+        } else {
+            XCTFail("\(model.tunnel.state)")
+        }
+    }
+
+    // MARK: lecture de la clé API après un refus
+
+    private func keyModel(keys: [String: String] = [:], profiles: [String], reads: KeyReads, serve: @escaping @Sendable (URLRequest) -> Int) -> AppModel {
+        let table = (["Profile  Model  Gateway  Alias  Distribution"] + profiles.map { "  \($0)   hv-fake-1   running   —   —" }).joined(separator: "\n")
+        let environment = AppEnvironment.resolve(
+            [
+                "HV_TEST_MODE": "1",
+                "HV_API_URL": "http://hermes.invalid",
+                "HV_TEST_PROFILE_TABLE": table,
+                "HV_TEST_API_KEYS": String(decoding: try! JSONEncoder().encode(keys), as: UTF8.self),
+            ],
+            defaults: isolatedDefaults(),
+            keychain: { InMemorySecretStore(apiKey: nil) }
+        )
+        KeyStubProtocol.serve = serve
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [KeyStubProtocol.self]
+        return AppModel(environment: environment, apiKeyReader: reads.read, urlConfiguration: configuration)
+    }
+
+    private func refusal(_ status: Int = 401) -> HermesError { .http(contract: "list_sessions", status: status, detail: nil) }
+
+    /// `/health` est public sur Hermes : une réponse de `/health` ne prouve pas que la clé est acceptée
+    func testAKeyThatHermesKeepsRefusingIsReadOverSSHOnceAndNotAtEveryHealthCheck() async {
+        let reads = KeyReads { count, _ in count <= 3 ? "short-key" : nil }
+        let model = keyModel(profiles: ["hv-bot-a"], reads: reads) { $0.url?.path.hasSuffix("/health") == true ? 200 : 401 }
+        await model.bots.refresh()
+        await model.refreshVersion()
+        XCTAssertEqual(reads.profiles, ["hv-bot-a"])
+        XCTAssertEqual(model.apiError, HermesAPIKey.unauthorizedMessage(profile: "hv-bot-a", holdsKey: true))
+        XCTAssertFalse(model.isCheckingAPI)
+    }
+
+    func testRetryReadsTheKeyOfTheRefusedProfileAndNotOfTheOneOnScreen() async {
+        let reads = KeyReads { count, _ in count == 1 ? nil : "key-a" }
+        let model = keyModel(keys: ["hv-bot-b": "key-b"], profiles: ["hv-bot-b", "hv-bot-a"], reads: reads) { _ in 200 }
+        await model.bots.refresh()
+        XCTAssertEqual(model.versionProfile, "hv-bot-b")
+        await model.handleAPIError(refusal(), profile: "hv-bot-a")
+        XCTAssertEqual(reads.profiles, ["hv-bot-a"])
+        XCTAssertEqual(model.apiError, HermesAPIKey.missingMessage(profile: "hv-bot-a"))
+        await model.retryAPI()
+        XCTAssertEqual(reads.profiles, ["hv-bot-a", "hv-bot-a"])
+        XCTAssertNil(model.apiError)
+    }
+
+    func testRetryKeepsTheBannerOfTheRefusedProfileWhileItsKeyStaysUnreadable() async {
+        let reads = KeyReads { _, _ in nil }
+        let model = keyModel(keys: ["hv-bot-b": "key-b"], profiles: ["hv-bot-b", "hv-bot-a"], reads: reads) { _ in 200 }
+        await model.bots.refresh()
+        await model.handleAPIError(refusal(), profile: "hv-bot-a")
+        await model.retryAPI()
+        XCTAssertEqual(reads.profiles, ["hv-bot-a", "hv-bot-a"])
+        XCTAssertEqual(model.apiError, HermesAPIKey.missingMessage(profile: "hv-bot-a"))
+    }
+
+    func testRetryAfterAnErrorThatIsNotARefusalChecksTheProfileOnScreenWithoutReadingAKey() async {
+        let reads = KeyReads { _, _ in "key" }
+        let model = keyModel(keys: ["hv-bot-b": "key-b"], profiles: ["hv-bot-b"], reads: reads) { _ in 200 }
+        await model.bots.refresh()
+        await model.handleAPIError(HermesError.unreachable(url: "", reason: "délai"), profile: "hv-bot-b")
+        XCTAssertNotNil(model.apiError)
+        await model.retryAPI()
+        XCTAssertNil(model.apiError)
+        XCTAssertEqual(reads.profiles, [])
+    }
+
+    private func eventually(_ condition: () async -> Bool) async {
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            if await condition() { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTFail("condition jamais vraie")
+    }
+}
+
+/// Lectures SSH de `API_SERVER_KEY` simulées : garde les profils lus, dans l'ordre ; `answer` rend la clé de la n-ième lecture, nil est un échec
+@MainActor
+private final class KeyReads {
+    private(set) var profiles: [String] = []
+    private let answer: (Int, String) -> String?
+
+    init(_ answer: @escaping (Int, String) -> String?) { self.answer = answer }
+
+    func read(_ profile: String) async throws -> String? {
+        profiles.append(profile)
+        guard let key = answer(profiles.count, profile) else { throw SSHFailure.unreachable("simulé") }
+        return key
+    }
+}
+
+/// Un faux Hermes sans réseau : `serve` donne le statut de chaque requête, le corps est une version connue
+private final class KeyStubProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var serve: (@Sendable (URLRequest) -> Int)?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let status = Self.serve?(request) ?? 500
+        guard let url = request.url, let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil) else { return }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"version":"0.22.1"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+#endif

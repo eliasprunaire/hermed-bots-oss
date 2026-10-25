@@ -36,7 +36,7 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché. 
 - Uniquement la clé du profil demandé (`hermes -p <profil> …`). Pas de repli sur `default`. Cache Trousseau `WhenUnlockedThisDeviceOnly`. Jamais affichée ni journalisée.
 - Échec : bandeau `Clé API introuvable sur l'hôte pour le profil <id>`. Un profil nommé sans clé n'envoie jamais la clé de `default`.
 - Le profil relu est celui de la requête refusée, pas celui du bot à l'écran : un 401 d'un bot en arrière-plan relit la clé de ce bot.
-- Une lecture par profil et par refus. « Réessayer » rouvre la lecture après un échec ; la connexion et une réponse valide la rouvrent aussi.
+- Une lecture par profil et par refus. « Réessayer » relit la clé du profil refusé, pas celle du bot à l'écran, et le bandeau reste tant que cette lecture échoue. La connexion et une réponse authentifiée (les sondes de capacités, pas `/health` qui est public) rouvrent aussi la lecture.
 
 ## Préfixe `/p/<profil>/`
 
@@ -78,6 +78,7 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 - Arguments exacts de la commande de clé, profil invalide refusé, 401 → récupération du profil seulement, clé absente des messages.
 - Profil nommé sans clé : bandeau introuvable, Authorization absent, clé de `default` jamais envoyée.
 - Échec temporaire de la lecture SSH, puis « Réessayer » : la lecture repart et la clé est récupérée (`APIKeyFetches`).
+- `AppModel` avec deux profils : un 401 d'un bot en arrière-plan, échec temporaire de la lecture, puis « Réessayer » relit ce bot et pas celui de l'écran. Une clé trop courte qui reste refusée ne coûte qu'une lecture SSH, malgré un `/health` valide.
 - Deux bots refusés en même temps : chaque refus nomme son bot, pas celui à l'écran (`onAPIError`).
 - Affichage en lecture seule sans secret ni saisie API.
 - Le magasin de secrets ne lit plus de clé SSH dans le Trousseau. Mode test : pas de `SecItem*`.

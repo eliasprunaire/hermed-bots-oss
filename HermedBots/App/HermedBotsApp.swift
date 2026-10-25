@@ -95,6 +95,11 @@ final class AppModel {
     private var sshConfig: SSHTunnelConfig?
     /// Une relecture SSH par profil et par 401/403, puis le message d'échec ; « Réessayer » la rouvre
     private let apiKeyFetches = APIKeyFetches()
+    /// Le profil dont le refus affiche `apiError` : « Réessayer » relit sa clé, pas celle du profil à l'écran
+    private var refusal: (profile: String, message: String)?
+    /// Un test injecte la lecture de `API_SERVER_KEY` et la session HTTP ; l'app lit par SSH et par la session par défaut
+    private let apiKeyReader: (@MainActor (String) async throws -> String?)?
+    private let urlConfiguration: URLSessionConfiguration
 
     var canCheckForUpdates: Bool {
         _ = updateRender
@@ -116,8 +121,12 @@ final class AppModel {
     init(
         environment: AppEnvironment,
         updates: UpdateCheck = UpdateCheck(driver: NullUpdateDriver()),
-        sshResolver: any SSHConfigResolving = SystemSSHConfigResolver()
+        sshResolver: any SSHConfigResolving = SystemSSHConfigResolver(),
+        apiKeyReader: (@MainActor (String) async throws -> String?)? = nil,
+        urlConfiguration: URLSessionConfiguration = .ephemeral
     ) {
+        self.apiKeyReader = apiKeyReader
+        self.urlConfiguration = urlConfiguration
         self.environment = environment
         self.updates = updates
         self.sshResolver = sshResolver
@@ -158,7 +167,7 @@ final class AppModel {
     private func hermesClient() -> HermesClient? {
         guard let apiURL else { return nil }
         let secrets = environment.secrets
-        return HermesClient(baseURL: apiURL, timeout: 15, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) })
+        return HermesClient(baseURL: apiURL, timeout: 15, configuration: urlConfiguration, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) })
     }
 
     private func resumeAPI(_ apiURL: URL) -> ResumeAPI {
@@ -309,7 +318,6 @@ final class AppModel {
             let value = try await readVersionRecovering(baseURL, profile: profile)
             guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
             version = value.map(Version.known) ?? .unknown
-            apiKeyFetches.settle(profile)
         } catch {
             guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
             version = .unknown
@@ -329,6 +337,8 @@ final class AppModel {
             let map = try await client.capabilities(profile: bot)
             guard connection == target, versionRequest == request, versionProfile == bot else { return }
             capabilities = map
+            // `/health` est public : seules les sondes authentifiées prouvent que la clé est acceptée
+            apiKeyFetches.settle(bot)
             conversation.updateSupport(map, bot: bot)
         } catch {
             guard connection == target, versionRequest == request, versionProfile == bot else { return }
@@ -336,11 +346,15 @@ final class AppModel {
         }
     }
 
-    /// Bouton « Réessayer » : une lecture SSH échouée plus tôt peut repartir
+    /// Bouton « Réessayer » : une lecture SSH échouée plus tôt peut repartir, pour le profil refusé
     func retryAPI() async {
         guard !isCheckingAPI else { return }
         apiKeyFetches.reset()
-        await recheckAPI()
+        if let refusal, apiError == refusal.message {
+            await recoverKey(of: refusal.profile)
+        } else {
+            await recheckAPI()
+        }
     }
 
     /// Sans rouvrir la garde : la relecture qui suit une clé récupérée ne boucle pas sur un 401 persistant
@@ -354,7 +368,7 @@ final class AppModel {
 
     private func versionClient(_ baseURL: URL) -> HermesClient {
         let secrets = environment.secrets
-        return HermesClient(baseURL: baseURL, timeout: 5, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) })
+        return HermesClient(baseURL: baseURL, timeout: 5, configuration: urlConfiguration, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) })
     }
 
     private func readVersionRecovering(_ baseURL: URL, profile: String) async throws -> String? {
@@ -367,28 +381,39 @@ final class AppModel {
     }
 
     /// `profile` est celui de la requête refusée, pas forcément celui qui est à l'écran
-    private func handleAPIError(_ error: Error, profile: String) async {
+    func handleAPIError(_ error: Error, profile: String) async {
         guard Self.isUnauthorized(error) else {
             apiError = Self.apiMessage(error)
             return
         }
+        await recoverKey(of: profile)
+    }
+
+    private func recoverKey(of profile: String) async {
         if await fetchRemoteAPIKey(profile) != nil {
             apiError = nil
             await recheckAPI()
             return
         }
         let holdsKey = (try? environment.secrets.resolvedAPIKey(profile: profile)) != nil
-        apiError = HermesAPIKey.unauthorizedMessage(profile: profile, holdsKey: holdsKey)
+        let message = HermesAPIKey.unauthorizedMessage(profile: profile, holdsKey: holdsKey)
+        refusal = (profile, message)
+        apiError = message
     }
 
     /// Une lecture SSH par profil et par refus : le Trousseau est mis à jour, la valeur n'est pas journalisée
     @discardableResult
     private func fetchRemoteAPIKey(_ profile: String) async -> String? {
-        guard let sshBackend, let sshConfig, case .open = tunnel.state else { return nil }
-        var secrets = environment.secrets
-        let key = await apiKeyFetches.fetch(profile: profile, into: &secrets) { name in
-            try await sshBackend.readAPIKey(sshConfig, profile: name)
+        let read: @MainActor (String) async throws -> String?
+        if let apiKeyReader {
+            read = apiKeyReader
+        } else if let sshBackend, let sshConfig, case .open = tunnel.state {
+            read = { try await sshBackend.readAPIKey(sshConfig, profile: $0) }
+        } else {
+            return nil
         }
+        var secrets = environment.secrets
+        let key = await apiKeyFetches.fetch(profile: profile, into: &secrets, read: read)
         if key != nil { environment.secrets = secrets }
         return key
     }
