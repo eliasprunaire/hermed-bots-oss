@@ -30,7 +30,7 @@ final class AppSettingsTests: XCTestCase {
     func testSavingThenReadingGivesTheSameEndpoint() {
         let defaults = isolatedDefaults()
         XCTAssertNil(SSHEndpoint.stored(in: defaults))
-        let endpoint = SSHEndpoint(host: "host.example", user: "operator", port: 2200)
+        let endpoint = SSHEndpoint(host: "lab.invalid")
         endpoint.save(to: defaults)
         XCTAssertEqual(SSHEndpoint.stored(in: defaults), endpoint)
     }
@@ -46,9 +46,9 @@ final class AppSettingsTests: XCTestCase {
 
     func testRepeatedStoredReadsStayCheap() {
         let defaults = isolatedDefaults()
-        SSHEndpoint(host: "host.example", user: "u", port: 22).save(to: defaults)
+        SSHEndpoint(host: "lab.invalid").save(to: defaults)
         for _ in 0..<10_000 {
-            XCTAssertEqual(SSHEndpoint.stored(in: defaults)?.host, "host.example")
+            XCTAssertEqual(SSHEndpoint.stored(in: defaults)?.host, "lab.invalid")
         }
     }
 }

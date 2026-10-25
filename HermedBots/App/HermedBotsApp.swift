@@ -14,22 +14,14 @@ final class AppModel {
         case unknown
     }
 
-    enum KeyState: Equatable {
-        case unread
-        case present
-        case absent
-        case unreadable
-    }
-
     private(set) var apiError: String?
     private(set) var isCheckingAPI = false
     private(set) var capabilities: CapabilityMap?
     private var versionRequest = UUID()
     private var checkedBot: String?
     private(set) var version = Version.loading
-    private(set) var keyState = KeyState.unread
     var host: String
-    var user: String
+    private(set) var preview: SSHConnectionPreview?
     let tunnel = SSHTunnel()
     // paresseux : ses lectures appellent des méthodes de ce modèle, qui doit être construit en entier avant
     @ObservationIgnored lazy var bots = BotsModel(
@@ -83,8 +75,10 @@ final class AppModel {
         guard let scope = environment.testResumeScope else { return nil }
         return ResumeStore(root: FileManager.default.temporaryDirectory.appendingPathComponent("HermedBots-resume").appendingPathComponent(scope))
     }
-    private var port: Int
     private var environment: AppEnvironment
+    private var sshResolver: any SSHConfigResolving
+    private let connector: SSHConnector
+    private var previewGeneration = 0
     let updates: UpdateCheck
     private(set) var updateRender = 0
     #if DEBUG
@@ -92,7 +86,7 @@ final class AppModel {
     let mainThreadWatch: MainThreadWatch?
     var testHangMilliseconds: Int { environment.testHangMilliseconds }
     #endif
-    // de quoi lire la liste des profils par un second ssh : le même agent que le tunnel, la même cible
+    // de quoi lire la liste des profils par un second ssh : le même alias que le tunnel
     private var sshBackend: SystemSSHBackend?
     private var sshConfig: SSHTunnelConfig?
 
@@ -109,17 +103,20 @@ final class AppModel {
     func persistEndpoint() {
         guard !environment.isTestMode else { return }
         let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmedUser = user.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedHost.isEmpty else { return }
-        SSHEndpoint(host: trimmedHost, user: trimmedUser.isEmpty ? NSUserName() : trimmedUser, port: port).save(to: environment.defaults)
+        SSHEndpoint(host: trimmedHost).save(to: environment.defaults)
     }
 
-    init(environment: AppEnvironment, updates: UpdateCheck = UpdateCheck(driver: NullUpdateDriver())) {
+    init(
+        environment: AppEnvironment,
+        updates: UpdateCheck = UpdateCheck(driver: NullUpdateDriver()),
+        sshResolver: any SSHConfigResolving = SystemSSHConfigResolver()
+    ) {
         self.environment = environment
         self.updates = updates
+        self.sshResolver = sshResolver
+        self.connector = SSHConnector(resolver: sshResolver)
         host = environment.ssh?.host ?? ""
-        user = environment.ssh?.user ?? NSUserName()
-        port = environment.ssh?.port ?? 22
         #if DEBUG
         if environment.isTestMode {
             let watch = MainThreadWatch()
@@ -133,6 +130,7 @@ final class AppModel {
         updates.onChange = { [weak self] in
             Task { @MainActor in self?.updateRender += 1 }
         }
+        refreshPreview()
     }
 
     /// L'adresse de l'API : le port du tunnel ouvert, ou l'adresse directe du mode test sans tunnel ; nil tant qu'aucune n'est joignable
@@ -148,7 +146,7 @@ final class AppModel {
     /// Pas l'adresse de l'API : le port local du tunnel change à chaque ouverture, et peut ensuite servir un autre hôte
     private var connection: String {
         guard let sshConfig else { return environment.baseURL?.absoluteString ?? "" }
-        return "\(sshConfig.user)@\(sshConfig.host):\(sshConfig.sshPort)"
+        return "\(sshConfig.user)@\(sshConfig.hostname):\(sshConfig.sshPort)"
     }
 
     private func hermesClient() -> HermesClient? {
@@ -208,17 +206,33 @@ final class AppModel {
         if environment.ssh != nil { connect() }
     }
 
-    /// Ouvre le tunnel vers l'hôte saisi ; un hôte refusé ou une clé absente s'affichent sans lancer ssh
-    func connect() {
-        let config: SSHTunnelConfig
-        do {
-            config = try SSHTunnelConfig(host: host, user: user, sshPort: port, refusePersoHermes: environment.isTestMode)
-        } catch {
-            tunnel.refuse(error as? SSHFailure ?? .invalidHost)
+    /// Relit `ssh -G` pour l'alias saisi et met à jour les champs en lecture seule
+    /// Un alias perso-hermes en mode test n'appelle pas `ssh -G`
+    func refreshPreview() {
+        previewGeneration += 1
+        let id = previewGeneration
+        let alias = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !alias.isEmpty else {
+            preview = nil
             return
         }
+        if environment.refusePersoHermes, alias.lowercased().contains("perso-hermes") {
+            preview = nil
+            return
+        }
+        Task { await resolvePreview(alias: alias, id: id) }
+    }
+
+    /// Ouvre le tunnel vers l'alias saisi ; un alias vide, invalide ou refusé invalide la génération en cours sans lancer ssh
+    func connect() {
         persistEndpoint()
-        openTunnel(config)
+        connector.begin(alias: host, refusePersoHermes: environment.refusePersoHermes, opened: { [weak self] config, preview in
+            self?.preview = preview
+            self?.openTunnel(config)
+        }, refused: { [weak self] failure, preview in
+            if let preview { self?.preview = preview }
+            self?.tunnel.refuse(failure)
+        })
     }
 
     func reconnectAfterWake() {
@@ -226,22 +240,25 @@ final class AppModel {
         openTunnel(config)
     }
 
-    private func openTunnel(_ config: SSHTunnelConfig) {
-        let key: String
+    private func resolvePreview(alias: String, id: Int) async {
         do {
-            guard let stored = try environment.secrets.sshPrivateKey(), !stored.isEmpty else {
-                keyState = .absent
-                tunnel.refuse(.keyMissing)
-                return
-            }
-            key = stored
+            let dump = try await sshResolver.dump(alias: alias)
+            let next = SSHConfig.parse(
+                dump,
+                alias: alias,
+                localUser: NSUserName(),
+                authSock: ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"]
+            )
+            guard id == previewGeneration else { return }
+            preview = next
         } catch {
-            keyState = .unreadable
-            tunnel.refuse(.keyUnreadable)
-            return
+            guard id == previewGeneration else { return }
+            preview = nil
         }
-        keyState = .present
-        let backend = SystemSSHBackend(key: key, knownHostsPath: environment.isTestMode ? nil : Self.knownHostsPath())
+    }
+
+    private func openTunnel(_ config: SSHTunnelConfig) {
+        let backend = SystemSSHBackend()
         sshBackend = backend
         sshConfig = config
         tunnel.start(config, backend: backend)
@@ -332,13 +349,6 @@ final class AppModel {
             return String(localized: "La clé API est refusée. Vérifiez la clé avant de réessayer.")
         }
         return String(localized: "Hermes ne répond pas. Vérifiez la liaison puis réessayez.")
-    }
-
-    private static func knownHostsPath() -> String? {
-        guard let support = try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true) else { return nil }
-        let folder = support.appendingPathComponent("Hermed Bots", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appendingPathComponent("known_hosts").path
     }
 }
 

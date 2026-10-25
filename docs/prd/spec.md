@@ -97,7 +97,7 @@ Sans objet : tous les sièges existent. Aucun siège à recruter.
 1. Spike S1–S12 (sortie : rapport).
 2. Paquet Swift de la couche d'adaptation, décodage tolérant, fixtures version actuelle et précédente, CI Linux.
 3. Garde-fou de boucle (logique pure, CI Linux).
-4. Tunnel SSH + Trousseau + mode de test sans Trousseau (macOS).
+4. Tunnel SSH (alias OpenSSH de l'utilisateur) + Trousseau pour les clés API + mode de test sans Trousseau (macOS).
 5. Interface : liste, conversation, approbation, outil en cours, `/new`, fils passés, mode dégradé, pause (identifiants d'accessibilité).
 6. Reprise après veille, anti-doublon.
 7. Concurrence Desktop.

@@ -193,21 +193,19 @@ Cette configuration s'effectue sur le Mac de l'utilisateur après installation.
 La recette de développement reste limitée à `hv-hermes-test`.
 Aucune commande de cette PR ne se connecte à la production.
 
-1. Faire provisionner la clé SSH dans le Trousseau par l'administrateur de la connexion.
+1. S'assurer que l'alias SSH de production existe dans la config OpenSSH de l'utilisateur (`Include` compris), avec l'identité (agent, certificat ou fichier) déjà gérée hors de l'app.
 2. Ouvrir **Réglages**, onglet **Connexion**.
-3. Saisir l'hôte et l'utilisateur SSH de production.
+3. Saisir uniquement l'alias SSH. L'app lit hôte, utilisateur, port et identité via `ssh -G`.
 4. Cliquer sur **Connecter**.
 5. Choisir chaque profil dans **Clé API par profil**.
 6. Saisir sa clé dans **Nouvelle clé API**.
 7. Cliquer sur **Enregistrer la clé**.
 8. Contrôler la liste des bots et la version Hermes affichée.
 
-La clé SSH est un mot de passe générique du service `com.hermedbots.HermedBots`, compte `hermes-ssh-key`.
-Sa valeur contient la clé privée SSH, sans passphrase interactive.
-L'interface actuelle ne sait pas importer cette clé.
-Le provisionnement initial du Trousseau reste une opération distincte autorisée par l'utilisateur.
-Les clés API utilisent le même service, avec le compte `hermes-api-key:<profil>`.
-Les réglages d'hôte et d'utilisateur persistent automatiquement.
+L'app ne lit plus de clé privée SSH dans le Trousseau.
+Elle lance `/usr/bin/ssh` avec l'alias et la config de l'utilisateur, sans `-F /dev/null` et sans agent privé.
+Les clés API restent dans le Trousseau, service `com.hermedbots.HermedBots`, compte `hermes-api-key:<profil>`.
+Seul l'alias SSH persiste dans les réglages.
 Le tunnel expose l'API distante uniquement sur la boucle locale.
 Une mise à jour ne modifie pas ces réglages.
 

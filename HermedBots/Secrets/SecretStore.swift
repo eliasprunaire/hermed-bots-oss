@@ -1,30 +1,25 @@
 import Foundation
 import Security
 
-/// Là où l'app lit les clés : celle de l'API Hermes et la clé privée SSH du tunnel
+/// Là où l'app lit les clés API Hermes ; l'identité SSH vient de la config et de l'agent de l'utilisateur
 protocol SecretStore: Sendable {
     func apiKey(profile: String) throws -> String?
     mutating func setAPIKey(_ key: String, profile: String) throws
-    func sshPrivateKey() throws -> String?
 }
 
 /// Magasin du mode test (`HV_TEST_MODE=1`) : il ne touche jamais le Trousseau
 struct InMemorySecretStore: SecretStore {
     private let key: String?
     private var apiKeys: [String: String]
-    let sshKey: String?
 
-    init(apiKey: String?, apiKeys: [String: String] = [:], sshKey: String? = nil) {
+    init(apiKey: String?, apiKeys: [String: String] = [:]) {
         key = apiKey
         self.apiKeys = apiKeys
-        self.sshKey = sshKey
     }
 
     func apiKey(profile: String) throws -> String? { apiKeys[profile] ?? (profile == "default" ? key : nil) }
 
     mutating func setAPIKey(_ key: String, profile: String) throws { apiKeys[profile] = key }
-
-    func sshPrivateKey() throws -> String? { sshKey }
 }
 
 struct KeychainError: Error, CustomStringConvertible {
@@ -39,7 +34,6 @@ struct KeychainError: Error, CustomStringConvertible {
 struct KeychainSecretStore: SecretStore {
     static let service = "com.hermedbots.HermedBots"
     static let account = "hermes-api-key"
-    static let sshAccount = "hermes-ssh-key"
     private let copyMatching: @Sendable (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
     private let update: @Sendable (CFDictionary, CFDictionary) -> OSStatus
     private let add: @Sendable (CFDictionary) -> OSStatus
@@ -77,8 +71,6 @@ struct KeychainSecretStore: SecretStore {
     }
 
     private static func apiAccount(_ profile: String) -> String { "\(account):\(profile)" }
-
-    func sshPrivateKey() throws -> String? { try read(account: Self.sshAccount) }
 
     private func read(account: String) throws -> String? {
         let query: [CFString: Any] = [
