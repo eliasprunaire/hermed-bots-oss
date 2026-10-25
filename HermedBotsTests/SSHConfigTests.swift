@@ -277,6 +277,8 @@ final class SSHConfigTests: XCTestCase {
             "proxyjump operator@bastion.invalid:2222,second.invalid",
             "proxyjump perso-hermes.invalid",
             "proxyjump -",
+            "proxyjump ssh://jump-alias.invalid,second.invalid",
+            "proxyjump blocked@jump-alias.invalid",
             "proxycommand /usr/bin/nc bastion.invalid 22",
             "proxycommand /usr/bin/ssh -W %h:%p perso-hermes.invalid",
             "proxycommand true",
