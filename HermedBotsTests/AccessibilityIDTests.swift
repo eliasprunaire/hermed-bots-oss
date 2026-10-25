@@ -1,3 +1,4 @@
+import AppSettings
 import XCTest
 
 final class AccessibilityIDTests: XCTestCase {
@@ -24,6 +25,8 @@ final class AccessibilityIDTests: XCTestCase {
         XCTAssertEqual(AccessibilityID.connectionTunnelState.rawValue, "hd.connection.tunnel-state")
         XCTAssertEqual(AccessibilityID.connectionMessage.rawValue, "hd.connection.message")
         XCTAssertEqual(AccessibilityID.updatesCheck.rawValue, "hd.updates.check")
+        XCTAssertEqual(AccessibilityID.settingsConnection.rawValue, SettingsPane.connection.accessibilityID)
+        XCTAssertEqual(AccessibilityID.settingsUpdates.rawValue, SettingsPane.updates.accessibilityID)
     }
 
     func testTheBotListIdsAreStable() {

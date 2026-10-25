@@ -1,39 +1,13 @@
+import AppSettings
 import Foundation
 
-/// Où et comment ouvrir le tunnel SSH ; rien de secret, la clé reste dans le Trousseau
-struct SSHEndpoint: Equatable {
-    var host: String
-    var user: String
-    var port: Int
-
-    private enum Key {
-        static let host = "ssh.host"
-        static let user = "ssh.user"
-        static let port = "ssh.port"
-    }
-
-    static func stored(in defaults: UserDefaults) -> SSHEndpoint? {
-        guard let host = defaults.string(forKey: Key.host), !host.isEmpty else { return nil }
-        let port = defaults.integer(forKey: Key.port)
-        return SSHEndpoint(host: host, user: defaults.string(forKey: Key.user) ?? NSUserName(), port: port == 0 ? 22 : port)
-    }
-
-    func save(to defaults: UserDefaults) {
-        defaults.set(host, forKey: Key.host)
-        defaults.set(user, forKey: Key.user)
-        defaults.set(port, forKey: Key.port)
-    }
-}
-
-/// Ce que l'app lit de son environnement au lancement : le magasin des clés, la cible de l'API et le tunnel SSH
 struct AppEnvironment {
     var secrets: SecretStore
     /// Adresse directe de l'API, mode test seulement, quand aucun hôte SSH n'est donné (faux serveur sans sshd)
     let baseURL: URL?
-    /// nil tant qu'aucun hôte n'est réglé : l'app n'ouvre alors aucun tunnel
     let ssh: SSHEndpoint?
     let isTestMode: Bool
-    /// Mode test seulement : durée en ms du blocage que l'app s'inflige au départ d'un tour, pour prouver que la sonde de perf voit un blocage ; 0 sans blocage
+    let defaults: UserDefaults
     var testHangMilliseconds = 0
     var testProfileLocks = false
     var testResumeScope: String?
@@ -59,6 +33,7 @@ struct AppEnvironment {
                 baseURL: ssh == nil ? environment["HV_API_URL"].flatMap { URL(string: $0) } : nil,
                 ssh: ssh,
                 isTestMode: true,
+                defaults: defaults,
                 testHangMilliseconds: environment["HV_HANG_MS"].flatMap { Int($0) } ?? 0,
                 testProfileLocks: environment["HV_PROFILE_LOCKS"] == "1",
                 testResumeScope: environment["HV_RESUME_SCOPE"],
@@ -66,6 +41,6 @@ struct AppEnvironment {
             )
         }
         #endif
-        return AppEnvironment(secrets: keychain(), baseURL: nil, ssh: SSHEndpoint.stored(in: defaults), isTestMode: false)
+        return AppEnvironment(secrets: keychain(), baseURL: nil, ssh: SSHEndpoint.stored(in: defaults), isTestMode: false, defaults: defaults)
     }
 }

@@ -1,3 +1,4 @@
+import AppSettings
 import HermesAdapter
 import Observation
 import SwiftUI
@@ -101,8 +102,16 @@ final class AppModel {
     }
 
     func checkForUpdates() {
-        updates.checkForUpdates()
+        UpdatesSettingsAction.perform(updates)
         updateRender += 1
+    }
+
+    func persistEndpoint() {
+        guard !environment.isTestMode else { return }
+        let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedUser = user.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedHost.isEmpty else { return }
+        SSHEndpoint(host: trimmedHost, user: trimmedUser.isEmpty ? NSUserName() : trimmedUser, port: port).save(to: environment.defaults)
     }
 
     init(environment: AppEnvironment, updates: UpdateCheck = UpdateCheck(driver: NullUpdateDriver())) {
@@ -208,8 +217,7 @@ final class AppModel {
             tunnel.refuse(error as? SSHFailure ?? .invalidHost)
             return
         }
-        // le mode test ne touche pas aux réglages de l'utilisateur
-        if !environment.isTestMode { SSHEndpoint(host: host, user: user, port: port).save(to: .standard) }
+        persistEndpoint()
         openTunnel(config)
     }
 
@@ -350,7 +358,6 @@ extension AppModel.Version {
 
 struct ContentView: View {
     let model: AppModel
-    @State private var showConnection = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -365,11 +372,12 @@ struct ContentView: View {
                             Text("Version de Hermes")
                             model.version.text.accessibilityID(.statusVersion)
                             Spacer()
-                            // icône seule : la colonne est étroite et le libellé passerait à la ligne ; le libellé reste pour VoiceOver et l'aide
-                            Button { showConnection = true } label: { Label("Connexion", systemImage: "network").labelStyle(.iconOnly) }
-                                .buttonStyle(.borderless)
-                                .help("Connexion")
-                                .accessibilityID(.connectionOpen)
+                            SettingsLink {
+                                Label("Réglages", systemImage: "gearshape").labelStyle(.iconOnly)
+                            }
+                            .buttonStyle(.borderless)
+                            .help("Réglages")
+                            .accessibilityID(.connectionOpen)
                         }
                         .lineLimit(1)
                         .font(.footnote)
@@ -384,7 +392,6 @@ struct ContentView: View {
                 }
             }
         }
-        .sheet(isPresented: $showConnection) { ConnectionView(model: model) }
         #if DEBUG
         .overlay(alignment: .bottomTrailing) {
             if let watch = model.mainThreadWatch {
@@ -497,9 +504,12 @@ struct HermedBotsApp: App {
         .defaultSize(width: 1280, height: 800)
         .commands {
             CommandGroup(after: .appInfo) {
-                Button("Rechercher les mises à jour…") { model.checkForUpdates() }
+                Button(SettingsCopy.checkForUpdates) { model.checkForUpdates() }
                     .disabled(!model.canCheckForUpdates)
             }
+        }
+        Settings {
+            SettingsWindow(model: model)
         }
     }
 }
