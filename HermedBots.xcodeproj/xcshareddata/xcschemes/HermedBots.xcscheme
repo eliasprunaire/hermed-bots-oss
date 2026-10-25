@@ -91,6 +91,9 @@
                <Test
                   Identifier = "LaunchTests/testColdLaunchToVersionVisibleStaysUnderTwoSeconds">
                </Test>
+               <Test
+                  Identifier = "ResumeLanes/testResumeBudget">
+               </Test>
             </SkippedTests>
          </TestableReference>
       </Testables>
