@@ -157,7 +157,10 @@ function lsregisterDump(entries) {
     .join("\n");
 }
 
-function countCopies({ home, buildDir, target, mdfind, lsregister }) {
+const PRODUCTION_ID = "com.hermedbots.HermedBots";
+const PROOF_ID = "com.hermedbots.HermedBots.updateproof";
+
+function countCopies({ home, buildDir, target, mdfind, lsregister, bundleId = PRODUCTION_ID }) {
   const box = fs.mkdtempSync(path.join(os.tmpdir(), "sparkle-count-"));
   const mdFile = path.join(box, "mdfind.txt");
   const lsFile = path.join(box, "lsregister.txt");
@@ -174,6 +177,7 @@ function countCopies({ home, buildDir, target, mdfind, lsregister }) {
           PATH: process.env.PATH,
           HOME: home,
           SPARKLE_PROOF_TARGET_VERSION: target,
+          SPARKLE_PROOF_BUNDLE_ID: bundleId,
           SPARKLE_PROOF_BUILD_DIR: buildDir || "",
           SPARKLE_PROOF_MDFIND_FILE: mdFile,
           SPARKLE_PROOF_LSREGISTER_FILE: lsFile,
@@ -185,10 +189,11 @@ function countCopies({ home, buildDir, target, mdfind, lsregister }) {
   }
 }
 
-test("the proof line records single-copy and discovers the shipping identifier after relaunch", () => {
+test("the proof line records single-copy and discovers the identifier under test after relaunch", () => {
   const source = fs.readFileSync(PROOF, "utf8");
-  assert.match(source, /mdfind "kMDItemCFBundleIdentifier == 'com\.hermedbots\.HermedBots'"/);
-  assert.match(source, /lsregister -dump/);
+  assert.match(source, /mdfind "kMDItemCFBundleIdentifier == '\$bundle'"/);
+  assert.doesNotMatch(source, /HERMEDBOTS_BUNDLE_ID|kMDItemCFBundleIdentifier == 'com\./);
+  assert.match(source, /"\$lsregister" -dump/);
   assert.match(source, /SPARKLE_PROOF_BUILD_DIR/);
   assert.match(source, /count_hermedbots_copies/);
   assert.match(
@@ -284,6 +289,148 @@ test("count_hermedbots_copies covers empty, one, two, wrong version, vanished, a
 
     const leaked = `${one.stdout}\n${two.stdout}\n${empty.stdout}\n${wrong.stdout}\n${vanished.stdout}\n${excluded.stdout}`;
     assert.doesNotMatch(leaked, /\/Users\/|\/home\/[^/\s]+/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the live proof counts the identifier it installed and excludes its source and build copies", () => {
+  const source = fs.readFileSync(PROOF, "utf8");
+  const local = source.slice(source.indexOf("pass update"));
+  assert.ok(source.indexOf("bundle_id=com.hermedbots.HermedBots.updateproof") < source.indexOf("pass update"));
+  assert.match(local, /SPARKLE_PROOF_BUILD_DIR="\$work\/dd:\$work\/v\$n:\$work\/v\$n1\$\{SPARKLE_PROOF_BUILD_DIR:\+:\$SPARKLE_PROOF_BUILD_DIR\}"/);
+  assert.match(local, /prove_single_copy "\$n1" "\$bundle_id"/);
+  const published = source.slice(source.indexOf("prove_published()"), source.indexOf('if [ "$mode" = published ]'));
+  assert.match(published, /bundle_id=\$\(plist_published "\$app" CFBundleIdentifier\)/);
+  assert.match(published, /SPARKLE_PROOF_BUILD_DIR="\$work\/extract\$\{SPARKLE_PROOF_BUILD_DIR:\+:\$SPARKLE_PROOF_BUILD_DIR\}"/);
+  assert.match(published, /prove_single_copy "\$to" "\$bundle_id"/);
+});
+
+test("count_hermedbots_copies ignores another identifier and every excluded source or build folder", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-proof-id-"));
+  try {
+    const installed = writeFakeApp(path.join(root, "run-update", "HermedBots.app"), "1.2.4");
+    const sourceN = writeFakeApp(path.join(root, "v1.2.3", "HermedBots.app"), "1.2.3");
+    const sourceN1 = writeFakeApp(path.join(root, "v1.2.4", "HermedBots.app"), "1.2.4");
+    const built = writeFakeApp(path.join(root, "dd", "Build", "HermedBots.app"), "1.2.4");
+    const production = writeFakeApp(path.join(root, "Applications", "HermedBots.app"), "9.9.9");
+    const stray = writeFakeApp(path.join(root, "stray", "HermedBots.app"), "1.2.4");
+    const buildDir = ["dd", "v1.2.3", "v1.2.4"].map((name) => path.join(root, name)).join(":");
+    const ours = [installed, sourceN, sourceN1, built].map((p) => ({ path: p, id: PROOF_ID }));
+    const prod = { path: production, id: PRODUCTION_ID };
+    const base = { home: root, buildDir, target: "1.2.4", bundleId: PROOF_ID };
+
+    const correct = countCopies({
+      ...base,
+      mdfind: `${installed}\n${sourceN}\n${sourceN1}\n${built}\n`,
+      lsregister: lsregisterDump([...ours, prod]),
+    });
+    assert.equal(correct.status, 0, correct.stdout + correct.stderr);
+    assert.match(correct.stdout, /single-copy count=1/);
+    assert.match(correct.stdout, /copy version=1\.2\.4 path=~\/run-update\/HermedBots\.app/);
+    assert.doesNotMatch(correct.stdout, /Applications|\/v1\.2|\/dd\//);
+
+    const twice = countCopies({
+      ...base,
+      mdfind: `${installed}\n${stray}\n`,
+      lsregister: lsregisterDump([...ours, { path: stray, id: PROOF_ID }, prod]),
+    });
+    assert.notEqual(twice.status, 0);
+    assert.match(twice.stdout, /single-copy count=2/);
+
+    const productionOnly = countCopies({ ...base, mdfind: "", lsregister: lsregisterDump([prod]) });
+    assert.notEqual(productionOnly.status, 0);
+    assert.match(productionOnly.stdout, /single-copy count=0/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// prove_single_copy with fake mdfind and lsregister first in PATH: each tool prints a file and exits with a chosen code
+function proveSingleCopy({ root, target, bundleId, md = {}, ls = {} }) {
+  const bin = path.join(root, "bin");
+  fs.mkdirSync(bin, { recursive: true });
+  const argsFile = path.join(root, "mdfind.args");
+  fs.rmSync(argsFile, { force: true });
+  const fake = (name, out, rc, record) => {
+    const outFile = path.join(root, `${name}.out`);
+    fs.writeFileSync(outFile, out);
+    const note = record ? `printf '%s\\n' "$*" > '${record}'\n` : "";
+    fs.writeFileSync(path.join(bin, name), `#!/bin/sh\n${note}cat '${outFile}'\nexit ${rc}\n`, { mode: 0o755 });
+  };
+  fake("mdfind", md.out || "", md.rc || 0, argsFile);
+  fake("lsregister", ls.out || "", ls.rc || 0);
+  const run = spawnSync(
+    "bash",
+    ["-c", 'SPARKLE_PROOF_SOURCE=1; . scripts/sparkle-update-proof.sh; prove_single_copy "$1" "$2"', "_", target, bundleId],
+    {
+      encoding: "utf8",
+      cwd: path.join(__dirname, "../.."),
+      env: { PATH: `${bin}:${process.env.PATH}`, HOME: root, TMPDIR: root },
+    },
+  );
+  return { run, args: fs.existsSync(argsFile) ? fs.readFileSync(argsFile, "utf8") : null };
+}
+
+test("prove_single_copy queries the identifier under test and passes with one copy", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-discovery-"));
+  try {
+    const keep = writeFakeApp(path.join(root, "keep.app"), "1.2.3");
+    const { run, args } = proveSingleCopy({
+      root,
+      target: "1.2.3",
+      bundleId: PROOF_ID,
+      md: { out: `${keep}\n` },
+      ls: { out: lsregisterDump([{ path: keep, id: PROOF_ID }]) },
+    });
+    assert.equal(run.status, 0, run.stdout + run.stderr);
+    assert.match(run.stdout, /single-copy count=1/);
+    assert.equal(args.trim(), `kMDItemCFBundleIdentifier == '${PROOF_ID}'`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prove_single_copy fails when Launch Services fails even if Spotlight sees one copy of two", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-discovery-"));
+  try {
+    const keep = writeFakeApp(path.join(root, "keep.app"), "1.2.3");
+    writeFakeApp(path.join(root, "extra.app"), "1.2.3");
+    const { run } = proveSingleCopy({ root, target: "1.2.3", bundleId: PRODUCTION_ID, md: { out: `${keep}\n` }, ls: { rc: 1 } });
+    assert.notEqual(run.status, 0);
+    assert.match(run.stdout, /single-copy discovery-failed source=lsregister rc=1/);
+    assert.doesNotMatch(run.stdout, /single-copy count=/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prove_single_copy fails when Spotlight fails even if Launch Services sees one copy", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-discovery-"));
+  try {
+    const keep = writeFakeApp(path.join(root, "keep.app"), "1.2.3");
+    const { run } = proveSingleCopy({
+      root,
+      target: "1.2.3",
+      bundleId: PRODUCTION_ID,
+      md: { rc: 1 },
+      ls: { out: lsregisterDump([{ path: keep, id: PRODUCTION_ID }]) },
+    });
+    assert.notEqual(run.status, 0);
+    assert.match(run.stdout, /single-copy discovery-failed source=mdfind rc=1/);
+    assert.doesNotMatch(run.stdout, /single-copy count=/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("prove_single_copy refuses an identifier that is not a bundle identifier before it queries", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-discovery-"));
+  try {
+    const { run, args } = proveSingleCopy({ root, target: "1.2.3", bundleId: "com.x' || kMDItemKind == '*" });
+    assert.notEqual(run.status, 0);
+    assert.match(run.stdout, /single-copy discovery-failed source=bundle-id/);
+    assert.equal(args, null);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

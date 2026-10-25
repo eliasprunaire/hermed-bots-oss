@@ -5,14 +5,11 @@
 #   bash scripts/sparkle-update-proof.sh           also starts the builds: needs a macOS GUI session, run it in a disposable VM
 #   bash scripts/sparkle-update-proof.sh published no build: installs the previous published release, then the next through the public feed
 # Optional environment: PROOF_OUT (parent of the evidence folder), SOURCE_PACKAGES (resolved SwiftPM folder for an offline build),
-# SPARKLE_PROOF_BUILD_DIR (bundle paths under this folder are not counted as installed copies)
+# SPARKLE_PROOF_BUILD_DIR (extra folders, separated by a colon: bundle paths under them are not counted as installed copies)
 set -euo pipefail
 set +x
 umask 077
 unset SPARKLE_PRIVATE_KEY
-
-# Shipping identifier. An update must replace this app, never leave a second copy.
-HERMEDBOTS_BUNDLE_ID=com.hermedbots.HermedBots
 
 _sparkle_python() {
   if [ -x /usr/bin/python3 ]; then
@@ -22,16 +19,18 @@ _sparkle_python() {
   fi
 }
 
-# Union of Spotlight hits and Launch Services path: rows for HERMEDBOTS_BUNDLE_ID.
-# Skips missing paths and anything still under SPARKLE_PROOF_BUILD_DIR.
+# An update must replace the installed app, never leave a second copy of the identifier under test.
+# Union of Spotlight hits and Launch Services path: rows for SPARKLE_PROOF_BUNDLE_ID.
+# Skips missing paths and anything under the folders of SPARKLE_PROOF_BUILD_DIR (colon separated).
 # Prints the count and each copy's version with a redacted path. Exit 0 only when
 # there is exactly one remaining copy at SPARKLE_PROOF_TARGET_VERSION.
 count_hermedbots_copies() {
   local target=${SPARKLE_PROOF_TARGET_VERSION:?SPARKLE_PROOF_TARGET_VERSION is required}
+  local bundle=${SPARKLE_PROOF_BUNDLE_ID:?SPARKLE_PROOF_BUNDLE_ID is required}
   local py
   py=$(_sparkle_python)
   [ -n "$py" ] || { echo 'python3 is required to count app copies' >&2; return 1; }
-  "$py" - "$HERMEDBOTS_BUNDLE_ID" "$target" "${SPARKLE_PROOF_BUILD_DIR:-}" \
+  "$py" - "$bundle" "$target" "${SPARKLE_PROOF_BUILD_DIR:-}" \
     "${SPARKLE_PROOF_MDFIND_FILE:-}" "${SPARKLE_PROOF_LSREGISTER_FILE:-}" <<'PY'
 import os, re, sys
 
@@ -75,14 +74,17 @@ def exists(path):
 def real(path):
     return os.path.realpath(path)
 
-def under_build(path, root):
-    if not root:
-        return False
+def under_build(path, roots):
     try:
-        rp, rr = real(path), real(root)
+        rp = real(path)
+        for root in roots.split(os.pathsep):
+            if root:
+                rr = real(root)
+                if rp == rr or rp.startswith(rr + os.sep):
+                    return True
     except OSError:
-        return False
-    return rp == rr or rp.startswith(rr + os.sep)
+        pass
+    return False
 
 def redact(path):
     home = os.environ.get("HOME") or ""
@@ -152,26 +154,26 @@ PY
 }
 
 # Live discovery on the machine that ran the install. Simulated files skip this.
+# A discovery tool that is missing or exits nonzero fails the check: its list would be incomplete.
 prove_single_copy() {
-  local target=$1
-  local tmp md dump st=0
-  tmp=$(mktemp -d "${TMPDIR:-/tmp}/sparkle-single-copy.XXXXXX")
+  local target=$1 bundle=$2
+  local tmp md dump lsregister=lsregister st=0 rc
+  # The identifier reaches the Spotlight query: only the characters of a bundle identifier
+  [[ $bundle =~ ^[A-Za-z0-9.-]+$ ]] || { echo 'single-copy discovery-failed source=bundle-id'; return 1; }
+  command -v lsregister >/dev/null 2>&1 \
+    || lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/sparkle-single-copy.XXXXXX") || return 1
   md="$tmp/mdfind.txt"
   dump="$tmp/lsregister.txt"
-  : > "$md"
-  : > "$dump"
-  if command -v mdfind >/dev/null 2>&1; then
-    mdfind "kMDItemCFBundleIdentifier == 'com.hermedbots.HermedBots'" > "$md" 2>/dev/null || true
+  mdfind "kMDItemCFBundleIdentifier == '$bundle'" > "$md" 2>/dev/null || { rc=$?; echo "single-copy discovery-failed source=mdfind rc=$rc"; st=1; }
+  "$lsregister" -dump > "$dump" 2>/dev/null || { rc=$?; echo "single-copy discovery-failed source=lsregister rc=$rc"; st=1; }
+  if [ "$st" = 0 ]; then
+    SPARKLE_PROOF_BUNDLE_ID=$bundle \
+      SPARKLE_PROOF_TARGET_VERSION=$target \
+      SPARKLE_PROOF_MDFIND_FILE=$md \
+      SPARKLE_PROOF_LSREGISTER_FILE=$dump \
+      count_hermedbots_copies || st=$?
   fi
-  if command -v lsregister >/dev/null 2>&1; then
-    lsregister -dump > "$dump" 2>/dev/null || true
-  elif [ -x /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister ]; then
-    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump > "$dump" 2>/dev/null || true
-  fi
-  SPARKLE_PROOF_TARGET_VERSION=$target \
-    SPARKLE_PROOF_MDFIND_FILE=$md \
-    SPARKLE_PROOF_LSREGISTER_FILE=$dump \
-    count_hermedbots_copies || st=$?
   rm -rf "${tmp:?}"
   return "$st"
 }
@@ -395,8 +397,8 @@ PY
   installed_after=$(plist_published "$app" CFBundleShortVersionString || true)
   installed_after=${installed_after:-none}
   stop_published "$app"
-  SPARKLE_PROOF_BUILD_DIR=${SPARKLE_PROOF_BUILD_DIR:-$work/extract}
-  if copies_out=$(prove_single_copy "$to"); then single_copy=pass; else single_copy=fail; fi
+  SPARKLE_PROOF_BUILD_DIR="$work/extract${SPARKLE_PROOF_BUILD_DIR:+:$SPARKLE_PROOF_BUILD_DIR}"
+  if copies_out=$(prove_single_copy "$to" "$bundle_id"); then single_copy=pass; else single_copy=fail; fi
   printf '%s\n' "$copies_out"
   if codesign --verify --deep --strict "$app" >/dev/null 2>&1; then codesign_verdict=pass; fi
   if spctl -a --type execute "$app" >/dev/null 2>&1; then spctl_verdict=pass; fi
@@ -656,8 +658,8 @@ relaunched=''
 single_copy=fail
 pass update install appcast.xml "HermedBots-$n1.zip"
 installed_after_update=$relaunched
-SPARKLE_PROOF_BUILD_DIR=${SPARKLE_PROOF_BUILD_DIR:-$work/dd}
-if copies_out=$(prove_single_copy "$n1"); then single_copy=pass; else single_copy=fail; fi
+SPARKLE_PROOF_BUILD_DIR="$work/dd:$work/v$n:$work/v$n1${SPARKLE_PROOF_BUILD_DIR:+:$SPARKLE_PROOF_BUILD_DIR}"
+if copies_out=$(prove_single_copy "$n1" "$bundle_id"); then single_copy=pass; else single_copy=fail; fi
 say "$copies_out"
 pass feed-signature refuse appcast-altered-signature.xml "HermedBots-$n1.zip"
 pass archive refuse appcast.xml "HermedBots-$n1-altered.zip"
