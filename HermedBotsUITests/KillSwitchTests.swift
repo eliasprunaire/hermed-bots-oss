@@ -58,10 +58,17 @@ final class KillSwitchTests: HD12Harness {
         request("/_hv/log").filter { ($0["p"] as? String)?.hasSuffix("/stop") == true && ($0["probe"] as? Bool) != true }
     }
 
+    private func caption() -> String {
+        let item = element(status)
+        guard item.exists else { return "" }
+        return text(status)
+    }
+
     private func cancelled() {
         let deadline = Date().addingTimeInterval(15)
-        while !text(status).contains("confirmée"), Date() < deadline { usleep(50_000) }
-        XCTAssertTrue(text(status).contains("confirmée"), text(status))
+        while request("/_hv/runs").contains(where: { $0["status"] as? String != "cancelled" }), Date() < deadline { usleep(50_000) }
+        XCTAssertFalse(request("/_hv/runs").contains { $0["status"] as? String != "cancelled" })
+        XCTAssertEqual(caption(), "")
     }
 
     func test01ThreeRunningTurns() {
@@ -89,8 +96,9 @@ final class KillSwitchTests: HD12Harness {
     func test03Idle() {
         let app = launch()
         openBot()
+        XCTAssertEqual(caption(), "")
         click(button)
-        XCTAssertTrue(text(status).contains("Aucun tour"))
+        XCTAssertEqual(caption(), "")
         XCTAssertEqual(stops().count, 0)
         HVShot.capture("hd15-idle", app)
     }
@@ -101,12 +109,10 @@ final class KillSwitchTests: HD12Harness {
         send("HV_KILL go")
         XCTAssertTrue(element("hd.tool.current").waitForExistence(timeout: 15))
         configure(mode: "down")
-        click(button)
         let deadline = Date().addingTimeInterval(20)
         while element(button).isEnabled, Date() < deadline { usleep(50_000) }
         XCTAssertFalse(element(button).isEnabled)
-        XCTAssertTrue(text(status).contains("K3"))
-        XCTAssertTrue(text(status).contains("tunnel"))
+        XCTAssertEqual(caption(), "")
         HVShot.capture("hd15-no-tunnel", app)
     }
 
@@ -119,7 +125,7 @@ final class KillSwitchTests: HD12Harness {
         let deadline = Date().addingTimeInterval(15)
         while element(button).isEnabled, Date() < deadline { usleep(50_000) }
         XCTAssertFalse(element(button).isEnabled)
-        XCTAssertTrue(text(status).contains("K3"))
+        XCTAssertEqual(caption(), "")
         XCTAssertEqual(stops().count, 0)
         HVShot.capture("hd15-drop", app)
     }

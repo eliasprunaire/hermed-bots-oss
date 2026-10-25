@@ -106,6 +106,12 @@ final class SSHTunnelConfigTests: XCTestCase {
         }
     }
 
+    func testTheForbiddenHostBannerNamesNoMachine() {
+        let text = SSHFailure.forbiddenHost.message
+        XCTAssertEqual(text, "Cet hôte est refusé en mode test.")
+        XCTAssertFalse(text.contains("docs/"))
+    }
+
     func testTheChildEnvironmentIsBuiltByHandAndNeverInheritsTheKey() async throws {
         setenv("HV_TEST_SSH_KEY", secret, 1)
         defer { unsetenv("HV_TEST_SSH_KEY") }

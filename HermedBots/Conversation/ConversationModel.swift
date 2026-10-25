@@ -58,13 +58,19 @@ final class ConversationModel {
     private let onAPIRecovered: @MainActor () -> Void
     private var activeRuns: [String: [KillSwitch.Run: ConversationMachine.Key]] = [:]
     var stopInProgress = false
-    var hasStartingTurn: Bool { machine.threads.values.contains { $0.step == .sending && $0.run == nil } }
+    private var startIDs: [RunKey: String] = [:]
+    func startingTurns() -> [String] {
+        let host = connection()
+        return machine.threads.compactMap { key, thread in
+            guard thread.step == .sending, thread.run == nil else { return nil }
+            return startIDs[RunKey(connection: host, thread: key)]
+        }
+    }
     var runningTurns: [KillSwitch.Run] {
         Array(activeRuns[connection(), default: [:]].keys)
     }
 
-    func confirmStopped(_ run: KillSwitch.Run, status: String) {
-        let host = connection()
+    func confirmStopped(_ run: KillSwitch.Run, status: String, on host: String) {
         guard let thread = activeRuns[host]?[run] else { return }
         activeRuns[host]?[run] = nil
         forget(RunKey(connection: host, thread: thread), run: run.id)
@@ -280,7 +286,12 @@ final class ConversationModel {
         guard canSend else { return }
         let text = draft
         draft = ""
-        apply(.send(text), on: connection())
+        let host = connection()
+        apply(.send(text), on: host)
+        guard let key = machines[host]?.screen,
+              machines[host]?.threads[key]?.step == .sending,
+              machines[host]?.threads[key]?.run == nil else { return }
+        startIDs[RunKey(connection: host, thread: key)] = UUID().uuidString
     }
 
     /// « Nouvelle session » : un fil vide chez Hermes (`new_session`, S4), jamais `/reset` ; l'ancien fil reste dans la liste des fils passés
@@ -335,7 +346,10 @@ final class ConversationModel {
         guard await permits(key, on: connection) else { return }
         guard let client = client(connection) else { return apply(.failed(key, Self.unreachable), on: connection) }
         do {
-            apply(.created(key, session: try await client.newSession(profile: key.bot).id, message: message), on: connection)
+            let session = try await client.newSession(profile: key.bot).id
+            apply(.created(key, session: session, message: message), on: connection)
+            let saved = ConversationMachine.Key(bot: key.bot, thread: .session(session))
+            startIDs[RunKey(connection: connection, thread: saved)] = startIDs.removeValue(forKey: RunKey(connection: connection, thread: key))
         } catch {
             if connection == self.connection() { reportAPIError(error) }
             apply(.failed(key, Self.message(error)), on: connection)
@@ -402,7 +416,7 @@ final class ConversationModel {
 
     private func follow(_ key: ConversationMachine.Key, run: String, on connection: String, restoring: Bool = false) async {
         let runKey = RunKey(connection: connection, thread: key)
-        let stopTarget = KillSwitch.Run(profile: key.bot, id: run)
+        let stopTarget = KillSwitch.Run(profile: key.bot, id: run, turn: startIDs.removeValue(forKey: runKey) ?? "")
         activeRuns[connection, default: [:]][stopTarget] = key
         replay[runKey] = ReplayCursor(replayed: restoring)
         loopEvents[runKey] = []

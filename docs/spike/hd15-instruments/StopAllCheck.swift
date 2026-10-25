@@ -8,7 +8,7 @@ struct StopAllCheck {
         var sent: [KillSwitch.Run] = []
         var confirmed: [KillSwitch.Run] = []
         var targets = runs
-        let model = KillSwitch(endpoint: { endpoint }, connection: { "test" }, runs: { targets }, profiles: { ["p0"] }, confirmed: { run, _ in confirmed.append(run) }, cancel: { _, run in
+        let model = KillSwitch(endpoint: { endpoint }, connection: { "test" }, runs: { targets }, profiles: { ["p0"] }, confirmed: { run, _, _ in confirmed.append(run) }, cancel: { _, run, _ in
             sent.append(run)
             try await Task.sleep(for: .milliseconds(10))
             return "cancelled"
@@ -18,18 +18,20 @@ struct StopAllCheck {
         _ = await (first, second)
         assert(Set(sent) == Set(runs) && sent.count == 3)
         assert(confirmed.count == 3)
-        assert(model.message.contains("confirmée"))
+        assert(model.message.isEmpty)
         targets = []
         await model.stopAll()
-        assert(sent.count == 3 && model.message.contains("Aucun tour"))
+        assert(sent.count == 3 && model.message.isEmpty)
         targets = runs
-        let dropped = KillSwitch(endpoint: { endpoint }, connection: { "test" }, runs: { targets }, profiles: { [] }, confirmed: { _, _ in }, cancel: { _, _ in throw URLError(.cannotConnectToHost) })
+        let dropped = KillSwitch(endpoint: { endpoint }, connection: { "test" }, runs: { targets }, profiles: { [] }, confirmed: { _, _, _ in }, cancel: { _, _, _ in throw URLError(.cannotConnectToHost) }, canCancel: { _, _, _ in true })
         await dropped.stopAll()
-        assert(dropped.isDisabled && dropped.message.contains("K3"))
+        assert(dropped.message == KillSwitch.partialStop)
+        await dropped.checkSupport()
+        assert(dropped.message == KillSwitch.partialStop)
         var starting = true
         targets = []
         sent = []
-        let late = KillSwitch(endpoint: { endpoint }, connection: { "test" }, runs: { targets }, profiles: { [] }, confirmed: { _, _ in }, pending: { starting }, cancel: { _, run in
+        let late = KillSwitch(endpoint: { endpoint }, connection: { "test" }, runs: { targets }, profiles: { [] }, confirmed: { _, _, _ in }, pending: { starting ? ["t"] : [] }, cancel: { _, run, _ in
             sent.append(run)
             return "cancelled"
         })
@@ -40,16 +42,19 @@ struct StopAllCheck {
         }
         await late.stopAll()
         assert(sent == [runs[0]])
-        let disconnected = KillSwitch(endpoint: { nil }, connection: { "test" }, runs: { runs }, profiles: { [] }, confirmed: { _, _ in })
+        let unsupported = KillSwitch(endpoint: { endpoint }, connection: { "test" }, runs: { runs }, profiles: { ["p0"] }, confirmed: { _, _, _ in }, canCancel: { _, _, _ in false })
+        await unsupported.checkSupport()
+        assert(unsupported.isDisabled && unsupported.message.isEmpty)
+        let disconnected = KillSwitch(endpoint: { nil }, connection: { "test" }, runs: { runs }, profiles: { [] }, confirmed: { _, _, _ in })
         await disconnected.stopAll()
-        assert(disconnected.isDisabled && disconnected.message.contains("K3"))
+        assert(disconnected.isDisabled && disconnected.message == KillSwitch.partialStop)
         var mixedResults = 0
-        let mixed = KillSwitch(endpoint: { endpoint }, connection: { "test" }, runs: { runs }, profiles: { [] }, confirmed: { _, _ in mixedResults += 1 }, cancel: { _, run in
+        let mixed = KillSwitch(endpoint: { endpoint }, connection: { "test" }, runs: { runs }, profiles: { [] }, confirmed: { _, _, _ in mixedResults += 1 }, cancel: { _, run, _ in
             if run == runs[0] { throw URLError(.cannotConnectToHost) }
             return "cancelled"
         })
         await mixed.stopAll()
-        assert(mixedResults == 2 && mixed.isDisabled)
+        assert(mixedResults == 2 && mixed.message == KillSwitch.partialStop)
         var machine = ConversationMachine()
         _ = machine.handle(.select(bot: "p0"))
         _ = machine.handle(.send("premier tour"))

@@ -66,8 +66,8 @@ final class AppModel {
         connection: { [unowned self] in self.connection },
         runs: { [unowned self] in self.conversation.runningTurns },
         profiles: { [unowned self] in (self.bots.list.shown ?? []).map(\.id) },
-        confirmed: { [unowned self] in self.conversation.confirmStopped($0, status: $1) },
-        pending: { [unowned self] in self.conversation.hasStartingTurn },
+        confirmed: { [unowned self] in self.conversation.confirmStopped($0, status: $1, on: $2) },
+        pending: { [unowned self] in self.conversation.startingTurns() },
         setStopping: { [unowned self] in self.conversation.stopInProgress = $0 }
     )
     private func startResumableRun(bot: String, text: String, session: String, model: String?, key: String) async throws -> String {

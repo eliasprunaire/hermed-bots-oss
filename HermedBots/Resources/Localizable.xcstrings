@@ -61,9 +61,9 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "No SSH key in the Keychain. Add it, then retry." } }
       }
     },
-    "Cet hôte est refusé en mode test : il désigne perso-hermes." : {
+    "Cet hôte est refusé en mode test." : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "This host is refused in test mode: it names perso-hermes." } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This host is refused in test mode." } }
       }
     },
     "Changement du modèle…" : {
