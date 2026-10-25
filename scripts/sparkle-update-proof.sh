@@ -4,11 +4,186 @@
 #   bash scripts/sparkle-update-proof.sh prepare   builds both versions, signs the feed, checks the signatures; launches nothing
 #   bash scripts/sparkle-update-proof.sh           also starts the builds: needs a macOS GUI session, run it in a disposable VM
 #   bash scripts/sparkle-update-proof.sh published no build: installs the previous published release, then the next through the public feed
-# Optional environment: PROOF_OUT (parent of the evidence folder), SOURCE_PACKAGES (resolved SwiftPM folder for an offline build)
+# Optional environment: PROOF_OUT (parent of the evidence folder), SOURCE_PACKAGES (resolved SwiftPM folder for an offline build),
+# SPARKLE_PROOF_BUILD_DIR (extra folders, separated by a colon: bundle paths under them are not counted as installed copies)
 set -euo pipefail
 set +x
 umask 077
 unset SPARKLE_PRIVATE_KEY
+
+_sparkle_python() {
+  if [ -x /usr/bin/python3 ]; then
+    printf '%s\n' /usr/bin/python3
+  else
+    command -v python3
+  fi
+}
+
+# An update must replace the installed app, never leave a second copy of the identifier under test
+# Union of Spotlight hits and Launch Services path: rows for SPARKLE_PROOF_BUNDLE_ID
+# Skips missing paths and anything under the folders of SPARKLE_PROOF_BUILD_DIR (colon separated)
+# Prints the count and each copy's version with a redacted path. Exit 0 only when
+# there is exactly one remaining copy at SPARKLE_PROOF_TARGET_VERSION
+count_hermedbots_copies() {
+  local target=${SPARKLE_PROOF_TARGET_VERSION:?SPARKLE_PROOF_TARGET_VERSION is required}
+  local bundle=${SPARKLE_PROOF_BUNDLE_ID:?SPARKLE_PROOF_BUNDLE_ID is required}
+  local py
+  py=$(_sparkle_python)
+  [ -n "$py" ] || { echo 'python3 is required to count app copies' >&2; return 1; }
+  "$py" - "$bundle" "$target" "${SPARKLE_PROOF_BUILD_DIR:-}" \
+    "${SPARKLE_PROOF_MDFIND_FILE:-}" "${SPARKLE_PROOF_LSREGISTER_FILE:-}" <<'PY'
+import os, re, sys
+
+bundle_id, target, build_dir, md_file, ls_file = sys.argv[1:6]
+
+def read_text(path):
+    if not path:
+        return ""
+    try:
+        return open(path, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return ""
+
+def lsregister_paths(text, ident):
+    rec = {"identifier": None, "paths": []}
+    found = []
+
+    def flush():
+        if rec["identifier"] == ident:
+            found.extend(rec["paths"])
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("---") or re.match(r"(?i)^bundle\b", stripped):
+            flush()
+            rec = {"identifier": None, "paths": []}
+        ident_match = re.search(r"(?i)\bidentifier:\s+(\S+)", line)
+        if ident_match:
+            rec["identifier"] = ident_match.group(1).strip()
+        path_match = re.search(r"(?i)\bpath:\s+(\S.*?)\s*$", line)
+        if path_match:
+            path = re.sub(r"\s+\([^)]*\)\s*$", "", path_match.group(1).strip())
+            if path:
+                rec["paths"].append(path)
+    flush()
+    return found
+
+def exists(path):
+    return os.path.exists(path)
+
+def real(path):
+    return os.path.realpath(path)
+
+def under_build(path, roots):
+    try:
+        rp = real(path)
+        for root in roots.split(os.pathsep):
+            if root:
+                rr = real(root)
+                if rp == rr or rp.startswith(rr + os.sep):
+                    return True
+    except OSError:
+        pass
+    return False
+
+def redact(path):
+    home = os.environ.get("HOME") or ""
+    try:
+        home_real = real(home) if home else ""
+        rp = real(path) if exists(path) else path
+    except OSError:
+        home_real, rp = home.rstrip("/"), path
+    if home_real and (rp == home_real or rp.startswith(home_real + os.sep)):
+        return "~" + rp[len(home_real):]
+    if home and (path == home or path.startswith(home.rstrip("/") + "/")):
+        return "~" + path[len(home.rstrip("/")):]
+    if os.path.isabs(rp) or os.path.isabs(path):
+        name = os.path.basename(str(rp).rstrip(os.sep)) or os.path.basename(str(path).rstrip(os.sep))
+        return "<ABS>/" + (name or "path")
+    return rp
+
+def short_version(app):
+    plist = os.path.join(app, "Contents", "Info.plist")
+    buddy = "/usr/libexec/PlistBuddy"
+    if os.path.isfile(plist) and os.access(buddy, os.X_OK):
+        import subprocess
+        run = subprocess.run(
+            [buddy, "-c", "Print :CFBundleShortVersionString", plist],
+            capture_output=True, text=True,
+        )
+        if run.returncode == 0:
+            value = run.stdout.strip()
+            return value if value else "none"
+        return "none"
+    if not os.path.isfile(plist):
+        return "none"
+    text = open(plist, encoding="utf-8", errors="replace").read()
+    match = re.search(
+        r"<key>CFBundleShortVersionString</key>\s*<string>([^<]*)</string>",
+        text,
+    )
+    return match.group(1) if match else "none"
+
+paths = []
+for line in read_text(md_file).splitlines():
+    line = line.strip()
+    if line:
+        paths.append(line)
+paths.extend(lsregister_paths(read_text(ls_file), bundle_id))
+
+unique = []
+seen = set()
+for path in paths:
+    if not exists(path):
+        continue
+    if under_build(path, build_dir):
+        continue
+    key = real(path)
+    if key in seen:
+        continue
+    seen.add(key)
+    unique.append(key)
+
+print("single-copy count=%d" % len(unique))
+versions = []
+for path in unique:
+    version = short_version(path)
+    versions.append(version)
+    print("copy version=%s path=%s" % (version, redact(path)))
+
+ok = len(unique) == 1 and versions[0] == target
+sys.exit(0 if ok else 1)
+PY
+}
+
+# Live discovery on the machine that ran the install. Simulated files skip this.
+# A discovery tool that is missing or exits nonzero fails the check: its list would be incomplete
+prove_single_copy() {
+  local target=$1 bundle=$2
+  local tmp md dump lsregister=lsregister st=0 rc
+  # The identifier reaches the Spotlight query: only the characters of a bundle identifier
+  [[ $bundle =~ ^[A-Za-z0-9.-]+$ ]] || { echo 'single-copy discovery-failed source=bundle-id'; return 1; }
+  command -v lsregister >/dev/null 2>&1 \
+    || lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/sparkle-single-copy.XXXXXX") || return 1
+  md="$tmp/mdfind.txt"
+  dump="$tmp/lsregister.txt"
+  mdfind "kMDItemCFBundleIdentifier == '$bundle'" > "$md" 2>/dev/null || { rc=$?; echo "single-copy discovery-failed source=mdfind rc=$rc"; st=1; }
+  "$lsregister" -dump > "$dump" 2>/dev/null || { rc=$?; echo "single-copy discovery-failed source=lsregister rc=$rc"; st=1; }
+  if [ "$st" = 0 ]; then
+    SPARKLE_PROOF_BUNDLE_ID=$bundle \
+      SPARKLE_PROOF_TARGET_VERSION=$target \
+      SPARKLE_PROOF_MDFIND_FILE=$md \
+      SPARKLE_PROOF_LSREGISTER_FILE=$dump \
+      count_hermedbots_copies || st=$?
+  fi
+  rm -rf "${tmp:?}"
+  return "$st"
+}
+
+if [ "${SPARKLE_PROOF_SOURCE:-}" = 1 ]; then
+  return 0 2>/dev/null || exit 0
+fi
 
 cd "$(dirname "$0")/.."
 mode=${1:-run}
@@ -65,7 +240,7 @@ APPLESCRIPT
 }
 
 prove_published() {
-  local from='' to='' expected_from='' feed=fail install=fail installed_after=none codesign_verdict=fail spctl_verdict=fail
+  local from='' to='' expected_from='' feed=fail install=fail installed_after=none codesign_verdict=fail spctl_verdict=fail single_copy=fail
   local work app bundle_id python zip extract releases_repo published_feed
   # Same public releases repository as scripts/release-macos.sh and docs/distribution.md
   releases_repo=eliasprunaire/hermed-bots-releases
@@ -100,8 +275,8 @@ prove_published() {
   trap cleanup_published EXIT
   trap 'exit 130' INT TERM HUP
   report_published() {
-    printf '%s\n' "SPARKLE-PROOF-PUBLISHED from=${from:-none} to=${to:-none} feed=$feed install=$install installed-after-relaunch=$installed_after codesign=$codesign_verdict spctl=$spctl_verdict"
-    if [ "$feed" = published ] && [ "$install" = pass ] && [ "$installed_after" = "$to" ] && [ "$codesign_verdict" = pass ] && [ "$spctl_verdict" = pass ]; then
+    printf '%s\n' "SPARKLE-PROOF-PUBLISHED from=${from:-none} to=${to:-none} feed=$feed install=$install installed-after-relaunch=$installed_after codesign=$codesign_verdict spctl=$spctl_verdict single-copy $single_copy"
+    if [ "$feed" = published ] && [ "$install" = pass ] && [ "$installed_after" = "$to" ] && [ "$codesign_verdict" = pass ] && [ "$spctl_verdict" = pass ] && [ "$single_copy" = pass ]; then
       exit 0
     fi
     exit 1
@@ -225,6 +400,9 @@ PY
   installed_after=$(plist_published "$app" CFBundleShortVersionString || true)
   installed_after=${installed_after:-none}
   stop_published "$app"
+  SPARKLE_PROOF_BUILD_DIR="$work/extract${SPARKLE_PROOF_BUILD_DIR:+:$SPARKLE_PROOF_BUILD_DIR}"
+  if copies_out=$(prove_single_copy "$to" "$bundle_id"); then single_copy=pass; else single_copy=fail; fi
+  printf '%s\n' "$copies_out"
   if codesign --verify --deep --strict "$app" >/dev/null 2>&1; then codesign_verdict=pass; fi
   if spctl -a --type execute "$app" >/dev/null 2>&1; then spctl_verdict=pass; fi
   report_published
@@ -480,8 +658,13 @@ pass() { # name, expect, feed file and N+1 archive file served in this pass, bot
 }
 
 relaunched=''
+single_copy=fail
 pass update install appcast.xml "HermedBots-$n1.zip"
 installed_after_update=$relaunched
+SPARKLE_PROOF_BUILD_DIR="$work/dd:$work/v$n:$work/v$n1${SPARKLE_PROOF_BUILD_DIR:+:$SPARKLE_PROOF_BUILD_DIR}"
+if copies_out=$(prove_single_copy "$n1" "$bundle_id"); then single_copy=pass; else single_copy=fail; fi
+say "$copies_out"
 pass feed-signature refuse appcast-altered-signature.xml "HermedBots-$n1.zip"
 pass archive refuse appcast.xml "HermedBots-$n1-altered.zip"
-say "SPARKLE-PROOF N=$n N1=$n1 feed-signature=pass install=pass installed-after-relaunch=$installed_after_update altered-feed=refused altered-archive=refused"
+say "SPARKLE-PROOF N=$n N1=$n1 feed-signature=pass install=pass installed-after-relaunch=$installed_after_update altered-feed=refused altered-archive=refused single-copy $single_copy"
+[ "$single_copy" = pass ] || exit 1

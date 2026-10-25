@@ -23,3 +23,4 @@ Guidance for coding agents working in this repository.
 | No change to `.claude/`, `.codex/` or `.mcp.json` in a PR | `scripts/check-protected-paths.js` and `.github/workflows/protected-paths.yml` |
 | Latest OS, SDK, language, and tool versions, no backward compatibility (macOS 27+ here) | The independent verifier checks deployment targets, SDK and toolchain versions, and any new fallback at each PR. Review. |
 | No infrastructure information in diffs, PR bodies, pushes or comments | `scripts/infra-guard-ci.js`, `test/infra-guard-ci.test.js`, and job `scan` in `.github/workflows/infra-guard.yml` |
+| une mise à jour remplace l'app, jamais de doublon | `scripts/sparkle-update-proof.sh` (`count_hermedbots_copies` / `prove_single_copy`, `single-copy pass` or `single-copy fail` on `SPARKLE-PROOF*`), `test/distribution/sparkle-update.test.js`, and the mandatory post-update check in `.cursor/skills/verify-hermed-bots/` |
