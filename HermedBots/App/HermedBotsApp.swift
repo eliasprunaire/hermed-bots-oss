@@ -481,8 +481,9 @@ struct HermedBotsApp: App {
         let driver = SparkleUpdateDriver()
         let updates = UpdateCheck(driver: driver)
         let delegate = SparkleCycleDelegate(updates: updates)
-        let updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: delegate, userDriverDelegate: nil)
+        let updater = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: delegate, userDriverDelegate: nil)
         driver.attach(updater)
+        updater.startUpdater()
         sparkleDelegate = delegate
         self.updater = updater
         _model = State(initialValue: AppModel(environment: environment, updates: updates))

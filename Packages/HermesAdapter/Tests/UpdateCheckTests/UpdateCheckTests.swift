@@ -64,6 +64,15 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertTrue(updates.canCheck)
     }
 
+    func testPersistedAutomaticChecksAreTurnedOff() {
+        let stored = UpdatePolicy(automaticallyChecks: true, automaticallyDownloads: true)
+        XCTAssertEqual(UpdatePolicy.imposed(on: stored), .onDemand)
+        XCTAssertEqual(
+            UpdatePolicy.imposed(on: UpdatePolicy(automaticallyChecks: false, automaticallyDownloads: true)),
+            .onDemand
+        )
+    }
+
     func testRepeatedChecksWhileAlreadyCheckingStayCheap() {
         let driver = FakeUpdateDriver()
         let updates = UpdateCheck(driver: driver)

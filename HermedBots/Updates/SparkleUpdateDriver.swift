@@ -5,16 +5,36 @@ final class SparkleUpdateDriver: UpdateDriver {
     private var controller: SPUStandardUpdaterController?
 
     func attach(_ controller: SPUStandardUpdaterController) {
-        self.controller = controller
+        onMain {
+            self.controller = controller
+            Self.imposeOnDemandPolicy(controller.updater)
+        }
+    }
+
+    static func imposeOnDemandPolicy(_ updater: SPUUpdater) {
+        let stored = UpdatePolicy(
+            automaticallyChecks: updater.automaticallyChecksForUpdates,
+            automaticallyDownloads: updater.automaticallyDownloadsUpdates
+        )
+        let policy = UpdatePolicy.imposed(on: stored)
+        updater.automaticallyChecksForUpdates = policy.automaticallyChecks
+        updater.automaticallyDownloadsUpdates = policy.automaticallyDownloads
     }
 
     var canStartCheck: Bool {
-        controller?.updater.canCheckForUpdates ?? false
+        onMain { controller?.updater.canCheckForUpdates ?? false }
     }
 
     func startCheck() -> Bool {
-        controller?.checkForUpdates(nil)
-        return true
+        onMain {
+            controller?.checkForUpdates(nil)
+            return true
+        }
+    }
+
+    private func onMain<T>(_ body: () -> T) -> T {
+        if Thread.isMainThread { return body() }
+        return DispatchQueue.main.sync(execute: body)
     }
 }
 

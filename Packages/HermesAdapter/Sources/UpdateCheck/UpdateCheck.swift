@@ -1,3 +1,19 @@
+public struct UpdatePolicy: Equatable, Sendable {
+    public var automaticallyChecks: Bool
+    public var automaticallyDownloads: Bool
+
+    public init(automaticallyChecks: Bool, automaticallyDownloads: Bool) {
+        self.automaticallyChecks = automaticallyChecks
+        self.automaticallyDownloads = automaticallyDownloads
+    }
+
+    public static let onDemand = UpdatePolicy(automaticallyChecks: false, automaticallyDownloads: false)
+
+    public static func imposed(on stored: UpdatePolicy) -> UpdatePolicy {
+        .onDemand
+    }
+}
+
 public protocol UpdateDriver: AnyObject {
     var canStartCheck: Bool { get }
     func startCheck() -> Bool

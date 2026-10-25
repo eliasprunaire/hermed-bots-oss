@@ -445,7 +445,7 @@ pass() { # name, expect, feed file and N+1 archive file served in this pass, bot
   since=$(date '+%Y-%m-%d %H:%M:%S')
   launch_app "$app" || fail "$name: build $n did not start"
   wait_until 20 request_user_check "$(app_pids "$app" | head -1)" || fail "$name: the check menu could not be clicked"
-  if [ "$expect" = install ]; then confirm_sparkle_install "$(app_pids "$app" | head -1)"; fi
+  if [ "$name" != feed-signature ]; then confirm_sparkle_install "$(app_pids "$app" | head -1)"; fi
   wait_until 120 requested appcast.xml || fail "$name: build $n never asked for the feed"
   if [ "$name" = feed-signature ]; then
     sleep 30
