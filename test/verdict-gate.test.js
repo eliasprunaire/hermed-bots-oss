@@ -1315,6 +1315,99 @@ test("main lets a later FAIL on the head beat an older same-patch PASS", async (
   }
 });
 
+test("main refuses a SHA reachable from the base even if it is an ancestor of the head", async () => {
+  const repo = featureRepo();
+  try {
+    const { io, posts } = harness({
+      eventName: "pull_request",
+      payload: {
+        action: "synchronize",
+        pull_request: {
+          number: 7,
+          head: { sha: repo.sha2 },
+          base: { sha: repo.baseSha },
+          user: { login: "eliasprunaire" },
+        },
+      },
+      pages: [
+        {
+          url: `${API}/issues/7/comments?per_page=100`,
+          comments: [rawComment(1, "2026-10-15T18:00:00Z", marked("PASS", repo.baseSha))],
+        },
+      ],
+      routes: {
+        commits: [{ sha: repo.baseSha }, { sha: repo.sha2 }],
+        timeline: [],
+        graphql: historyPayload({
+          commits: [repo.baseSha, repo.sha2],
+          force: [],
+        }),
+      },
+    });
+    attachGit(io, repo.dir);
+    assert.equal(await main([], io), 0);
+    assert.equal(posts[0].body.state, "failure");
+    assert.equal(
+      posts[0].body.description,
+      `VERDICT PASS @ ${repo.baseSha} is not on this pull`,
+    );
+  } finally {
+    rmSync(repo.dir, { recursive: true, force: true });
+  }
+});
+
+test("main refuses an ancestor of the head that never appears on the pull timeline", async () => {
+  const { dir, git } = initGitDir();
+  try {
+    writeFileSync(join(dir, "note.txt"), "base\n");
+    git(["add", "note.txt"]);
+    git(["commit", "-qm", "base"]);
+    const baseSha = git(["rev-parse", "HEAD"]).stdout.trim();
+    writeFileSync(join(dir, "note.txt"), "one\n");
+    git(["add", "note.txt"]);
+    git(["commit", "-qm", "one"]);
+    const mid = git(["rev-parse", "HEAD"]).stdout.trim();
+    writeFileSync(join(dir, "note.txt"), "two\n");
+    git(["add", "note.txt"]);
+    git(["commit", "-qm", "two"]);
+    const head = git(["rev-parse", "HEAD"]).stdout.trim();
+    const ancestor = git(["merge-base", "--is-ancestor", mid, head]);
+    assert.equal(ancestor.status, 0);
+    const { io, posts } = harness({
+      eventName: "pull_request",
+      payload: {
+        action: "synchronize",
+        pull_request: {
+          number: 7,
+          head: { sha: head },
+          base: { sha: baseSha },
+          user: { login: "eliasprunaire" },
+        },
+      },
+      pages: [
+        {
+          url: `${API}/issues/7/comments?per_page=100`,
+          comments: [rawComment(1, "2026-10-15T18:00:00Z", marked("PASS", mid))],
+        },
+      ],
+      routes: {
+        commits: [{ sha: head }],
+        timeline: [],
+        graphql: historyPayload({ commits: [head], force: [] }),
+      },
+    });
+    attachGit(io, dir);
+    assert.equal(await main([], io), 0);
+    assert.equal(posts[0].body.state, "failure");
+    assert.equal(
+      posts[0].body.description,
+      `VERDICT PASS @ ${mid} is not on this pull`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("main refuses an empty diff even when both patch-ids would match", async () => {
   const { dir, git } = initGitDir();
   try {

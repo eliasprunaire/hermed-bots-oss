@@ -2,10 +2,13 @@ name: Protected paths
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
   pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   protected-agent-config:
@@ -23,6 +26,9 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
         run: |
           # run the checker as it exists on the base branch, so a PR cannot weaken its own gate
           checker="$RUNNER_TEMP/check-protected-paths.js"

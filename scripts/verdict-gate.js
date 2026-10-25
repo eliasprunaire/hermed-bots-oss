@@ -994,17 +994,19 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
       names.repo,
       head.number,
     );
-    for (const sha of history) {
-      onPull.add(sha);
-    }
     fetchCommit(io, headSha);
     fetchCommit(io, head.baseSha);
-    for (const sha of offHead) {
-      if (onPull.has(sha)) {
-        fetchCommit(io, sha);
-      } else if (fetchCommit(io, sha) && isAncestor(io, sha, headSha)) {
-        onPull.add(sha);
+    for (const sha of history) {
+      if (sha === headSha) {
+        continue;
       }
+      if (!fetchCommit(io, sha)) {
+        continue;
+      }
+      if (isAncestor(io, sha, head.baseSha)) {
+        continue;
+      }
+      onPull.add(sha);
     }
     const identity = patchIdentity(io, onPull, headSha, head.baseSha);
     headPatchId = identity.headPatchId;
