@@ -97,7 +97,6 @@ final class SSHTunnelConfigTests: XCTestCase {
 
         let failed = await fetches.fetch(profile: "cyber", into: &store, read: read)
         XCTAssertNil(failed)
-        XCTAssertFalse(fetches.gotValue("cyber"))
         // le même refus ne relit pas
         let sameRefusal = await fetches.fetch(profile: "cyber", into: &store, read: read)
         XCTAssertNil(sameRefusal)
@@ -107,13 +106,19 @@ final class SSHTunnelConfigTests: XCTestCase {
         let retried = await fetches.fetch(profile: "cyber", into: &store, read: read)
         XCTAssertEqual(retried, secret)
         XCTAssertEqual(reads, ["cyber", "cyber"])
-        XCTAssertTrue(fetches.gotValue("cyber"))
         XCTAssertEqual(try store.apiKey(profile: "cyber"), secret)
 
-        // une lecture réussie ne vaut que pour son profil
-        XCTAssertFalse(fetches.gotValue("sport"))
+        // un profil qui a répondu rouvre sa lecture sans toucher aux autres
+        _ = await fetches.fetch(profile: "sport", into: &store, read: read)
         fetches.settle("cyber")
-        XCTAssertFalse(fetches.gotValue("cyber"))
+        _ = await fetches.fetch(profile: "cyber", into: &store, read: read)
+        _ = await fetches.fetch(profile: "sport", into: &store, read: read)
+        XCTAssertEqual(reads, ["cyber", "cyber", "sport", "cyber"])
+    }
+
+    func testAHeldKeyThatHermesRefusesIsNotReportedAsMissing() {
+        XCTAssertTrue(HermesAPIKey.unauthorizedMessage(profile: "cyber", holdsKey: true).contains("clé API est refusée pour le profil cyber"))
+        XCTAssertEqual(HermesAPIKey.unauthorizedMessage(profile: "cyber", holdsKey: false), HermesAPIKey.missingMessage(profile: "cyber"))
     }
 
     func testANamedProfileWithoutAKeyShowsTheMissingBannerAndNeverSendsTheDefaultKey() async throws {

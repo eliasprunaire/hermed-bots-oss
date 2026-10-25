@@ -77,6 +77,6 @@ final class ProfileKeys: HD12Harness {
             XCTAssertTrue(button.isHittable, "élément inaccessible : \(id)")
             XCTAssertTrue(settings.frame.contains(button.frame), "\(id) hors de la fenêtre")
         }
-        HVShot.capture("hd17-key-settings", settings)
+        HVShot.capture("hd17-connection-no-key", settings)
     }
 }

@@ -377,9 +377,8 @@ final class AppModel {
             await recheckAPI()
             return
         }
-        apiError = apiKeyFetches.gotValue(profile)
-            ? String(localized: "La clé API est refusée pour le profil \(profile).")
-            : HermesAPIKey.missingMessage(profile: profile)
+        let holdsKey = (try? environment.secrets.resolvedAPIKey(profile: profile)) != nil
+        apiError = HermesAPIKey.unauthorizedMessage(profile: profile, holdsKey: holdsKey)
     }
 
     /// Une lecture SSH par profil et par refus : le Trousseau est mis à jour, la valeur n'est pas journalisée

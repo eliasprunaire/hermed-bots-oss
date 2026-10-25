@@ -470,6 +470,11 @@ enum HermesAPIKey {
     static func missingMessage(profile: String) -> String {
         String(localized: "Clé API introuvable sur l'hôte pour le profil \(profile).")
     }
+
+    /// Une clé détenue que Hermes refuse n'est pas une clé introuvable
+    static func unauthorizedMessage(profile: String, holdsKey: Bool) -> String {
+        holdsKey ? String(localized: "La clé API est refusée pour le profil \(profile).") : missingMessage(profile: profile)
+    }
 }
 
 enum HermesProfileName: Error, Equatable {
@@ -490,28 +495,17 @@ enum APIKeyRecovery {
 @MainActor
 final class APIKeyFetches {
     private var attempted: Set<String> = []
-    private var recovered: Set<String> = []
 
     /// nil si la garde est fermée pour ce profil, si la lecture échoue ou si la clé est introuvable ; la valeur n'est pas journalisée
     func fetch(profile: String, into secrets: inout some SecretStore, read: (String) async throws -> String?) async -> String? {
         guard attempted.insert(profile).inserted else { return nil }
-        guard let key = try? await APIKeyRecovery.refresh(profile: profile, into: &secrets, fetch: read) else { return nil }
-        recovered.insert(profile)
-        return key
+        return try? await APIKeyRecovery.refresh(profile: profile, into: &secrets, fetch: read)
     }
-
-    func gotValue(_ profile: String) -> Bool { recovered.contains(profile) }
 
     /// Le profil a répondu : le prochain refus peut relire
-    func settle(_ profile: String) {
-        attempted.remove(profile)
-        recovered.remove(profile)
-    }
+    func settle(_ profile: String) { attempted.remove(profile) }
 
-    func reset() {
-        attempted.removeAll()
-        recovered.removeAll()
-    }
+    func reset() { attempted.removeAll() }
 }
 
 /// Un ssh vivant : son port local est déjà ouvert quand la session existe
