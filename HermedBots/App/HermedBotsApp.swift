@@ -77,7 +77,7 @@ final class AppModel {
     }
     private var environment: AppEnvironment
     private var sshResolver: any SSHConfigResolving
-    private let connector: SSHConnectCoordinator
+    private let connector: SSHConnector
     private var previewGeneration = 0
     let updates: UpdateCheck
     private(set) var updateRender = 0
@@ -115,7 +115,7 @@ final class AppModel {
         self.environment = environment
         self.updates = updates
         self.sshResolver = sshResolver
-        self.connector = SSHConnectCoordinator(resolver: sshResolver)
+        self.connector = SSHConnector(resolver: sshResolver)
         host = environment.ssh?.host ?? ""
         #if DEBUG
         if environment.isTestMode {
@@ -207,6 +207,7 @@ final class AppModel {
     }
 
     /// Relit `ssh -G` pour l'alias saisi et met à jour les champs en lecture seule
+    /// Un alias perso-hermes en mode test n'appelle pas `ssh -G`
     func refreshPreview() {
         previewGeneration += 1
         let id = previewGeneration
@@ -215,18 +216,17 @@ final class AppModel {
             preview = nil
             return
         }
+        if environment.refusePersoHermes, alias.lowercased().contains("perso-hermes") {
+            preview = nil
+            return
+        }
         Task { await resolvePreview(alias: alias, id: id) }
     }
 
-    /// Ouvre le tunnel vers l'alias saisi ; un alias inconnu ou un hôte refusé s'affichent sans lancer ssh
+    /// Ouvre le tunnel vers l'alias saisi ; un alias vide, invalide ou refusé invalide la génération en cours sans lancer ssh
     func connect() {
         persistEndpoint()
-        let alias = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !alias.isEmpty else {
-            tunnel.refuse(.invalidHost)
-            return
-        }
-        connector.connect(alias: alias, refusePersoHermes: environment.isTestMode, opened: { [weak self] config, preview in
+        connector.begin(alias: host, refusePersoHermes: environment.refusePersoHermes, opened: { [weak self] config, preview in
             self?.preview = preview
             self?.openTunnel(config)
         }, refused: { [weak self] failure, preview in

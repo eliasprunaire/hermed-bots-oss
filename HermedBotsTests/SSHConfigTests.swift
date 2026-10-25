@@ -54,6 +54,7 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertEqual(preview.user, "operator")
         XCTAssertEqual(preview.port, 2222)
         XCTAssertEqual(preview.jumpCount, 2)
+        XCTAssertEqual(preview.hopHosts, ["jump.invalid", "hop2.invalid"])
         XCTAssertEqual(preview.jumpLabel, "2 sauts")
         XCTAssertEqual(preview.identity, .certificate)
         XCTAssertEqual(preview.identity.label, "certificat")
@@ -152,10 +153,54 @@ final class SSHConfigTests: XCTestCase {
             XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
         }
     }
+
+    func testAMatchHostWithOnlyStandardValuesIsKnownFromDashVvDebug() {
+        let dump = defaultDump.replacingOccurrences(of: "unknown-alias.invalid", with: "match-defaults.invalid")
+        let dashV = unmatchedDebug
+        XCTAssertTrue(parse(dump, alias: "match-defaults.invalid", debug: dashV).isUnknownAlias)
+        let dashVv = """
+            debug2: checking match for 'host match-defaults.invalid' originally match-defaults.invalid
+            debug3: match found
+            debug1: Applying options for *
+            """
+        let preview = parse(dump, alias: "match-defaults.invalid", debug: dashVv)
+        XCTAssertFalse(preview.isUnknownAlias)
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true))
+    }
+
+    func testAPersoHermesProxyJumpIsRefusedInTestMode() {
+        let dump = """
+            user operator
+            hostname gateway.invalid
+            port 22
+            identityfile /tmp/fake-id.invalid
+            proxyjump jump.invalid,perso-hermes.invalid
+            """
+        let preview = parse(dump, alias: "lab.invalid")
+        XCTAssertEqual(preview.hopHosts, ["jump.invalid", "perso-hermes.invalid"])
+        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
+            XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
+        }
+    }
+
+    func testAPersoHermesProxyCommandIsRefusedInTestMode() {
+        let dump = """
+            user operator
+            hostname gateway.invalid
+            port 22
+            identityfile /tmp/fake-id.invalid
+            proxycommand ssh -W %h:%p perso-hermes.invalid
+            """
+        let preview = parse(dump, alias: "lab.invalid")
+        XCTAssertEqual(preview.proxyCommand, "ssh -W %h:%p perso-hermes.invalid")
+        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
+            XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
+        }
+    }
 }
 
 @MainActor
-final class SSHConnectCoordinatorTests: XCTestCase {
+final class SSHConnectorTests: XCTestCase {
     private func knownDump(alias: String, hostname: String) -> SSHConfigDump {
         SSHConfigDump(
             stdout: """
@@ -174,12 +219,12 @@ final class SSHConnectCoordinatorTests: XCTestCase {
             "a.invalid": knownDump(alias: "a.invalid", hostname: "alpha.invalid"),
             "b.invalid": knownDump(alias: "b.invalid", hostname: "beta.invalid"),
         ])
-        let coordinator = SSHConnectCoordinator(resolver: resolver, localUser: "operator")
+        let connector = SSHConnector(resolver: resolver, localUser: "operator")
         var opened: [String] = []
         var refused: [SSHFailure] = []
-        coordinator.connect(alias: "a.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        connector.begin(alias: "a.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         await eventually { await resolver.started == ["a.invalid"] }
-        coordinator.connect(alias: "b.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        connector.begin(alias: "b.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         await eventually { await resolver.started == ["a.invalid", "b.invalid"] }
         await resolver.release("b.invalid")
         await eventually { opened == ["b.invalid"] }
@@ -187,6 +232,52 @@ final class SSHConnectCoordinatorTests: XCTestCase {
         try? await Task.sleep(for: .milliseconds(80))
         XCTAssertEqual(opened, ["b.invalid"])
         XCTAssertEqual(refused, [])
+    }
+
+    func testAnEmptyBeginInvalidatesAnInFlightResolution() async {
+        let resolver = GatedSSHResolver(dumps: [
+            "a.invalid": knownDump(alias: "a.invalid", hostname: "alpha.invalid"),
+        ])
+        let connector = SSHConnector(resolver: resolver, localUser: "operator")
+        var opened: [String] = []
+        var refused: [SSHFailure] = []
+        connector.begin(alias: "a.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        await eventually { await resolver.started == ["a.invalid"] }
+        connector.begin(alias: "   ", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        XCTAssertEqual(refused, [.invalidHost])
+        XCTAssertEqual(await resolver.started, ["a.invalid"])
+        await resolver.release("a.invalid")
+        try? await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(opened, [])
+        XCTAssertEqual(refused, [.invalidHost])
+    }
+
+    func testAnInvalidBeginInvalidatesAnInFlightResolutionWithoutADump() async {
+        let resolver = GatedSSHResolver(dumps: [
+            "a.invalid": knownDump(alias: "a.invalid", hostname: "alpha.invalid"),
+        ])
+        let connector = SSHConnector(resolver: resolver, localUser: "operator")
+        var opened: [String] = []
+        var refused: [SSHFailure] = []
+        connector.begin(alias: "a.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        await eventually { await resolver.started == ["a.invalid"] }
+        connector.begin(alias: "bad alias", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        XCTAssertEqual(refused, [.invalidHost])
+        await resolver.release("a.invalid")
+        try? await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(opened, [])
+        XCTAssertEqual(await resolver.started, ["a.invalid"])
+    }
+
+    func testPersoHermesIsRefusedWithoutDumpingTheConfig() async {
+        let resolver = GatedSSHResolver(dumps: [:])
+        let connector = SSHConnector(resolver: resolver, localUser: "operator")
+        var opened: [String] = []
+        var refused: [SSHFailure] = []
+        connector.begin(alias: "perso-hermes.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        XCTAssertEqual(refused, [.forbiddenHost])
+        XCTAssertEqual(opened, [])
+        XCTAssertEqual(await resolver.started, [])
     }
 
     private func eventually(_ condition: () async -> Bool) async {
@@ -219,3 +310,84 @@ private actor GatedSSHResolver: SSHConfigResolving {
         gates[alias] = nil
     }
 }
+
+#if DEBUG
+@MainActor
+final class AppModelConnectTests: XCTestCase {
+    private func isolatedDefaults() -> UserDefaults {
+        let name = "hd07-appmodel-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        addTeardownBlock { UserDefaults(suiteName: name)?.removePersistentDomain(forName: name) }
+        return defaults
+    }
+
+    private func knownDump(alias: String, hostname: String) -> SSHConfigDump {
+        SSHConfigDump(
+            stdout: """
+            user operator
+            hostname \(hostname)
+            port 22
+            identityfile /tmp/fake-id.invalid
+            proxyjump none
+            """,
+            stderr: "debug1: Applying options for \(alias)\n"
+        )
+    }
+
+    func testAnEmptySecondRequestOnAppModelNeverOpensTheFirstTunnel() async {
+        let resolver = GatedSSHResolver(dumps: [
+            "a.invalid": knownDump(alias: "a.invalid", hostname: "alpha.invalid"),
+        ])
+        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], defaults: isolatedDefaults(), keychain: { InMemorySecretStore(apiKey: nil) })
+        let model = AppModel(environment: environment, sshResolver: resolver)
+        model.host = "a.invalid"
+        model.connect()
+        await eventually { await resolver.started == ["a.invalid"] }
+        model.host = ""
+        model.connect()
+        if case .failed(let failure) = model.tunnel.state {
+            XCTAssertEqual(failure, .invalidHost)
+        } else {
+            XCTFail("attendu invalidHost, obtenu \(model.tunnel.state)")
+        }
+        await resolver.release("a.invalid")
+        try? await Task.sleep(for: .milliseconds(80))
+        if case .failed(let failure) = model.tunnel.state {
+            XCTAssertEqual(failure, .invalidHost)
+        } else {
+            XCTFail("A a ouvert un tunnel périmé : \(model.tunnel.state)")
+        }
+        XCTAssertEqual(await resolver.started, ["a.invalid"])
+    }
+
+    func testPersoHermesOnAppModelNeverDumpsOrOpens() async {
+        let resolver = GatedSSHResolver(dumps: [
+            "perso-hermes.invalid": knownDump(alias: "perso-hermes.invalid", hostname: "perso-hermes.invalid"),
+        ])
+        let environment = AppEnvironment.resolve(
+            ["HV_TEST_MODE": "1", "HV_SSH_HOST": "perso-hermes.invalid"],
+            defaults: isolatedDefaults(),
+            keychain: { InMemorySecretStore(apiKey: nil) }
+        )
+        let model = AppModel(environment: environment, sshResolver: resolver)
+        try? await Task.sleep(for: .milliseconds(40))
+        XCTAssertEqual(await resolver.started, [])
+        model.connect()
+        XCTAssertEqual(await resolver.started, [])
+        if case .failed(let failure) = model.tunnel.state {
+            XCTAssertEqual(failure, .forbiddenHost)
+        } else {
+            XCTFail("\(model.tunnel.state)")
+        }
+    }
+
+    private func eventually(_ condition: () async -> Bool) async {
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            if await condition() { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTFail("condition jamais vraie")
+    }
+}
+#endif

@@ -11,7 +11,7 @@ final class SSHTunnelConfigTests: XCTestCase {
         let args = try config().arguments(localPort: 51234)
         XCTAssertEqual(args.last, "lab.invalid")
         XCTAssertEqual(args.indices.filter { args[$0] == "-L" }.map { args[$0 + 1] }, ["127.0.0.1:51234:127.0.0.1:8642"])
-        for required in ["-N", "-T", "BatchMode=yes", "ExitOnForwardFailure=yes", "ForwardAgent=no", "ControlMaster=no", "ControlPath=none", "ConnectTimeout=5", "ServerAliveInterval=5", "ServerAliveCountMax=2"] {
+        for required in ["-N", "-T", "BatchMode=yes", "ExitOnForwardFailure=yes", "ForwardAgent=no", "ControlMaster=no", "ControlPath=none", "ForkAfterAuthentication=no", "LogLevel=ERROR", "ConnectTimeout=5", "ServerAliveInterval=5", "ServerAliveCountMax=2"] {
             XCTAssertTrue(args.contains(required), required)
         }
         XCTAssertNil(args.firstIndex(of: "-F"))
@@ -43,6 +43,15 @@ final class SSHTunnelConfigTests: XCTestCase {
 
     func testPersoHermesIsAllowedOutsideTestMode() throws {
         XCTAssertEqual(try config(alias: "perso-hermes.invalid", hostname: "perso-hermes.invalid", refuse: false).alias, "perso-hermes.invalid")
+    }
+
+    func testPersoHermesOnAJumpOrProxyCommandIsRefusedInTestMode() {
+        XCTAssertThrowsError(try SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", hopHosts: ["jump.invalid", "perso-hermes.invalid"], refusePersoHermes: true)) {
+            XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
+        }
+        XCTAssertThrowsError(try SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", proxyCommand: "ssh -W %h:%p perso-hermes.invalid", refusePersoHermes: true)) {
+            XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
+        }
     }
 
     func testAliasAndPortAreValidatedBeforeAnyArgumentIsBuilt() {

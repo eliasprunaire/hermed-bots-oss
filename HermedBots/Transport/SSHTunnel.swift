@@ -73,10 +73,16 @@ struct SSHTunnelConfig: Equatable, Sendable {
     let sshPort: Int
     let remotePort: Int
 
-    /// `refusePersoHermes` est vrai en mode test : aucune connexion de test ne doit viser perso-hermes, ni comme alias ni comme hôte résolu
-    init(alias: String, hostname: String, user: String, sshPort: Int = 22, remotePort: Int = 8642, refusePersoHermes: Bool) throws {
-        if refusePersoHermes, alias.lowercased().contains("perso-hermes") || hostname.lowercased().contains("perso-hermes") {
-            throw SSHFailure.forbiddenHost
+    let hopHosts: [String]
+    let proxyCommand: String?
+
+    /// `refusePersoHermes` est vrai en mode test : aucune connexion de test ne doit viser perso-hermes, ni comme alias, hôte résolu, saut ou ProxyCommand
+    init(alias: String, hostname: String, user: String, sshPort: Int = 22, remotePort: Int = 8642, hopHosts: [String] = [], proxyCommand: String? = nil, refusePersoHermes: Bool) throws {
+        if refusePersoHermes {
+            let route = [alias, hostname] + hopHosts + [proxyCommand].compactMap { $0 }
+            if route.contains(where: { $0.lowercased().contains("perso-hermes") }) {
+                throw SSHFailure.forbiddenHost
+            }
         }
         guard Self.isAlias(alias) else { throw SSHFailure.invalidHost }
         guard Self.isHostname(hostname) else { throw SSHFailure.invalidHost }
@@ -86,6 +92,8 @@ struct SSHTunnelConfig: Equatable, Sendable {
         self.user = user
         self.sshPort = sshPort
         self.remotePort = remotePort
+        self.hopHosts = hopHosts
+        self.proxyCommand = proxyCommand
     }
 
     /// Les arguments de `ssh` : l'alias, jamais `-F`, `-i`, `-l` ni `-p`
@@ -103,6 +111,7 @@ struct SSHTunnelConfig: Equatable, Sendable {
         for option in [
             "BatchMode=yes", "ExitOnForwardFailure=yes", "ForwardAgent=no",
             "ControlMaster=no", "ControlPath=none",
+            "ForkAfterAuthentication=no", "LogLevel=ERROR",
             "ConnectTimeout=5", "ServerAliveInterval=5", "ServerAliveCountMax=2",
         ] {
             args += ["-o", option]
@@ -110,7 +119,7 @@ struct SSHTunnelConfig: Equatable, Sendable {
         return args
     }
 
-    private static func isAlias(_ value: String) -> Bool {
+    static func isAlias(_ value: String) -> Bool {
         (1...253).contains(value.count) && value.first != "-"
             && value.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) }
     }
@@ -148,7 +157,7 @@ final class Child: Sendable {
     private let exited = OSAllocatedUnfairLock(initialState: false)
     private let heldStdin: OSAllocatedUnfairLock<Int32?>
 
-    fileprivate init(pid: pid_t, group: pid_t, ownsGroup: Bool, stdoutFD: Int32?, stderrFD: Int32, heldStdin: Int32?) {
+    fileprivate init(pid: pid_t, group: pid_t, ownsGroup: Bool, stdoutFD: Int32?, stderrFD: Int32, heldStdin: Int32?, stderrLimit: Int = Spawn.maxStderr) {
         self.pid = pid
         self.group = group
         self.ownsGroup = ownsGroup
@@ -165,7 +174,7 @@ final class Child: Sendable {
         }
         var readers = [Task<Void, Never>]()
         let errBuffer = stderrBuffer
-        readers.append(Task { await Spawn.blocking { Spawn.drain(stderrFD, into: errBuffer, limit: Spawn.maxStderr) } })
+        readers.append(Task { await Spawn.blocking { Spawn.drain(stderrFD, into: errBuffer, limit: stderrLimit) } })
         if let stdoutFD {
             let outBuffer = stdoutBuffer
             readers.append(Task { await Spawn.blocking { Spawn.drain(stdoutFD, into: outBuffer, limit: .max) } })
@@ -214,7 +223,7 @@ enum Spawn {
     /// Lance `path` dans un groupe de processus neuf, ou dans celui de `leader`
     /// Le processus n'hérite ni de l'environnement de l'app (il reçoit `environment` seulement) ni de ses descripteurs
     /// `holdingStdinOpen` : l'entrée standard du processus est un tube dont l'app garde l'écriture ouverte (voir `startWatchdog`)
-    static func start(_ path: String, _ arguments: [String], environment: [String: String], joining leader: pid_t? = nil, stdin: Data? = nil, captureStdout: Bool = false, holdingStdinOpen: Bool = false) throws -> Child {
+    static func start(_ path: String, _ arguments: [String], environment: [String: String], joining leader: pid_t? = nil, stdin: Data? = nil, captureStdout: Bool = false, holdingStdinOpen: Bool = false, stderrLimit: Int = maxStderr) throws -> Child {
         var fileActions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&fileActions)
         defer { posix_spawn_file_actions_destroy(&fileActions) }
@@ -275,7 +284,7 @@ enum Spawn {
             if !holdingStdinOpen { close(inPipe[1]) }
         }
         let held = holdingStdinOpen ? inPipe[1] : nil
-        return Child(pid: pid, group: leader ?? pid, ownsGroup: leader == nil, stdoutFD: captureStdout ? outPipe[0] : nil, stderrFD: errPipe[0], heldStdin: held)
+        return Child(pid: pid, group: leader ?? pid, ownsGroup: leader == nil, stdoutFD: captureStdout ? outPipe[0] : nil, stderrFD: errPipe[0], heldStdin: held, stderrLimit: stderrLimit)
     }
 
     /// Le chef du groupe d'un tunnel : un sh qui lit son entrée standard, puis supprime le dossier privé et tue le groupe entier quand elle se ferme
@@ -286,8 +295,8 @@ enum Spawn {
     }
 
     /// Lance, attend la fin et rend les sorties ; au bout de `timeout` le processus est tué et l'appel échoue
-    static func run(_ path: String, _ arguments: [String], environment: [String: String], joining leader: pid_t? = nil, stdin: Data? = nil, timeout: Duration) async throws -> Output {
-        let child = try start(path, arguments, environment: environment, joining: leader, stdin: stdin, captureStdout: true)
+    static func run(_ path: String, _ arguments: [String], environment: [String: String], joining leader: pid_t? = nil, stdin: Data? = nil, timeout: Duration, stderrLimit: Int = maxStderr) async throws -> Output {
+        let child = try start(path, arguments, environment: environment, joining: leader, stdin: stdin, captureStdout: true, stderrLimit: stderrLimit)
         let fired = OSAllocatedUnfairLock(initialState: false)
         let timer = Task {
             try await Task.sleep(for: timeout)

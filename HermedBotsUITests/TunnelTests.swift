@@ -146,9 +146,31 @@ final class TunnelTests: XCTestCase {
         let app = launch(host: "perso-hermes.invalid")
         let banner = wait(for: .bannerError, in: app, toContain: "refusé en mode test", timeout: 10)
         XCTAssertTrue(banner.contains("refusé en mode test"), banner)
-        // le temps à l'échantillonneur de voir qu'aucun ssh ne démarre
+        // le temps à l'échantillonneur (et à ps) de voir qu'aucun /usr/bin/ssh ne démarre, y compris `ssh -G -vv`
         sleep(4)
+        let ssh = processArgs().filter { $0.contains("/usr/bin/ssh") && $0.contains("perso-hermes") }
+        XCTAssertEqual(ssh, [], ssh.joined(separator: "\n"))
         XCTAssertEqual(text(of: element(.statusVersion, in: app)), "inconnue")
         HVShot.capture("hd07-refuse-launch", app)
+    }
+
+    /// Le runner peut lire la table des processus ; l'app sandboxée ne le peut pas. `lane-processes.sh` reprend le même filtre.
+    private func processArgs() -> [String] {
+        let pipe = Pipe()
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/ps")
+        process.arguments = ["-Ao", "args="]
+        process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            XCTFail("ps indisponible : \(error)")
+            return []
+        }
+        XCTAssertEqual(process.terminationStatus, 0, "ps a échoué")
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        return String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline).map { String($0) }
     }
 }

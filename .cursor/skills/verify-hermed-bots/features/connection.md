@@ -40,26 +40,27 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 
 ## Transport
 
-- Résolution : `/usr/bin/ssh -G <alias>`.
-- Tunnel : `/usr/bin/ssh` + alias, `-N -T`, `-L 127.0.0.1:<port libre>:127.0.0.1:<remotePort>`, `BatchMode=yes`, `ExitOnForwardFailure=yes`, `ForwardAgent=no`, `ControlMaster=no`, `ControlPath=none`, `ConnectTimeout`, `ServerAliveInterval`, `ServerAliveCountMax`.
+- Résolution : `/usr/bin/ssh -G -vv <alias>` (`match found` n'apparaît qu'à `-vv`).
+- Tunnel : `/usr/bin/ssh` + alias, `-N -T`, `-L 127.0.0.1:<port libre>:127.0.0.1:<remotePort>`, `BatchMode=yes`, `ExitOnForwardFailure=yes`, `ForwardAgent=no`, `ControlMaster=no`, `ControlPath=none`, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, `ConnectTimeout`, `ServerAliveInterval`, `ServerAliveCountMax`.
 - `SSH_AUTH_SOCK` vient de la session. `IdentityAgent` de la config ssh a priorité.
 - Liste des profils : second `/usr/bin/ssh` avec l'alias, commande `hermes profile list`.
+- Une nouvelle demande de connexion, y compris un refus local (alias vide ou invalide), invalide la génération en cours.
 
 ## Échecs
 
 | Cas | Message |
 | --- | --- |
-| Alias inconnu (`ssh -G -v` n'applique aucun bloc Host autre que `*` ; un bloc Host aux valeurs standard reste valide) | Cet alias SSH est inconnu. |
+| Alias inconnu (`ssh -G -vv` n'applique aucun bloc Host autre que `*` ni aucun Match ; un bloc Host ou Match aux valeurs standard reste valide) | Cet alias SSH est inconnu. |
 | Agent verrouillé ou vide | L'agent SSH est verrouillé ou vide. |
 | Certificat expiré | Le certificat SSH a expiré. |
 | Serveur refuse l'identité | Le serveur refuse l'identité SSH. |
 | Clé d'hôte changée | La clé de l'hôte a changé. |
 | Hôte injoignable | Hôte injoignable. |
-| `perso-hermes` en mode test, alias ou hôte résolu | Cet hôte est refusé en mode test. |
+| `perso-hermes` en mode test, sur l'alias, l'hôte résolu, un saut ProxyJump ou ProxyCommand ; l'alias tapé est refusé avant `ssh -G` | Cet hôte est refusé en mode test. |
 
 ## Vérification unitaire
 
-- Parser `ssh -G` simulé : cas `Include` (alias `lab` → `gateway.invalid`) et cas alias inconnu (`unknown-alias.invalid`, port 22).
-- Arguments exacts du tunnel : alias, pas de `-F`, `-i`, `-l`, `-p`, agent privé ni `known_hosts` temporaire.
+- Parser `ssh -G` simulé : cas `Include` (alias `lab` → `gateway.invalid`), cas alias inconnu (`unknown-alias.invalid`, port 22), cas Match `-vv`.
+- Arguments exacts du tunnel : alias, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, pas de `-F`, `-i`, `-l`, `-p`, agent privé ni `known_hosts` temporaire.
 - Affichage en lecture seule sans secret.
 - Le magasin de secrets ne lit plus de clé SSH dans le Trousseau.

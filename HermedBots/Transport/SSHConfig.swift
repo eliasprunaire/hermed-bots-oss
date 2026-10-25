@@ -21,6 +21,8 @@ struct SSHConnectionPreview: Equatable, Sendable {
     let user: String
     let port: Int
     let jumpCount: Int
+    let hopHosts: [String]
+    let proxyCommand: String?
     let identity: SSHIdentityKind
     let identityPresent: Bool
     let isUnknownAlias: Bool
@@ -51,7 +53,7 @@ protocol SSHConfigResolving: Sendable {
     func dump(alias: String) async throws -> SSHConfigDump
 }
 
-/// `/usr/bin/ssh -G -v <alias>` : stdout = config aplatie, stderr = blocs Host appliqués
+/// `/usr/bin/ssh -G -vv <alias>` : stdout = config aplatie ; stderr nomme Host et Match (`match found` n'apparaît qu'à `-vv`)
 struct SystemSSHConfigResolver: SSHConfigResolving {
     let environment: [String: String]
 
@@ -64,9 +66,10 @@ struct SystemSSHConfigResolver: SSHConfigResolving {
         do {
             output = try await Spawn.run(
                 "/usr/bin/ssh",
-                ["-G", "-v", alias],
+                ["-G", "-vv", alias],
                 environment: SSHChildEnvironment.make(environment),
-                timeout: .seconds(8)
+                timeout: .seconds(8),
+                stderrLimit: 65_536
             )
         } catch SpawnError.timedOut {
             throw SSHFailure.unreachable("délai dépassé")
@@ -113,7 +116,10 @@ enum SSHConfig {
         let hostname = first(values["hostname"]) ?? alias
         let user = first(values["user"]) ?? localUser
         let port = Int(first(values["port"]) ?? "") ?? 22
-        let jumps = proxyJumpCount(first(values["proxyjump"]))
+        let proxyJump = first(values["proxyjump"])
+        let hops = hopHosts(proxyJump)
+        let jumps = hops.count
+        let proxyCommand = first(values["proxycommand"]).flatMap { isNone($0) ? nil : $0 }
         let certificates = (values["certificatefile"] ?? []).filter { !isNone($0) }
         let identityFiles = values["identityfile"] ?? []
         let agent = first(values["identityagent"])
@@ -133,7 +139,7 @@ enum SSHConfig {
             user: user,
             localUser: localUser,
             jumps: jumps,
-            proxyCommand: first(values["proxycommand"]),
+            proxyCommand: proxyCommand,
             certificates: certificates,
             agent: agent,
             identityFiles: identityFiles,
@@ -145,14 +151,16 @@ enum SSHConfig {
             user: user,
             port: port,
             jumpCount: jumps,
+            hopHosts: hops,
+            proxyCommand: proxyCommand,
             identity: identity,
             identityPresent: present,
             isUnknownAlias: unknown
         )
     }
 
-    /// Un alias est inconnu seulement s'il n'a pas de bloc Host (stderr de `ssh -G -v`) et que `ssh -G` reste aux valeurs standard
-    /// Un bloc Host qui ne change aucune valeur reste un alias valide
+    /// Un alias est inconnu seulement s'il n'a pas de bloc Host/Match (stderr de `ssh -G -vv`) et que `ssh -G` reste aux valeurs standard
+    /// Un bloc Host ou Match qui ne change aucune valeur reste un alias valide
     static func isUnknownAlias(
         alias: String,
         hostname: String,
@@ -166,7 +174,7 @@ enum SSHConfig {
         identityFiles: [String],
         debug: String = ""
     ) -> Bool {
-        if hostBlock(matches: alias, debug: debug) { return false }
+        if hostBlock(matches: alias, debug: debug) || matchBlock(matches: alias, debug: debug) { return false }
         guard hostname.caseInsensitiveCompare(alias) == .orderedSame, port == 22 else { return false }
         if user != localUser { return false }
         if jumps > 0 { return false }
@@ -175,6 +183,22 @@ enum SSHConfig {
         if let agent, !isNone(agent), agent != "SSH_AUTH_SOCK" { return false }
         guard identityFiles.allSatisfy({ defaultIdentityNames.contains(URL(fileURLWithPath: $0).lastPathComponent) }) else { return false }
         return debug.contains("Applying options for")
+    }
+
+    /// `debug2: checking match for 'host …' originally <alias>` puis `match found` (`-vv`)
+    static func matchBlock(matches alias: String, debug: String) -> Bool {
+        var pending = false
+        for line in debug.split(whereSeparator: \.isNewline) {
+            let text = String(line)
+            if let range = text.range(of: "originally ") {
+                let original = String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+                pending = glob(original, matches: alias) || glob(alias, matches: original)
+            } else if text.localizedCaseInsensitiveContains("checking match for") {
+                pending = text.localizedCaseInsensitiveContains(alias)
+            }
+            if pending, text.localizedCaseInsensitiveContains("match found") { return true }
+        }
+        return false
     }
 
     /// `debug1: … Applying options for <pattern>` : un motif autre que `*` qui couvre l'alias
@@ -238,9 +262,17 @@ enum SSHConfig {
         }
     }
 
-    private static func proxyJumpCount(_ value: String?) -> Int {
-        guard let value, !isNone(value) else { return 0 }
-        return value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty && !isNone(String($0)) }.count
+    static func hopHosts(_ value: String?) -> [String] {
+        guard let value, !isNone(value) else { return [] }
+        return value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.compactMap { hop in
+            guard !hop.isEmpty, !isNone(String(hop)) else { return nil }
+            var host = String(hop)
+            if let at = host.lastIndex(of: "@") { host = String(host[host.index(after: at)...]) }
+            if let colon = host.lastIndex(of: ":"), host[host.index(after: colon)...].allSatisfy(\.isNumber) {
+                host = String(host[..<colon])
+            }
+            return host
+        }
     }
 
     private static func dictionary(from dump: String) -> [String: [String]] {
@@ -276,6 +308,8 @@ enum SSHConnectionPlanner {
             user: preview.user,
             sshPort: preview.port,
             remotePort: remotePort,
+            hopHosts: preview.hopHosts,
+            proxyCommand: preview.proxyCommand,
             refusePersoHermes: refusePersoHermes
         )
         if preview.isUnknownAlias { throw SSHFailure.unknownAlias }
@@ -283,9 +317,9 @@ enum SSHConnectionPlanner {
     }
 }
 
-/// Une seule connexion en cours : un connect B ignore le dump de A s'il arrive après
+/// Une seule connexion en cours : `begin` invalide toute résolution en vol, y compris un refus local (vide, invalide, perso-hermes)
 @MainActor
-final class SSHConnectCoordinator {
+final class SSHConnector {
     private var generation = 0
     private var task: Task<Void, Never>?
     private let resolver: any SSHConfigResolving
@@ -302,7 +336,7 @@ final class SSHConnectCoordinator {
         self.authSock = authSock
     }
 
-    func connect(
+    func begin(
         alias: String,
         refusePersoHermes: Bool,
         opened: @escaping @MainActor (SSHTunnelConfig, SSHConnectionPreview) -> Void,
@@ -311,10 +345,24 @@ final class SSHConnectCoordinator {
         generation += 1
         let id = generation
         task?.cancel()
-        task = Task { await run(alias: alias, id: id, refusePersoHermes: refusePersoHermes, opened: opened, refused: refused) }
+        task = nil
+        let trimmed = alias.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            refused(.invalidHost, nil)
+            return
+        }
+        if refusePersoHermes, trimmed.lowercased().contains("perso-hermes") {
+            refused(.forbiddenHost, nil)
+            return
+        }
+        guard SSHTunnelConfig.isAlias(trimmed) else {
+            refused(.invalidHost, nil)
+            return
+        }
+        task = Task { await resolve(alias: trimmed, id: id, refusePersoHermes: refusePersoHermes, opened: opened, refused: refused) }
     }
 
-    private func run(
+    private func resolve(
         alias: String,
         id: Int,
         refusePersoHermes: Bool,

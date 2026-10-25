@@ -31,20 +31,28 @@ The app runs `/usr/bin/ssh` as a child process. The spike used a private `ssh-ag
 - The cost is a process to supervise. HD-07 does it: one process group, one watchdog, one stderr classifier.
 - The absolute path matters. In Ayo's shell `ssh` is an alias of `vssh`. The app never resolves `ssh` through `PATH`.
 
-## How the key reaches `ssh`
+## How the key reached `ssh` during the spike
 
-1. The app creates a private directory (mode 0700) under the temporary directory and starts `ssh-agent -D -a <dir>/a`.
-2. It runs `ssh-add -` and writes the key on its standard input.
-3. It runs `ssh-add -L` and stores the public part in `<dir>/key.pub`. The public part is not secret.
-4. It runs `ssh -i <dir>/key.pub -o IdentitiesOnly=yes -o IdentityAgent=<dir>/a …`. `IdentitiesOnly` plus the public file tells `ssh` which agent key to sign with.
+The spike used a throwaway test key and a private agent. That path is not the product.
 
-Without `IdentitiesOnly` and `-i`, `ssh -v` also looks for `~/.ssh/id_rsa`, `id_ecdsa`, `id_ed25519` and their `_sk` forms before it offers the agent key. With them it offers one key, the agent key (`Offering public key: … explicit agent`). The house tool `vssh` uses the same pattern.
+1. The probe created a private directory (mode 0700) under the temporary directory and started `ssh-agent -D -a <dir>/a`.
+2. It ran `ssh-add -` and wrote the key on its standard input.
+3. It ran `ssh-add -L` and stored the public part in `<dir>/key.pub`. The public part is not secret.
+4. It ran `ssh -i <dir>/key.pub -o IdentitiesOnly=yes -o IdentityAgent=<dir>/a …`. `IdentitiesOnly` plus the public file told `ssh` which agent key to sign with.
 
-A key protected by a passphrase fails at step 2 in 0.01 s (`rc=1`, `Enter passphrase for (stdin):`, no terminal). The app shows "unreadable key" and does not wait.
+Without `IdentitiesOnly` and `-i`, `ssh -v` also looked for `~/.ssh/id_rsa`, `id_ecdsa`, `id_ed25519` and their `_sk` forms before it offered the agent key. With them it offered one key, the agent key (`Offering public key: … explicit agent`). The house tool `vssh` used the same pattern.
+
+A key protected by a passphrase failed at step 2 in 0.01 s (`rc=1`, `Enter passphrase for (stdin):`, no terminal). The probe showed that case and did not wait.
+
+## Current product
+
+The app launches `/usr/bin/ssh` with the user's alias and the default user config. It does not start `ssh-agent`, does not run `ssh-add`, does not write `key.pub`, and does not keep a temporary `known_hosts`. Identity comes from the session `SSH_AUTH_SOCK` and from `IdentityAgent` in the user's config. Arguments force `ForkAfterAuthentication=no` and `LogLevel=ERROR`.
+
+Resolution uses `/usr/bin/ssh -G -vv <alias>`. Test mode refuses `perso-hermes` on the typed alias, the resolved host, ProxyJump hops and ProxyCommand, before any tunnel `ssh`.
 
 ## The forward
 
-`ssh -N -T -L 127.0.0.1:<port>:127.0.0.1:8642 hvssh@<HOST>` opens a local port. `GET /health` on it answers `{"status": "ok", "platform": "hermes-agent", "version": "0.22.2"}`. `ssh -W 127.0.0.1:22` through the same account fails with `stdio forwarding failed`: `PermitOpen` holds. `ssh` stops on SIGTERM with `rc=0`.
+The spike opened `ssh -N -T -L 127.0.0.1:<port>:127.0.0.1:8642 hvssh@<HOST>`. `GET /health` on it answered `{"status": "ok", "platform": "hermes-agent", "version": "0.22.2"}`. `ssh -W 127.0.0.1:22` through the same account failed with `stdio forwarding failed`: `PermitOpen` holds. `ssh` stopped on SIGTERM with `rc=0`. The product uses the same forward shape, with the alias as the host argument instead of `user@host`.
 
 ## Failure texts
 
@@ -61,8 +69,8 @@ A path with spaces in a `-o` value needs quotes. `-o "UserKnownHostsFile=/a b/kh
 ## No orphan
 
 - A first smoke run sent SIGTERM to the app. The app crashed (`Trace/BPT trap`) and left `ssh` and `ssh-agent` alive. The cause is inferred: the signal handler closure was isolated to the main actor and ran on a global queue. The handler is now not isolated, and the crash did not come back.
-- SIGKILL cannot be caught. The group leader is therefore a `sh` that reads a pipe only the app holds open. When the app dies the kernel closes the pipe, and the `sh` removes the private directory and runs `kill -KILL 0`, which kills its whole group. With this watchdog, SIGTERM and SIGKILL on the app left no `ssh`, `ssh-agent` or `sh` behind (smoke run), and the lanes of HD-07 show the same for Cmd-Q and `terminate()`.
-- The agent, the watchdog and every `ssh` share one process group. A reopen starts a new `ssh` in the same group.
+- SIGKILL cannot be caught. The group leader is a `sh` that reads a pipe only the app holds open. When the app dies the kernel closes the pipe and the `sh` runs `kill -KILL 0`, which kills its whole group. With this watchdog, SIGTERM and SIGKILL on the app left no `ssh` or `sh` behind (smoke run), and the lanes of HD-07 show the same for Cmd-Q and `terminate()`. The spike also had a private `ssh-agent` in that group; the product does not.
+- The watchdog and every `ssh` share one process group. A reopen starts a new `ssh` in the same group.
 
 ## When the host disappears
 
@@ -70,9 +78,9 @@ After `docker network disconnect bridge hv-hermes-test`, a probe that resolved `
 
 ## Not observed
 
-- `StrictHostKeyChecking=accept-new` on a real host: the first connection trusts the key it sees. The test mode keeps `known_hosts` in the private directory, so each run starts clean. A real run keeps it in `~/Library/Application Support/Hermed Bots/known_hosts`.
+- `StrictHostKeyChecking=accept-new` on a real host: the first connection trusts the key it sees. The spike kept `known_hosts` in the private directory so each run started clean. The product leaves host-key files to the user's OpenSSH config.
 - A changed host key (the table above quotes the OpenSSH text).
-- perso-hermes. No agent opened, resolved or read it.
+- perso-hermes during the spike. Test mode now refuses that name on the full route before `ssh` starts.
 
 ## Reproduce
 
