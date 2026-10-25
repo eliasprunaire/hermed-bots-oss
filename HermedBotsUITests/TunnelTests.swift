@@ -1,7 +1,7 @@
 import XCTest
 
 /// Lanes de HD-07 contre `hv-hermes-test` : l'app atteint l'API par un tunnel SSH, jamais en direct
-/// Le runner reçoit `HV_SSH_HOST`, `HV_SSH_USER`, `HV_TEST_SSH_KEY` (clé acceptée) et `HV_TEST_SSH_WRONG_KEY` (clé refusée) par `TEST_RUNNER_*`
+/// Le runner reçoit `HV_SSH_HOST` (alias SSH) par `TEST_RUNNER_*`
 /// `HV_API_URL` sert de référence : le test lit lui-même `/health` sur le port publié, l'app ne le reçoit pas
 @MainActor
 final class TunnelTests: XCTestCase {
@@ -14,14 +14,12 @@ final class TunnelTests: XCTestCase {
         }
     }
 
-    private func launch(key: String? = nil, host: String? = nil) -> XCUIApplication {
+    private func launch(host: String? = nil) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments += ["-AppleLanguages", "(fr)"]
         app.launchEnvironment["HV_TEST_MODE"] = "1"
         for name in ["HV_TEST_API_KEY", "HV_TEST_API_KEYS"] { app.launchEnvironment[name] = environment[name] }
         app.launchEnvironment["HV_SSH_HOST"] = host ?? environment["HV_SSH_HOST"]
-        app.launchEnvironment["HV_SSH_USER"] = environment["HV_SSH_USER"] ?? "hvssh"
-        app.launchEnvironment["HV_TEST_SSH_KEY"] = key ?? environment["HV_TEST_SSH_KEY"]
         app.launch()
         return app
     }
@@ -79,38 +77,34 @@ final class TunnelTests: XCTestCase {
         HVShot.capture("hd07-tunnel", app)
     }
 
-    func testTheConnectionViewShowsTheHostAndTheKeyStateButNeverTheKey() throws {
+    func testTheConnectionViewShowsTheAliasAndDerivedFieldsButNeverASecret() throws {
         let app = launch()
         _ = settledVersion(in: app)
         openConnection(app)
         let host = element(.connectionHost, in: app)
         XCTAssertEqual(text(of: host), environment["HV_SSH_HOST"])
-        XCTAssertEqual(text(of: element(.connectionKeyState, in: app)), "présente dans le Trousseau")
-        // aucun fragment de la clé dans tout ce que l'app expose
-        let key = try XCTUnwrap(environment["HV_TEST_SSH_KEY"])
-        let body = key.split(separator: "\n").filter { !$0.hasPrefix("-----") }.joined()
-        XCTAssertGreaterThan(body.count, 60)
+        XCTAssertTrue(element(.connectionResolvedHost, in: app).exists)
+        XCTAssertTrue(element(.connectionUser, in: app).exists)
+        XCTAssertTrue(element(.connectionIdentity, in: app).exists)
+        XCTAssertTrue(element(.connectionIdentityPresent, in: app).exists)
         let tree = app.debugDescription
-        for fragment in [String(body.prefix(40)), String(body.suffix(40))] {
-            XCTAssertFalse(tree.contains(fragment), "un fragment de la clé est visible dans l'interface")
-        }
+        XCTAssertFalse(tree.contains("Trousseau"))
         XCTAssertFalse(tree.contains("PRIVATE KEY"))
         HVShot.capture("hd07-connection", app)
     }
 
-    func testAWrongKeyShowsOneClearMessageAndStopsWithoutARetryLoop() throws {
-        let wrong = try XCTUnwrap(environment["HV_TEST_SSH_WRONG_KEY"], "HV_TEST_SSH_WRONG_KEY absent")
-        let app = launch(key: wrong)
-        let banner = wait(for: .bannerError, in: app, toContain: "refuse la clé SSH")
-        XCTAssertTrue(banner.contains("Le serveur refuse la clé SSH"), banner)
-        // une boucle de relance aurait changé l'état ou fait apparaître « réouverture » dans les secondes qui suivent
+    func testARefusedIdentityShowsOneClearMessageAndStopsWithoutARetryLoop() throws {
+        try XCTSkipIf(environment["HV_SSH_REFUSED"] != "1", "HV_SSH_REFUSED absent : pas de serveur qui refuse l'identité")
+        let app = launch()
+        let banner = wait(for: .bannerError, in: app, toContain: "refuse l'identité")
+        XCTAssertTrue(banner.contains("refuse l'identité"), banner)
         sleep(6)
-        XCTAssertTrue(text(of: element(.bannerError, in: app)).contains("refuse la clé SSH"))
+        XCTAssertTrue(text(of: element(.bannerError, in: app)).contains("refuse l'identité"))
         XCTAssertEqual(text(of: element(.statusVersion, in: app)), "inconnue")
         HVShot.capture("hd07-wrong-key", app)
         openConnection(app)
         XCTAssertEqual(text(of: element(.connectionTunnelState, in: app)), "en échec")
-        XCTAssertTrue(text(of: element(.connectionMessage, in: app)).contains("refuse la clé SSH"))
+        XCTAssertTrue(text(of: element(.connectionMessage, in: app)).contains("refuse l'identité"))
     }
 
     func testAHostThatNamesPersoHermesIsRefusedBeforeAnyConnection() throws {

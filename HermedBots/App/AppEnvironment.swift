@@ -22,12 +22,11 @@ struct AppEnvironment {
         #if DEBUG
         if environment["HV_TEST_MODE"] == "1" {
             let host = environment["HV_SSH_HOST"] ?? ""
-            let ssh = host.isEmpty ? nil : SSHEndpoint(host: host, user: environment["HV_SSH_USER"] ?? NSUserName(), port: environment["HV_SSH_PORT"].flatMap { Int($0) } ?? 22)
+            let ssh = host.isEmpty ? nil : SSHEndpoint(host: host)
             return AppEnvironment(
                 secrets: InMemorySecretStore(
                     apiKey: environment["HV_TEST_API_KEY"],
-                    apiKeys: environment["HV_TEST_API_KEYS"].flatMap { try? JSONDecoder().decode([String: String].self, from: Data($0.utf8)) } ?? [:],
-                    sshKey: environment["HV_TEST_SSH_KEY"]
+                    apiKeys: environment["HV_TEST_API_KEYS"].flatMap { try? JSONDecoder().decode([String: String].self, from: Data($0.utf8)) } ?? [:]
                 ),
                 // l'adresse directe ne sert qu'à défaut de tunnel : avec un hôte SSH, rien ne contourne le tunnel
                 baseURL: ssh == nil ? environment["HV_API_URL"].flatMap { URL(string: $0) } : nil,

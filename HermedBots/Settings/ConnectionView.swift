@@ -25,18 +25,7 @@ extension SSHTunnel.State {
     }
 }
 
-extension AppModel.KeyState {
-    var label: String {
-        switch self {
-        case .unread: String(localized: "pas encore lue")
-        case .present: String(localized: "présente dans le Trousseau")
-        case .absent: String(localized: "absente du Trousseau")
-        case .unreadable: String(localized: "illisible")
-        }
-    }
-}
-
-/// L'hôte du tunnel et l'état de la clé ; la valeur de la clé ne s'affiche jamais
+/// L'alias du tunnel et les champs déduits de `ssh -G` ; aucun secret
 struct ConnectionView: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
@@ -47,9 +36,25 @@ struct ConnectionView: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                TextField("Hôte", text: $model.host).accessibilityID(.connectionHost)
-                TextField("Utilisateur", text: $model.user).accessibilityID(.connectionUser)
-                LabeledContent("Clé SSH") { Text(model.keyState.label).accessibilityID(.connectionKeyState) }
+                TextField("Alias SSH", text: $model.host).accessibilityID(.connectionHost)
+                LabeledContent("Hôte") {
+                    Text(verbatim: model.preview?.hostname ?? "—").accessibilityID(.connectionResolvedHost)
+                }
+                LabeledContent("Utilisateur") {
+                    Text(verbatim: model.preview?.user ?? "—").accessibilityID(.connectionUser)
+                }
+                LabeledContent("Port") {
+                    Text(verbatim: model.preview.map { String($0.port) } ?? "—").accessibilityID(.connectionPort)
+                }
+                LabeledContent("ProxyJump") {
+                    Text(verbatim: model.preview?.jumpLabel ?? "—").accessibilityID(.connectionJumps)
+                }
+                LabeledContent("Identité") {
+                    Text(verbatim: model.preview?.identity.label ?? "—").accessibilityID(.connectionIdentity)
+                }
+                LabeledContent(model.preview?.identityPresentTitle ?? String(localized: "Clé publique")) {
+                    Text(verbatim: model.preview?.identityPresentLabel ?? "—").accessibilityID(.connectionIdentityPresent)
+                }
                 LabeledContent("Tunnel") { Text(model.tunnel.state.label).accessibilityID(.connectionTunnelState) }
                 LabeledContent("Version de Hermes") { model.version.text.accessibilityID(.connectionVersion) }
                 Section("Clé API par profil") {
@@ -81,8 +86,10 @@ struct ConnectionView: View {
                 }
             }
             .formStyle(.grouped)
-            .onChange(of: model.host) { model.persistEndpoint() }
-            .onChange(of: model.user) { model.persistEndpoint() }
+            .onChange(of: model.host) {
+                model.persistEndpoint()
+                model.refreshPreview()
+            }
             HStack {
                 Button("Tester la connexion") { Task { await model.refreshVersion() } }.accessibilityID(.connectionCheck)
                 Spacer()

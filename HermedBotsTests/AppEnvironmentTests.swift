@@ -12,11 +12,6 @@ final class AppEnvironmentTests: XCTestCase {
         func setAPIKey(_ key: String, profile: String) throws {
             XCTFail("KeychainSecretStore appelé")
         }
-
-        func sshPrivateKey() throws -> String? {
-            XCTFail("KeychainSecretStore appelé")
-            return nil
-        }
     }
 
     private func isolatedDefaults() -> UserDefaults {
@@ -83,19 +78,19 @@ final class AppEnvironmentTests: XCTestCase {
         XCTAssertNil(environment.baseURL)
     }
 
-    func testTestModeReadsTheSSHEndpointAndTheKeyFromTheEnvironmentAndRefusesPersoHermes() throws {
+    func testTestModeReadsTheSSHAliasFromTheEnvironmentAndRefusesPersoHermes() throws {
         let environment = AppEnvironment.resolve(
-            ["HV_TEST_MODE": "1", "HV_SSH_HOST": "host.example", "HV_SSH_USER": "hvssh", "HV_SSH_PORT": "2222", "HV_TEST_SSH_KEY": "cle-ssh-de-test"],
+            ["HV_TEST_MODE": "1", "HV_SSH_HOST": "lab.invalid", "HV_SSH_USER": "ignored", "HV_SSH_PORT": "2222", "HV_TEST_SSH_KEY": "cle-ssh-de-test"],
             defaults: isolatedDefaults(), keychain: spy
         )
-        XCTAssertEqual(environment.ssh, SSHEndpoint(host: "host.example", user: "hvssh", port: 2222))
-        XCTAssertEqual(try environment.secrets.sshPrivateKey(), "cle-ssh-de-test")
+        XCTAssertEqual(environment.ssh, SSHEndpoint(host: "lab.invalid"))
         XCTAssertTrue(environment.refusePersoHermes)
+        XCTAssertTrue(environment.secrets is InMemorySecretStore)
     }
 
     func testTheTunnelWinsOverTheDirectApiUrl() {
         let environment = AppEnvironment.resolve(
-            ["HV_TEST_MODE": "1", "HV_SSH_HOST": "host.example", "HV_SSH_USER": "u", "HV_API_URL": "http://127.0.0.1:18642"],
+            ["HV_TEST_MODE": "1", "HV_SSH_HOST": "lab.invalid", "HV_SSH_USER": "u", "HV_API_URL": "http://127.0.0.1:18642"],
             defaults: isolatedDefaults(), keychain: spy
         )
         XCTAssertNotNil(environment.ssh)
@@ -110,14 +105,14 @@ final class AppEnvironmentTests: XCTestCase {
 
     func testTestModeIgnoresTheStoredEndpoint() {
         let defaults = isolatedDefaults()
-        SSHEndpoint(host: "host.example", user: "stored", port: 22).save(to: defaults)
+        SSHEndpoint(host: "lab.invalid").save(to: defaults)
         let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], defaults: defaults, keychain: spy)
         XCTAssertNil(environment.ssh, "le mode test ne lit pas les réglages de l'utilisateur")
     }
 
-    func testAnInvalidSSHPortFallsBackToThePort22() {
-        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1", "HV_SSH_HOST": "host.example", "HV_SSH_USER": "u", "HV_SSH_PORT": "abc"], defaults: isolatedDefaults(), keychain: spy)
-        XCTAssertEqual(environment.ssh?.port, 22)
+    func testTestModeIgnoresUserAndPortEnvironmentOverrides() {
+        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1", "HV_SSH_HOST": "lab.invalid", "HV_SSH_USER": "u", "HV_SSH_PORT": "abc"], defaults: isolatedDefaults(), keychain: spy)
+        XCTAssertEqual(environment.ssh, SSHEndpoint(host: "lab.invalid"))
     }
 
     func testOnlyTheValueOneEnablesTestMode() {
@@ -165,12 +160,12 @@ final class AppEnvironmentTests: XCTestCase {
 
     func testWithoutTestModeTheEndpointComesFromTheStoredSettingsAndTheEnvironmentIsIgnored() {
         let defaults = isolatedDefaults()
-        SSHEndpoint(host: "perso.example", user: "operator", port: 2200).save(to: defaults)
+        SSHEndpoint(host: "lab.invalid").save(to: defaults)
         let environment = AppEnvironment.resolve(
-            ["HV_SSH_HOST": "host.example", "HV_SSH_USER": "evil", "HV_SSH_PORT": "1", "HV_TEST_SSH_KEY": "x"],
+            ["HV_SSH_HOST": "other.invalid", "HV_SSH_USER": "evil", "HV_SSH_PORT": "1", "HV_TEST_SSH_KEY": "x"],
             defaults: defaults, keychain: { SpyKeychain() }
         )
-        XCTAssertEqual(environment.ssh, SSHEndpoint(host: "perso.example", user: "operator", port: 2200))
+        XCTAssertEqual(environment.ssh, SSHEndpoint(host: "lab.invalid"))
         XCTAssertFalse(environment.refusePersoHermes, "perso-hermes est la cible réelle du produit")
         XCTAssertFalse(environment.secrets is InMemorySecretStore)
     }
@@ -188,7 +183,7 @@ final class AppEnvironmentTests: XCTestCase {
     func testSavingThenReadingGivesTheSameEndpoint() {
         let defaults = isolatedDefaults()
         XCTAssertNil(SSHEndpoint.stored(in: defaults))
-        let endpoint = SSHEndpoint(host: "host.example", user: "u", port: 2022)
+        let endpoint = SSHEndpoint(host: "lab.invalid")
         endpoint.save(to: defaults)
         XCTAssertEqual(SSHEndpoint.stored(in: defaults), endpoint)
     }

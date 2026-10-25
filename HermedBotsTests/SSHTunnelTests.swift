@@ -3,105 +3,75 @@ import XCTest
 
 // compilé dans le paquet de tests lui-même, sans l'app comme hôte : aucun test ici n'ouvre de connexion réseau
 final class SSHTunnelConfigTests: XCTestCase {
-    private let secret = "-----BEGIN OPENSSH PRIVATE KEY-----\nSECRETMATERIAL0123456789\n-----END OPENSSH PRIVATE KEY-----"
-
-    private func config(host: String = "host.example", refuse: Bool = true) throws -> SSHTunnelConfig {
-        try SSHTunnelConfig(host: host, user: "hvssh", refusePersoHermes: refuse)
+    private func config(alias: String = "lab.invalid", hostname: String = "gateway.invalid", refuse: Bool = true) throws -> SSHTunnelConfig {
+        try SSHTunnelConfig(alias: alias, hostname: hostname, user: "operator", refusePersoHermes: refuse)
     }
 
-    private func arguments(_ config: SSHTunnelConfig, knownHosts: String = "/tmp/hb-1/known_hosts") -> [String] {
-        config.arguments(localPort: 51234, agentSocket: "/tmp/hb-1/a", publicKeyPath: "/tmp/hb-1/key.pub", knownHostsPath: knownHosts)
-    }
-
-    func testArgumentsCarryNoSecret() throws {
-        // la clé est dans l'environnement du processus de test, comme en mode test de l'app
-        setenv("HV_TEST_SSH_KEY", secret, 1)
-        defer { unsetenv("HV_TEST_SSH_KEY") }
-        let args = try arguments(config())
-        for arg in args {
-            XCTAssertFalse(arg.contains("SECRETMATERIAL"), arg)
-            XCTAssertFalse(arg.contains("PRIVATE KEY"), arg)
-        }
-        // le seul fichier d'identité nommé est la clé publique ; la clé privée vit dans l'agent
-        let identities = args.indices.filter { args[$0] == "-i" }.map { args[$0 + 1] }
-        XCTAssertEqual(identities, ["/tmp/hb-1/key.pub"])
-        XCTAssertTrue(args.contains("IdentitiesOnly=yes"))
-        XCTAssertTrue(args.contains("IdentityAgent=/tmp/hb-1/a"))
-    }
-
-    func testArgumentsOpenAForwardToTheRemoteApiAndNothingElse() throws {
-        let args = try arguments(config())
-        XCTAssertEqual(args.last, "host.example")
+    func testArgumentsOpenAForwardWithTheAliasAndTheUserConfig() throws {
+        let args = try config().arguments(localPort: 51234)
+        XCTAssertEqual(args.last, "lab.invalid")
         XCTAssertEqual(args.indices.filter { args[$0] == "-L" }.map { args[$0 + 1] }, ["127.0.0.1:51234:127.0.0.1:8642"])
-        XCTAssertEqual(args.indices.filter { args[$0] == "-l" }.map { args[$0 + 1] }, ["hvssh"])
-        for required in ["-N", "-T", "BatchMode=yes", "ExitOnForwardFailure=yes", "ForwardAgent=no", "PasswordAuthentication=no", "LogLevel=ERROR"] {
+        for required in ["-N", "-T", "BatchMode=yes", "ExitOnForwardFailure=yes", "ForwardAgent=no", "ControlMaster=no", "ControlPath=none", "ConnectTimeout=5", "ServerAliveInterval=5", "ServerAliveCountMax=2"] {
             XCTAssertTrue(args.contains(required), required)
         }
-        // -F /dev/null : ni ~/.ssh/config ni alias d'hôte ne décident de la cible
-        let configIndex = args.firstIndex(of: "-F")
-        XCTAssertEqual(configIndex.map { args[$0 + 1] }, "/dev/null")
+        XCTAssertNil(args.firstIndex(of: "-F"))
+        XCTAssertNil(args.firstIndex(of: "-i"))
+        XCTAssertNil(args.firstIndex(of: "-l"))
+        XCTAssertNil(args.firstIndex(of: "-p"))
+        XCTAssertFalse(args.contains { $0.hasPrefix("IdentityAgent=") })
+        XCTAssertFalse(args.contains { $0.hasPrefix("UserKnownHostsFile=") })
+        XCTAssertFalse(args.contains("IdentitiesOnly=yes"))
     }
 
-    func testTheProfileListReadRunsOnlyHermesProfileListWithNoForwardAndNoSecret() throws {
-        setenv("HV_TEST_SSH_KEY", secret, 1)
-        defer { unsetenv("HV_TEST_SSH_KEY") }
-        let args = try config().profileListArguments(agentSocket: "/tmp/hb-1/a", publicKeyPath: "/tmp/hb-1/key.pub", knownHostsPath: "/tmp/hb-1/known_hosts")
-        // la commande distante est la dernière chose, après l'hôte, et la seule que l'app lance
-        XCTAssertEqual(Array(args.suffix(4)), ["host.example", "hermes", "profile", "list"])
-        for absent in ["-N", "-L", "-R", "-D"] { XCTAssertFalse(args.contains(absent), absent) }
-        for required in ["-T", "BatchMode=yes", "ForwardAgent=no", "PasswordAuthentication=no", "IdentitiesOnly=yes", "IdentityAgent=/tmp/hb-1/a", "LogLevel=ERROR", "ConnectTimeout=5"] {
+    func testTheProfileListReadRunsOnlyHermesProfileListWithNoForward() throws {
+        let args = try config().profileListArguments()
+        XCTAssertEqual(Array(args.suffix(4)), ["lab.invalid", "hermes", "profile", "list"])
+        for absent in ["-N", "-L", "-R", "-D", "-F", "-i", "-l", "-p"] { XCTAssertFalse(args.contains(absent), absent) }
+        for required in ["-T", "BatchMode=yes", "ForwardAgent=no", "ControlMaster=no", "ControlPath=none", "ConnectTimeout=5"] {
             XCTAssertTrue(args.contains(required), required)
         }
-        XCTAssertEqual(args.indices.filter { args[$0] == "-i" }.map { args[$0 + 1] }, ["/tmp/hb-1/key.pub"])
-        XCTAssertEqual(args.indices.filter { args[$0] == "-l" }.map { args[$0 + 1] }, ["hvssh"])
-        XCTAssertEqual(args.firstIndex(of: "-F").map { args[$0 + 1] }, "/dev/null")
-        for arg in args {
-            XCTAssertFalse(arg.contains("SECRETMATERIAL"), arg)
-            XCTAssertFalse(arg.contains("PRIVATE KEY"), arg)
+    }
+
+    func testPersoHermesIsRefusedInTestModeOnTheAliasAndOnTheResolvedHost() {
+        for alias in ["perso-hermes.invalid", "PERSO-HERMES.INVALID", "perso-hermes-alias.invalid"] {
+            XCTAssertThrowsError(try config(alias: alias, hostname: "gateway.invalid"), alias) { XCTAssertEqual($0 as? SSHFailure, .forbiddenHost, alias) }
         }
-    }
-
-    func testAPathWithSpacesStaysOneOptionValue() throws {
-        let args = try arguments(config(), knownHosts: "/tmp/example-home/Library/Application Support/Hermed Bots/known_hosts")
-        XCTAssertTrue(args.contains(#"UserKnownHostsFile="/tmp/example-home/Library/Application Support/Hermed Bots/known_hosts""#))
-    }
-
-    func testPersoHermesIsRefusedInTestMode() {
-        for host in ["perso-hermes.invalid", "PERSO-HERMES.INVALID", "perso-hermes-alias.invalid", "ssh.perso-hermes.invalid", "192.0.2.10.perso-hermes.invalid"] {
-            XCTAssertThrowsError(try config(host: host), host) { XCTAssertEqual($0 as? SSHFailure, .forbiddenHost, host) }
+        XCTAssertThrowsError(try config(alias: "lab.invalid", hostname: "ssh.perso-hermes.invalid")) {
+            XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
         }
     }
 
     func testPersoHermesIsAllowedOutsideTestMode() throws {
-        // c'est la cible réelle du produit : seul le mode test la refuse
-        XCTAssertEqual(try config(host: "perso-hermes.invalid", refuse: false).host, "perso-hermes.invalid")
+        XCTAssertEqual(try config(alias: "perso-hermes.invalid", hostname: "perso-hermes.invalid", refuse: false).alias, "perso-hermes.invalid")
     }
 
-    func testHostUserAndPortAreValidatedBeforeAnyArgumentIsBuilt() {
-        for host in ["", " ", "-oProxyCommand=id", "a b", "host;id", "host\nid", "ho$st"] {
-            XCTAssertThrowsError(try config(host: host), host) { XCTAssertEqual($0 as? SSHFailure, .invalidHost, host) }
-        }
-        for user in ["", "-x", "a b", "u@h"] {
-            XCTAssertThrowsError(try SSHTunnelConfig(host: "host.example", user: user, refusePersoHermes: true), user) { XCTAssertEqual($0 as? SSHFailure, .invalidUser, user) }
+    func testAliasAndPortAreValidatedBeforeAnyArgumentIsBuilt() {
+        for alias in ["", " ", "-oProxyCommand=id", "a b", "host;id", "host\nid", "ho$st"] {
+            XCTAssertThrowsError(try config(alias: alias), alias) { XCTAssertEqual($0 as? SSHFailure, .invalidHost, alias) }
         }
         for port in [0, -1, 65536] {
-            XCTAssertThrowsError(try SSHTunnelConfig(host: "host.example", user: "u", sshPort: port, refusePersoHermes: true), "\(port)") { XCTAssertEqual($0 as? SSHFailure, .invalidPort) }
+            XCTAssertThrowsError(try SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "u", sshPort: port, refusePersoHermes: true), "\(port)") {
+                XCTAssertEqual($0 as? SSHFailure, .invalidPort)
+            }
         }
     }
 
-    func testAnIPv6LiteralIsAValidHost() throws {
-        XCTAssertEqual(try config(host: "::1").host, "::1")
+    func testAnIPv6LiteralIsAValidResolvedHost() throws {
+        XCTAssertEqual(try config(hostname: "::1").hostname, "::1")
     }
 
     func testOnlyAnUnreachableHostIsRetried() {
-        XCTAssertEqual(SSHFailure.classify(stderr: "hvssh@host.example: Permission denied (publickey)."), .wrongKey)
+        XCTAssertEqual(SSHFailure.classify(stderr: "operator@gateway.invalid: Permission denied (publickey)."), .wrongKey)
+        XCTAssertEqual(SSHFailure.classify(stderr: "sign_and_send_pubkey: signing failed for ed25519 from agent: agent refused operation"), .agentLockedOrEmpty)
+        XCTAssertEqual(SSHFailure.classify(stderr: "Could not open a connection to your authentication agent"), .agentLockedOrEmpty)
+        XCTAssertEqual(SSHFailure.classify(stderr: "Certificate invalid: expired"), .certificateExpired)
         XCTAssertEqual(SSHFailure.classify(stderr: "Host key verification failed."), .hostKeyChanged)
         XCTAssertEqual(SSHFailure.classify(stderr: "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@"), .hostKeyChanged)
-        XCTAssertEqual(SSHFailure.classify(stderr: "ssh: connect to host host.example port 22: Connection refused\n"), .unreachable("ssh: connect to host host.example port 22: Connection refused"))
+        XCTAssertEqual(SSHFailure.classify(stderr: "ssh: connect to host gateway.invalid port 22: Connection refused\n"), .unreachable("ssh: connect to host gateway.invalid port 22: Connection refused"))
         XCTAssertEqual(SSHFailure.classify(stderr: ""), .unreachable(""))
         let retried = [SSHFailure.unreachable("x")].filter(\.retries)
         XCTAssertEqual(retried.count, 1)
-        for terminal in [SSHFailure.wrongKey, .hostKeyChanged, .keyMissing, .keyUnreadable, .forbiddenHost, .invalidHost, .invalidUser, .invalidPort] {
+        for terminal in [SSHFailure.wrongKey, .hostKeyChanged, .unknownAlias, .agentLockedOrEmpty, .certificateExpired, .forbiddenHost, .invalidHost, .invalidPort] {
             XCTAssertFalse(terminal.retries, "\(terminal)")
         }
     }
@@ -110,14 +80,25 @@ final class SSHTunnelConfigTests: XCTestCase {
         let text = SSHFailure.forbiddenHost.message
         XCTAssertEqual(text, "Cet hôte est refusé en mode test.")
         XCTAssertFalse(text.contains("docs/"))
+        XCTAssertEqual(SSHFailure.unknownAlias.message, "Cet alias SSH est inconnu.")
+        XCTAssertEqual(SSHFailure.agentLockedOrEmpty.message, "L'agent SSH est verrouillé ou vide.")
+        XCTAssertEqual(SSHFailure.certificateExpired.message, "Le certificat SSH a expiré.")
+        XCTAssertTrue(SSHFailure.wrongKey.message.contains("refuse l'identité"))
+        XCTAssertFalse(SSHFailure.wrongKey.message.contains("Trousseau"))
     }
 
-    func testTheChildEnvironmentIsBuiltByHandAndNeverInheritsTheKey() async throws {
-        setenv("HV_TEST_SSH_KEY", secret, 1)
-        defer { unsetenv("HV_TEST_SSH_KEY") }
-        let environment = SSHChildEnvironment.make(agentSocket: "/tmp/hb-1/a")
-        XCTAssertEqual(Set(environment.keys), ["PATH", "LC_ALL", "SSH_AUTH_SOCK"])
-        // env(1) lancé par Spawn n'affiche que ce qu'on lui donne
+    func testTheChildEnvironmentTakesTheSessionAgentAndNeverInheritsATestKey() async throws {
+        let environment = SSHChildEnvironment.make([
+            "HV_TEST_SSH_KEY": "SECRETMATERIAL0123456789",
+            "SSH_AUTH_SOCK": "/tmp/example-agent.invalid",
+            "HOME": "/tmp/example-home",
+            "PATH": "/evil",
+        ])
+        XCTAssertEqual(environment["PATH"], "/usr/bin:/bin")
+        XCTAssertEqual(environment["LC_ALL"], "C")
+        XCTAssertEqual(environment["SSH_AUTH_SOCK"], "/tmp/example-agent.invalid")
+        XCTAssertEqual(environment["HOME"], "/tmp/example-home")
+        XCTAssertNil(environment["HV_TEST_SSH_KEY"])
         let result = try await Spawn.run("/usr/bin/env", [], environment: ["ONLY": "this"], timeout: .seconds(5))
         XCTAssertEqual(result.stdout, "ONLY=this\n")
         XCTAssertFalse(result.stdout.contains("SECRETMATERIAL"))
@@ -223,7 +204,7 @@ final class ProcessGroupTests: XCTestCase {
 
 @MainActor
 final class SSHTunnelSupervisorTests: XCTestCase {
-    private let config = try! SSHTunnelConfig(host: "host.example", user: "hvssh", refusePersoHermes: true)
+    private let config = try! SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refusePersoHermes: true)
 
     private func eventually(_ what: String, timeout: TimeInterval = 3, _ condition: () async -> Bool) async {
         let deadline = Date().addingTimeInterval(timeout)
@@ -352,55 +333,11 @@ final class SSHTunnelSupervisorTests: XCTestCase {
     }
 }
 
-/// Le vrai backend, avec un vrai ssh-agent : la fermeture pendant la préparation de l'agent
 final class SystemSSHBackendTests: XCTestCase {
-    private var work: URL!
-
-    // un dossier de travail à part : le dossier temporaire de l'utilisateur compte des milliers d'entrées, trop lentes à lister pour attraper la préparation
-    override func setUpWithError() throws {
-        work = FileManager.default.temporaryDirectory.appendingPathComponent("hbtest-" + UUID().uuidString.prefix(8).lowercased(), isDirectory: true)
-        try FileManager.default.createDirectory(at: work, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-    }
-
-    override func tearDownWithError() throws {
-        try? FileManager.default.removeItem(at: work)
-    }
-
-    /// les dossiers privés de tunnel (`hb-*`) : un par agent en préparation ou ouvert, supprimé quand l'agent s'arrête
-    private func tunnelDirectories() -> [String] {
-        ((try? FileManager.default.contentsOfDirectory(atPath: work.path)) ?? []).filter { $0.hasPrefix("hb-") }.sorted()
-    }
-
-    /// Une clé jetable : générée par ssh-keygen dans le dossier de travail, lue puis supprimée
-    private func throwawayKey() async throws -> String {
-        let path = work.appendingPathComponent("k").path
-        let made = try await Spawn.run("/usr/bin/ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-f", path], environment: SSHChildEnvironment.make(agentSocket: "/dev/null"), timeout: .seconds(10))
-        XCTAssertEqual(made.status, 0)
-        defer { try? FileManager.default.removeItem(atPath: path); try? FileManager.default.removeItem(atPath: path + ".pub") }
-        return try String(contentsOfFile: path, encoding: .utf8)
-    }
-
-    // le port 1 de la boucle locale : rien n'y écoute, une ouverture qui continue après la fermeture échoue vite
-    private let config = try! SSHTunnelConfig(host: "127.0.0.1", user: "hvssh", sshPort: 1, refusePersoHermes: true)
-
-    func testClosingWhileTheAgentIsBeingPreparedLeavesNothingBehind() async throws {
-        let backend = SystemSSHBackend(key: try await throwawayKey(), knownHostsPath: nil, workDirectory: work)
-        let config = self.config
-        let opening = Task { try await backend.open(config) }
-        // le dossier privé existe dès que la préparation commence, et elle dure des dizaines de millisecondes : close() arrive pendant elle
-        let deadline = Date().addingTimeInterval(5)
-        while tunnelDirectories().isEmpty, Date() < deadline { await Task.yield() }
-        await backend.close()
-        let outcome = await opening.result
-        let leftover = tunnelDirectories()
-        // sans nettoyage, l'agent d'une ouverture périmée reste vivant : on l'arrête avant d'échouer
-        await backend.close()
-        XCTAssertEqual(leftover, [], "un agent préparé après close() est resté vivant")
-        XCTAssertThrowsError(try outcome.get()) { XCTAssertTrue($0 is CancellationError, "\($0)") }
-    }
+    private let config = try! SSHTunnelConfig(alias: "lab.invalid", hostname: "127.0.0.1", user: "operator", sshPort: 1, refusePersoHermes: true)
 
     func testOpeningAfterCloseStartsNothing() async throws {
-        let backend = SystemSSHBackend(key: try await throwawayKey(), knownHostsPath: nil, workDirectory: work)
+        let backend = SystemSSHBackend(environment: ["PATH": "/usr/bin:/bin"])
         await backend.close()
         do {
             _ = try await backend.open(config)
@@ -408,7 +345,6 @@ final class SystemSSHBackendTests: XCTestCase {
         } catch {
             XCTAssertTrue(error is CancellationError, "\(error)")
         }
-        XCTAssertEqual(tunnelDirectories(), [])
     }
 }
 
