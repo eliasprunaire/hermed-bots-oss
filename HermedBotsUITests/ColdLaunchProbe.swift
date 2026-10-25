@@ -17,8 +17,6 @@ final class ColdLaunchProbe: XCTestCase {
         if let host = environment["HV_SSH_HOST"] {
             mode = "tunnel"
             app.launchEnvironment["HV_SSH_HOST"] = host
-            app.launchEnvironment["HV_SSH_USER"] = environment["HV_SSH_USER"] ?? "hvssh"
-            app.launchEnvironment["HV_TEST_SSH_KEY"] = environment["HV_TEST_SSH_KEY"]
         } else {
             mode = "direct"
             app.launchEnvironment["HV_API_URL"] = environment["HV_API_URL"]

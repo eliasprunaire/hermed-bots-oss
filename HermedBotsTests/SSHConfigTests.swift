@@ -245,7 +245,8 @@ final class SSHConnectorTests: XCTestCase {
         await eventually { await resolver.started == ["a.invalid"] }
         connector.begin(alias: "   ", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         XCTAssertEqual(refused, [.invalidHost])
-        XCTAssertEqual(await resolver.started, ["a.invalid"])
+        let startedAfterEmpty = await resolver.started
+        XCTAssertEqual(startedAfterEmpty, ["a.invalid"])
         await resolver.release("a.invalid")
         try? await Task.sleep(for: .milliseconds(80))
         XCTAssertEqual(opened, [])
@@ -266,7 +267,8 @@ final class SSHConnectorTests: XCTestCase {
         await resolver.release("a.invalid")
         try? await Task.sleep(for: .milliseconds(80))
         XCTAssertEqual(opened, [])
-        XCTAssertEqual(await resolver.started, ["a.invalid"])
+        let started = await resolver.started
+        XCTAssertEqual(started, ["a.invalid"])
     }
 
     func testPersoHermesIsRefusedWithoutDumpingTheConfig() async {
@@ -277,7 +279,8 @@ final class SSHConnectorTests: XCTestCase {
         connector.begin(alias: "perso-hermes.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         XCTAssertEqual(refused, [.forbiddenHost])
         XCTAssertEqual(opened, [])
-        XCTAssertEqual(await resolver.started, [])
+        let started = await resolver.started
+        XCTAssertEqual(started, [])
     }
 
     private func eventually(_ condition: () async -> Bool) async {
@@ -357,7 +360,8 @@ final class AppModelConnectTests: XCTestCase {
         } else {
             XCTFail("A a ouvert un tunnel périmé : \(model.tunnel.state)")
         }
-        XCTAssertEqual(await resolver.started, ["a.invalid"])
+        let started = await resolver.started
+        XCTAssertEqual(started, ["a.invalid"])
     }
 
     func testPersoHermesOnAppModelNeverDumpsOrOpens() async {
@@ -371,9 +375,11 @@ final class AppModelConnectTests: XCTestCase {
         )
         let model = AppModel(environment: environment, sshResolver: resolver)
         try? await Task.sleep(for: .milliseconds(40))
-        XCTAssertEqual(await resolver.started, [])
+        let startedAtLaunch = await resolver.started
+        XCTAssertEqual(startedAtLaunch, [])
         model.connect()
-        XCTAssertEqual(await resolver.started, [])
+        let startedAfterConnect = await resolver.started
+        XCTAssertEqual(startedAfterConnect, [])
         if case .failed(let failure) = model.tunnel.state {
             XCTAssertEqual(failure, .forbiddenHost)
         } else {

@@ -21,7 +21,7 @@ final class SixActions: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(fr)"]
         app.launchEnvironment["HV_TEST_MODE"] = "1"
         app.launchEnvironment["HV_RESUME_SCOPE"] = UUID().uuidString
-        for name in ["HV_API_URL", "HV_TEST_API_KEY", "HV_TEST_API_KEYS", "HV_SSH_HOST", "HV_SSH_USER", "HV_TEST_SSH_KEY"] {
+        for name in ["HV_API_URL", "HV_TEST_API_KEY", "HV_TEST_API_KEYS", "HV_SSH_HOST"] {
             if let value = environment[name] { app.launchEnvironment[name] = value }
         }
         app.launch()
