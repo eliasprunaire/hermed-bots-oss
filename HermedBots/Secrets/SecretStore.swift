@@ -31,11 +31,9 @@ struct KeychainError: Error, CustomStringConvertible {
 }
 
 extension SecretStore {
-    /// Clé du profil, sinon celle de `default` (y compris l'entrée héritée du compte unique)
+    /// Uniquement la clé du profil demandé ; jamais celle de `default` pour un autre profil
     func resolvedAPIKey(profile: String) throws -> String? {
-        if let key = try apiKey(profile: profile), !key.isEmpty { return key }
-        if profile != "default" { return try apiKey(profile: "default") }
-        return nil
+        try apiKey(profile: profile).flatMap { $0.isEmpty ? nil : $0 }
     }
 }
 

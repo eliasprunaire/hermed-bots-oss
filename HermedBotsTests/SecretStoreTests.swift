@@ -54,8 +54,9 @@ final class SecretStoreTests: XCTestCase {
         XCTAssertEqual(try store.apiKey(profile: "default"), "default-test-key")
         XCTAssertNil(try store.apiKey(profile: "missing"))
         XCTAssertNil(try store.apiKey(profile: "CYBER"))
-        XCTAssertEqual(try store.resolvedAPIKey(profile: "missing"), "default-test-key")
+        XCTAssertNil(try store.resolvedAPIKey(profile: "missing"))
         XCTAssertEqual(try store.resolvedAPIKey(profile: "cyber"), "replacement-test-key")
+        XCTAssertEqual(try store.resolvedAPIKey(profile: "default"), "default-test-key")
         XCTAssertEqual(items.values[KeychainSecretStore.account], Data("legacy-test-key".utf8))
         XCTAssertEqual(items.values.count, 4)
     }

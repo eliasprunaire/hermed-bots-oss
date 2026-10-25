@@ -33,12 +33,12 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché. 
 - Pas de champ, pas de section, pas de secours manuel.
 - Un HTTP 401 ou 403 déclenche une lecture SSH, même alias et même config que le tunnel.
 - Commande distante figée : `hermes -p <profil> config get API_SERVER_KEY --raw`. Le profil passe une liste blanche.
-- Si le profil n'a pas de valeur, repli sur `default` (`SecretStore.resolvedAPIKey`). Cache Trousseau `WhenUnlockedThisDeviceOnly`. Jamais affichée ni journalisée.
-- Échec : bandeau `Clé API introuvable sur l'hôte pour le profil <id>`.
+- Uniquement la clé du profil demandé (`hermes -p <profil> …`). Pas de repli sur `default`. Cache Trousseau `WhenUnlockedThisDeviceOnly`. Jamais affichée ni journalisée.
+- Échec : bandeau `Clé API introuvable sur l'hôte pour le profil <id>`. Un profil nommé sans clé n'envoie jamais la clé de `default`.
 
 ## Préfixe `/p/<profil>/`
 
-Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway/platforms/api_server.py`) sert les préfixes `/p/<profil>/`. L'auth vérifie `API_SERVER_KEY` **du profil routé** (fichier `.env` de ce profil), pas celle de `default`. Un préfixe nommé sans clé propre échoue fermé (401). La clé de default reste valable seulement sur les routes sans préfixe et sur `/p/default/`. Sources publiques : [API Server — Multi-profile routing](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server), [`api_server.py` sur `main`](https://github.com/NousResearch/hermes-agent/blob/main/gateway/platforms/api_server.py). Le repli app sur `default` après SSH n'est donc pas accepté par Hermes sur un préfixe nommé.
+Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway/platforms/api_server.py`) sert les préfixes `/p/<profil>/`. L'auth vérifie `API_SERVER_KEY` **du profil routé** (fichier `.env` de ce profil), pas celle de `default`. Un préfixe nommé sans clé propre échoue fermé (401). La clé de default reste valable seulement sur les routes sans préfixe et sur `/p/default/`. Sources publiques : [API Server — Multi-profile routing](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server), [`api_server.py` sur `main`](https://github.com/NousResearch/hermes-agent/blob/main/gateway/platforms/api_server.py). L'app aligne ce contrat : pas de repli vers `default`.
 
 ## Transport
 
@@ -73,6 +73,7 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 - Relais (`ProxyJump` ou `ProxyCommand`, valeurs de toute forme, y compris URI, `user@hop`, `none,none`, `NONE,NONE`) : refusé en mode test et hors mode test, y compris quand un seul lancement (tunnel, liste des profils, détection) le voit. Seul `none` comme valeur entière n'est pas un relais.
 - Arguments exacts du tunnel : alias, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, pas de `-F`, `-i`, `-l`, `-p`, agent privé ni `known_hosts` temporaire.
 - Recette HD-07 : `new_alias` (`docs/spike/hd07-instruments/lib.sh`) crée une clé éphémère et les alias `hv-hd07` (clé installée dans le conteneur) et `hv-hd07-refused` (clé jamais installée). Il les écrit dans un bloc `Include` marqué en tête de `~/.ssh/config` du compte qui lance la lane. `drop_alias` retire le bloc, puis les clés. Il réécrit la config à travers un lien symbolique et la laisse identique à l'octet près. Si le bloc ne part pas, il échoue avec un message et garde les clés. `new_alias` refuse un lien symbolique sans cible et une config illisible : il n'écrit rien et la config garde ses octets. Test : `test/hd07-alias-lib.test.js`. L'app n'a plus de variable de clé ni d'utilisateur.
-- Arguments exacts de la commande de clé, profil invalide refusé, 401 → récupération, clé absente des messages.
+- Arguments exacts de la commande de clé, profil invalide refusé, 401 → récupération du profil seulement, clé absente des messages.
+- Profil nommé sans clé : bandeau introuvable, Authorization absent, clé de `default` jamais envoyée.
 - Affichage en lecture seule sans secret ni saisie API.
 - Le magasin de secrets ne lit plus de clé SSH dans le Trousseau. Mode test : pas de `SecItem*`.

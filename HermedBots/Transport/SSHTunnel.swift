@@ -477,17 +477,12 @@ enum HermesProfileName: Error, Equatable {
 }
 
 enum APIKeyRecovery {
-    /// Lit la clé du profil, puis celle de `default` si le profil n'en définit pas (même repli que `SecretStore.resolvedAPIKey`)
+    /// Lit uniquement `API_SERVER_KEY` du profil demandé ; pas de repli sur `default`
     static func refresh(profile: String, into secrets: inout some SecretStore, fetch: (String) async throws -> String?) async throws -> String? {
         let profile = try HermesAPIKey.validate(profile)
-        var names = [profile]
-        if profile != "default" { names.append("default") }
-        for name in names {
-            guard let value = try await fetch(name), let key = HermesAPIKey.parse(value) else { continue }
-            try secrets.setAPIKey(key, profile: name)
-            return key
-        }
-        return nil
+        guard let value = try await fetch(profile), let key = HermesAPIKey.parse(value) else { return nil }
+        try secrets.setAPIKey(key, profile: profile)
+        return key
     }
 }
 

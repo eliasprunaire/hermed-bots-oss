@@ -61,7 +61,7 @@ final class SSHTunnelConfigTests: XCTestCase {
         }
     }
 
-    func testUnauthorizedRecoveryFetchesTheProfileThenDefaultAndNeverPutsTheKeyInMessages() async throws {
+    func testUnauthorizedRecoveryFetchesOnlyTheNamedProfileAndNeverPutsTheKeyInMessages() async throws {
         let secret = "fetched-profile-key-VALUE"
         var store = InMemorySecretStore(apiKey: nil)
         var calls: [String] = []
@@ -74,23 +74,6 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(try store.apiKey(profile: "cyber"), secret)
         XCTAssertNil(try store.apiKey(profile: "default"))
 
-        var fallbackStore = InMemorySecretStore(apiKey: nil)
-        var fallbackCalls: [String] = []
-        let fallback = try await APIKeyRecovery.refresh(profile: "ia", into: &fallbackStore) { name in
-            fallbackCalls.append(name)
-            return name == "default" ? "default-host-key-VALUE" : nil
-        }
-        XCTAssertEqual(fallback, "default-host-key-VALUE")
-        XCTAssertEqual(fallbackCalls, ["ia", "default"])
-        XCTAssertEqual(try fallbackStore.resolvedAPIKey(profile: "ia"), "default-host-key-VALUE")
-
-        var missing = InMemorySecretStore(apiKey: nil)
-        let none = try await APIKeyRecovery.refresh(profile: "sport", into: &missing) { _ in nil }
-        XCTAssertNil(none)
-        let message = HermesAPIKey.missingMessage(profile: "sport")
-        XCTAssertEqual(message, "Clé API introuvable sur l'hôte pour le profil sport.")
-        XCTAssertFalse(message.contains(secret))
-        XCTAssertFalse(message.contains("default-host-key-VALUE"))
         XCTAssertNil(HermesAPIKey.parse(" \n "))
         XCTAssertEqual(HermesAPIKey.parse("  \(secret)\nignored-line\n"), secret)
 
@@ -98,6 +81,32 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(simulated.status, 0)
         XCTAssertEqual(HermesAPIKey.parse(simulated.stdout), secret)
         XCTAssertFalse(HermesAPIKey.missingMessage(profile: "cyber").contains(secret))
+    }
+
+    func testANamedProfileWithoutAKeyShowsTheMissingBannerAndNeverSendsTheDefaultKey() async throws {
+        let defaultKey = "default-host-key-VALUE"
+        var store = InMemorySecretStore(apiKey: defaultKey)
+        var fetched: [String] = []
+        let recovered = try await APIKeyRecovery.refresh(profile: "sport", into: &store) { name in
+            fetched.append(name)
+            XCTAssertNotEqual(name, "default")
+            return name == "default" ? defaultKey : nil
+        }
+        XCTAssertNil(recovered)
+        XCTAssertEqual(fetched, ["sport"])
+        XCTAssertNil(try store.resolvedAPIKey(profile: "sport"))
+        XCTAssertEqual(try store.resolvedAPIKey(profile: "default"), defaultKey)
+        XCTAssertNil(try store.apiKey(profile: "sport"))
+
+        let message = HermesAPIKey.missingMessage(profile: "sport")
+        XCTAssertEqual(message, "Clé API introuvable sur l'hôte pour le profil sport.")
+        XCTAssertFalse(message.contains(defaultKey))
+
+        let api = ResumeAPI(baseURL: URL(string: "http://hermes.invalid")!, apiKey: defaultKey, apiKeyForProfile: { try store.resolvedAPIKey(profile: $0) })
+        let request = try api.makeRequest(profile: "sport", input: "bonjour", session: "s", model: nil, key: "idem")
+        XCTAssertEqual(request.url?.path, "/p/sport/v1/runs")
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertNil(try api.authorization(for: "sport"))
     }
 
     func testPersoHermesStaysRefusedWhenBuildingAPIKeyArgumentsInTestMode() {

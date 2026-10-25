@@ -67,12 +67,10 @@ final class AppModel {
     private func startResumableRun(bot: String, text: String, session: String, model: String?, key: String) async throws -> String {
         guard let apiURL else { throw HermesError.unreachable(url: "", reason: "tunnel fermé") }
         do {
-            let api = ResumeAPI(baseURL: apiURL, apiKey: try environment.secrets.resolvedAPIKey(profile: bot))
-            return try await api.start(profile: bot, input: text, session: session, model: model, key: key)
+            return try await resumeAPI(apiURL).start(profile: bot, input: text, session: session, model: model, key: key)
         } catch {
             guard Self.isUnauthorized(error), await fetchRemoteAPIKey(bot) != nil else { throw error }
-            let api = ResumeAPI(baseURL: apiURL, apiKey: try environment.secrets.resolvedAPIKey(profile: bot))
-            return try await api.start(profile: bot, input: text, session: session, model: model, key: key)
+            return try await resumeAPI(apiURL).start(profile: bot, input: text, session: session, model: model, key: key)
         }
     }
 
