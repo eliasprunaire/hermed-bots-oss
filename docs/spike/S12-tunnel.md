@@ -1,6 +1,6 @@
-# S12: open the SSH tunnel from the app, key in the Keychain
+# S12: open the SSH tunnel from the app
 
-Status: observed. Feeds HD-07 (`HermedBots/Transport/SSHTunnel.swift`). Chosen option: the system `/usr/bin/ssh`, with the key in a private `ssh-agent`.
+Status: observed. Feeds HD-07 (`HermedBots/Transport/SSHTunnel.swift`). Chosen option at the time: the system `/usr/bin/ssh`. The product uses the user's SSH alias and config, not a private key held by the app.
 
 Observed on 2026-10-19 on macOS 27.0.1 with `/usr/bin/ssh` `OpenSSH_10.3p1, LibreSSL 3.3.6`. The target is `sshd` (Debian trixie `openssh-server`) inside `hv-hermes-test`, image `hv-hermes:hd07`, built from `docs/spike/hd07-instruments/Dockerfile` on `hv-hermes:spike`. Hermes is v0.22.2. Only `hvssh` may log in, by public key, and `PermitOpen` allows `127.0.0.1:8642` only. Every key in this note is a throwaway test key, generated for the run and deleted after it. No key value appears here.
 
@@ -8,7 +8,7 @@ The Mac reaches `sshd` by the name `<HOST>` (OrbStack). No port 22 is published.
 
 ## Question
 
-The PRD asks whether the app can open the tunnel with the system `ssh` or with a library, with the key in the Keychain. The key must stay out of argv, logs, files and screenshots.
+The PRD asks whether the app can open the tunnel with the system `ssh` or with a library. Secrets must stay out of argv, logs, files and screenshots.
 
 ## Options
 
@@ -25,7 +25,7 @@ Neither library was built or run. The comparison rests on their READMEs and rele
 
 ## Decision
 
-The app runs `/usr/bin/ssh` as a child process, with a private `ssh-agent` that holds the key.
+The app runs `/usr/bin/ssh` as a child process. The spike used a private `ssh-agent` for a throwaway test key. The product later dropped that path and uses the user's agent and config.
 
 - No new dependency. `ssh` already does the key types, `known_hosts`, keep-alive and the forward.
 - The cost is a process to supervise. HD-07 does it: one process group, one watchdog, one stderr classifier.
@@ -70,7 +70,6 @@ After `docker network disconnect bridge hv-hermes-test`, a probe that resolved `
 
 ## Not observed
 
-- The real Keychain read: `SecItemCopyMatching` for service `com.hermedbots.HermedBots`, account `hermes-ssh-key`. It prompts the user on first use (A3), so no lane ran it. In test mode the key comes from `HV_TEST_SSH_KEY`.
 - `StrictHostKeyChecking=accept-new` on a real host: the first connection trusts the key it sees. The test mode keeps `known_hosts` in the private directory, so each run starts clean. A real run keeps it in `~/Library/Application Support/Hermed Bots/known_hosts`.
 - A changed host key (the table above quotes the OpenSSH text).
 - perso-hermes. No agent opened, resolved or read it.

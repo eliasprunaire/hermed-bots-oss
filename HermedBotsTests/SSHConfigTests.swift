@@ -16,7 +16,7 @@ final class SSHConfigTests: XCTestCase {
         """
 
     /// Sortie de `ssh -G` pour un nom sans bloc Host : l'alias est renvoyé tel quel, port 22, identités par défaut
-    private let unknownDump = """
+    private let defaultDump = """
         user operator
         hostname unknown-alias.invalid
         port 22
@@ -31,9 +31,15 @@ final class SSHConfigTests: XCTestCase {
         proxycommand none
         """
 
-    private func parse(_ dump: String, alias: String, existing: Set<String> = [], authSock: String? = nil) -> SSHConnectionPreview {
+    private let unmatchedDebug = "debug1: Reading configuration data\ndebug1: Applying options for *\n"
+    private func matchedDebug(_ alias: String) -> String {
+        "debug1: Applying options for \(alias)\ndebug1: Applying options for *\n"
+    }
+
+    private func parse(_ dump: String, alias: String, debug: String = "", existing: Set<String> = [], authSock: String? = nil) -> SSHConnectionPreview {
         SSHConfig.parse(
             dump,
+            debug: debug,
             alias: alias,
             localUser: localUser,
             filesExist: { existing.contains($0) },
@@ -60,7 +66,7 @@ final class SSHConfigTests: XCTestCase {
     }
 
     func testAnUnknownAliasIsTheNameAsTypedOnPort22WithOnlyDefaultIdentities() {
-        let preview = parse(unknownDump, alias: "unknown-alias.invalid")
+        let preview = parse(defaultDump, alias: "unknown-alias.invalid", debug: unmatchedDebug)
         XCTAssertTrue(preview.isUnknownAlias)
         XCTAssertEqual(preview.hostname, "unknown-alias.invalid")
         XCTAssertEqual(preview.port, 22)
@@ -70,6 +76,15 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
             XCTAssertEqual($0 as? SSHFailure, .unknownAlias)
         }
+    }
+
+    func testAValidAliasWithOnlyStandardValuesIsNotUnknown() {
+        let dump = defaultDump.replacingOccurrences(of: "unknown-alias.invalid", with: "lab.invalid")
+        let preview = parse(dump, alias: "lab.invalid", debug: matchedDebug("lab.invalid"))
+        XCTAssertFalse(preview.isUnknownAlias)
+        XCTAssertEqual(preview.hostname, "lab.invalid")
+        XCTAssertEqual(preview.port, 22)
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true))
     }
 
     func testAMatchingBlockWithTheSameNameIsStillKnownWhenUserOrIdentityDiffer() {
@@ -127,5 +142,80 @@ final class SSHConfigTests: XCTestCase {
             XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
         }
         XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: false))
+    }
+
+    func testPersoHermesIsRefusedBeforeAnUnknownAliasCheck() {
+        let dump = defaultDump.replacingOccurrences(of: "unknown-alias.invalid", with: "perso-hermes.invalid")
+        let preview = parse(dump, alias: "perso-hermes.invalid", debug: unmatchedDebug)
+        XCTAssertTrue(preview.isUnknownAlias)
+        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
+            XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
+        }
+    }
+}
+
+@MainActor
+final class SSHConnectCoordinatorTests: XCTestCase {
+    private func knownDump(alias: String, hostname: String) -> SSHConfigDump {
+        SSHConfigDump(
+            stdout: """
+            user operator
+            hostname \(hostname)
+            port 22
+            identityfile /tmp/fake-id.invalid
+            proxyjump none
+            """,
+            stderr: "debug1: Applying options for \(alias)\n"
+        )
+    }
+
+    func testALaterConnectIgnoresAStaleResolution() async {
+        let resolver = GatedSSHResolver(dumps: [
+            "a.invalid": knownDump(alias: "a.invalid", hostname: "alpha.invalid"),
+            "b.invalid": knownDump(alias: "b.invalid", hostname: "beta.invalid"),
+        ])
+        let coordinator = SSHConnectCoordinator(resolver: resolver, localUser: "operator")
+        var opened: [String] = []
+        var refused: [SSHFailure] = []
+        coordinator.connect(alias: "a.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        await eventually { await resolver.started == ["a.invalid"] }
+        coordinator.connect(alias: "b.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        await eventually { await resolver.started == ["a.invalid", "b.invalid"] }
+        await resolver.release("b.invalid")
+        await eventually { opened == ["b.invalid"] }
+        await resolver.release("a.invalid")
+        try? await Task.sleep(for: .milliseconds(80))
+        XCTAssertEqual(opened, ["b.invalid"])
+        XCTAssertEqual(refused, [])
+    }
+
+    private func eventually(_ condition: () async -> Bool) async {
+        let deadline = Date().addingTimeInterval(2)
+        while Date() < deadline {
+            if await condition() { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTFail("condition jamais vraie")
+    }
+}
+
+private actor GatedSSHResolver: SSHConfigResolving {
+    private let dumps: [String: SSHConfigDump]
+    private var gates: [String: CheckedContinuation<Void, Never>] = [:]
+    private(set) var started: [String] = []
+
+    init(dumps: [String: SSHConfigDump]) {
+        self.dumps = dumps
+    }
+
+    func dump(alias: String) async throws -> SSHConfigDump {
+        started.append(alias)
+        await withCheckedContinuation { gates[alias] = $0 }
+        return dumps[alias] ?? SSHConfigDump(stdout: "")
+    }
+
+    func release(_ alias: String) {
+        gates[alias]?.resume()
+        gates[alias] = nil
     }
 }

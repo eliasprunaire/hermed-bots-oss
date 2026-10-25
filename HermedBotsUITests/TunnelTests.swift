@@ -116,7 +116,7 @@ final class TunnelTests: XCTestCase {
         host.typeKey("a", modifierFlags: .command)
         host.typeText("perso-hermes.invalid")
         element(.connectionConnect, in: app).click()
-        let message = wait(for: .connectionMessage, in: app, toContain: "perso-hermes", timeout: 5)
+        let message = wait(for: .connectionMessage, in: app, toContain: "refusé en mode test", timeout: 5)
         XCTAssertTrue(message.contains("refusé en mode test"), message)
         XCTAssertEqual(text(of: element(.connectionTunnelState, in: app)), "en échec")
         HVShot.capture("hd07-refuse-prod", app)
@@ -144,7 +144,7 @@ final class TunnelTests: XCTestCase {
 
     func testAPersoHermesHostInTheEnvironmentNeverStartsSsh() throws {
         let app = launch(host: "perso-hermes.invalid")
-        let banner = wait(for: .bannerError, in: app, toContain: "perso-hermes", timeout: 10)
+        let banner = wait(for: .bannerError, in: app, toContain: "refusé en mode test", timeout: 10)
         XCTAssertTrue(banner.contains("refusé en mode test"), banner)
         // le temps à l'échantillonneur de voir qu'aucun ssh ne démarre
         sleep(4)

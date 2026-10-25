@@ -42,11 +42,16 @@ struct SSHConnectionPreview: Equatable, Sendable {
     }
 }
 
-protocol SSHConfigResolving: Sendable {
-    func dump(alias: String) async throws -> String
+struct SSHConfigDump: Equatable, Sendable {
+    var stdout: String
+    var stderr: String = ""
 }
 
-/// `/usr/bin/ssh -G <alias>` avec la config par défaut, Include compris
+protocol SSHConfigResolving: Sendable {
+    func dump(alias: String) async throws -> SSHConfigDump
+}
+
+/// `/usr/bin/ssh -G -v <alias>` : stdout = config aplatie, stderr = blocs Host appliqués
 struct SystemSSHConfigResolver: SSHConfigResolving {
     let environment: [String: String]
 
@@ -54,12 +59,12 @@ struct SystemSSHConfigResolver: SSHConfigResolving {
         self.environment = environment
     }
 
-    func dump(alias: String) async throws -> String {
+    func dump(alias: String) async throws -> SSHConfigDump {
         let output: Spawn.Output
         do {
             output = try await Spawn.run(
                 "/usr/bin/ssh",
-                ["-G", alias],
+                ["-G", "-v", alias],
                 environment: SSHChildEnvironment.make(environment),
                 timeout: .seconds(8)
             )
@@ -69,7 +74,7 @@ struct SystemSSHConfigResolver: SSHConfigResolving {
             throw SSHFailure.unreachable("ssh ne démarre pas")
         }
         guard output.status == 0 else { throw SSHFailure.unknownAlias }
-        return output.stdout
+        return SSHConfigDump(stdout: output.stdout, stderr: output.stderr)
     }
 }
 
@@ -80,7 +85,25 @@ enum SSHConfig {
 
     /// Analyse la sortie de `ssh -G`. Les chemins restent hors des libellés affichés.
     static func parse(
+        _ dump: SSHConfigDump,
+        alias: String,
+        localUser: String,
+        filesExist: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
+        authSock: String? = nil
+    ) -> SSHConnectionPreview {
+        parse(
+            dump.stdout,
+            debug: dump.stderr,
+            alias: alias,
+            localUser: localUser,
+            filesExist: filesExist,
+            authSock: authSock
+        )
+    }
+
+    static func parse(
         _ dump: String,
+        debug: String = "",
         alias: String,
         localUser: String,
         filesExist: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
@@ -113,7 +136,8 @@ enum SSHConfig {
             proxyCommand: first(values["proxycommand"]),
             certificates: certificates,
             agent: agent,
-            identityFiles: identityFiles
+            identityFiles: identityFiles,
+            debug: debug
         )
         return SSHConnectionPreview(
             alias: alias,
@@ -127,7 +151,8 @@ enum SSHConfig {
         )
     }
 
-    /// `ssh -G` rend l'alias tel quel et le port 22 quand aucun bloc Host ne correspond
+    /// Un alias est inconnu seulement s'il n'a pas de bloc Host (stderr de `ssh -G -v`) et que `ssh -G` reste aux valeurs standard
+    /// Un bloc Host qui ne change aucune valeur reste un alias valide
     static func isUnknownAlias(
         alias: String,
         hostname: String,
@@ -138,15 +163,46 @@ enum SSHConfig {
         proxyCommand: String?,
         certificates: [String],
         agent: String?,
-        identityFiles: [String]
+        identityFiles: [String],
+        debug: String = ""
     ) -> Bool {
+        if hostBlock(matches: alias, debug: debug) { return false }
         guard hostname.caseInsensitiveCompare(alias) == .orderedSame, port == 22 else { return false }
         if user != localUser { return false }
         if jumps > 0 { return false }
         if let proxyCommand, !isNone(proxyCommand) { return false }
         if !certificates.isEmpty { return false }
         if let agent, !isNone(agent), agent != "SSH_AUTH_SOCK" { return false }
-        return identityFiles.allSatisfy { defaultIdentityNames.contains(URL(fileURLWithPath: $0).lastPathComponent) }
+        guard identityFiles.allSatisfy({ defaultIdentityNames.contains(URL(fileURLWithPath: $0).lastPathComponent) }) else { return false }
+        return debug.contains("Applying options for")
+    }
+
+    /// `debug1: … Applying options for <pattern>` : un motif autre que `*` qui couvre l'alias
+    static func hostBlock(matches alias: String, debug: String) -> Bool {
+        for line in debug.split(whereSeparator: \.isNewline) {
+            let text = String(line)
+            guard let range = text.range(of: "Applying options for ") else { continue }
+            let pattern = String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces)
+            if pattern.isEmpty || pattern == "*" { continue }
+            if glob(pattern, matches: alias) { return true }
+        }
+        return false
+    }
+
+    private static func glob(_ pattern: String, matches value: String) -> Bool {
+        var regex = "^"
+        for character in pattern {
+            switch character {
+            case "*": regex += ".*"
+            case "?": regex += "."
+            case ".", "[", "]", "{", "}", "(", ")", "+", "^", "$", "|", "\\":
+                regex += "\\\(character)"
+            default:
+                regex += String(character)
+            }
+        }
+        regex += "$"
+        return value.range(of: regex, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     private static func kind(certificates: [String], agent: String?, identityFiles: [String], authSock: String?) -> SSHIdentityKind {
@@ -214,8 +270,7 @@ enum SSHConfig {
 
 enum SSHConnectionPlanner {
     static func config(from preview: SSHConnectionPreview, refusePersoHermes: Bool, remotePort: Int = 8642) throws -> SSHTunnelConfig {
-        if preview.isUnknownAlias { throw SSHFailure.unknownAlias }
-        return try SSHTunnelConfig(
+        let config = try SSHTunnelConfig(
             alias: preview.alias,
             hostname: preview.hostname,
             user: preview.user,
@@ -223,5 +278,63 @@ enum SSHConnectionPlanner {
             remotePort: remotePort,
             refusePersoHermes: refusePersoHermes
         )
+        if preview.isUnknownAlias { throw SSHFailure.unknownAlias }
+        return config
+    }
+}
+
+/// Une seule connexion en cours : un connect B ignore le dump de A s'il arrive après
+@MainActor
+final class SSHConnectCoordinator {
+    private var generation = 0
+    private var task: Task<Void, Never>?
+    private let resolver: any SSHConfigResolving
+    private let localUser: String
+    private let authSock: String?
+
+    init(
+        resolver: any SSHConfigResolving,
+        localUser: String = NSUserName(),
+        authSock: String? = ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"]
+    ) {
+        self.resolver = resolver
+        self.localUser = localUser
+        self.authSock = authSock
+    }
+
+    func connect(
+        alias: String,
+        refusePersoHermes: Bool,
+        opened: @escaping @MainActor (SSHTunnelConfig, SSHConnectionPreview) -> Void,
+        refused: @escaping @MainActor (SSHFailure, SSHConnectionPreview?) -> Void
+    ) {
+        generation += 1
+        let id = generation
+        task?.cancel()
+        task = Task { await run(alias: alias, id: id, refusePersoHermes: refusePersoHermes, opened: opened, refused: refused) }
+    }
+
+    private func run(
+        alias: String,
+        id: Int,
+        refusePersoHermes: Bool,
+        opened: @MainActor (SSHTunnelConfig, SSHConnectionPreview) -> Void,
+        refused: @MainActor (SSHFailure, SSHConnectionPreview?) -> Void
+    ) async {
+        var preview: SSHConnectionPreview?
+        do {
+            let dump = try await resolver.dump(alias: alias)
+            guard id == generation, !Task.isCancelled else { return }
+            let next = SSHConfig.parse(dump, alias: alias, localUser: localUser, authSock: authSock)
+            preview = next
+            let config = try SSHConnectionPlanner.config(from: next, refusePersoHermes: refusePersoHermes)
+            guard id == generation, !Task.isCancelled else { return }
+            opened(config, next)
+        } catch is CancellationError {
+            return
+        } catch {
+            guard id == generation, !Task.isCancelled else { return }
+            refused(error as? SSHFailure ?? .invalidHost, preview)
+        }
     }
 }

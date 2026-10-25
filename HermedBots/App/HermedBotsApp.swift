@@ -77,6 +77,7 @@ final class AppModel {
     }
     private var environment: AppEnvironment
     private var sshResolver: any SSHConfigResolving
+    private let connector: SSHConnectCoordinator
     private var previewGeneration = 0
     let updates: UpdateCheck
     private(set) var updateRender = 0
@@ -114,6 +115,7 @@ final class AppModel {
         self.environment = environment
         self.updates = updates
         self.sshResolver = sshResolver
+        self.connector = SSHConnectCoordinator(resolver: sshResolver)
         host = environment.ssh?.host ?? ""
         #if DEBUG
         if environment.isTestMode {
@@ -224,7 +226,13 @@ final class AppModel {
             tunnel.refuse(.invalidHost)
             return
         }
-        Task { await openResolvedTunnel(alias: alias) }
+        connector.connect(alias: alias, refusePersoHermes: environment.isTestMode, opened: { [weak self] config, preview in
+            self?.preview = preview
+            self?.openTunnel(config)
+        }, refused: { [weak self] failure, preview in
+            if let preview { self?.preview = preview }
+            self?.tunnel.refuse(failure)
+        })
     }
 
     func reconnectAfterWake() {
@@ -246,24 +254,6 @@ final class AppModel {
         } catch {
             guard id == previewGeneration else { return }
             preview = nil
-        }
-    }
-
-    private func openResolvedTunnel(alias: String) async {
-        let preview: SSHConnectionPreview
-        do {
-            let dump = try await sshResolver.dump(alias: alias)
-            preview = SSHConfig.parse(
-                dump,
-                alias: alias,
-                localUser: NSUserName(),
-                authSock: ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"]
-            )
-            self.preview = preview
-            let config = try SSHConnectionPlanner.config(from: preview, refusePersoHermes: environment.isTestMode)
-            openTunnel(config)
-        } catch {
-            tunnel.refuse(error as? SSHFailure ?? .invalidHost)
         }
     }
 

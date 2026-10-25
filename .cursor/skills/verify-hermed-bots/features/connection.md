@@ -49,7 +49,7 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 
 | Cas | Message |
 | --- | --- |
-| Alias inconnu (`ssh -G` rend le nom tel quel et le port 22 sans bloc Host) | Cet alias SSH est inconnu. |
+| Alias inconnu (`ssh -G -v` n'applique aucun bloc Host autre que `*` ; un bloc Host aux valeurs standard reste valide) | Cet alias SSH est inconnu. |
 | Agent verrouillé ou vide | L'agent SSH est verrouillé ou vide. |
 | Certificat expiré | Le certificat SSH a expiré. |
 | Serveur refuse l'identité | Le serveur refuse l'identité SSH. |
