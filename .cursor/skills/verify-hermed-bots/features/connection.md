@@ -36,6 +36,10 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché. 
 - Si le profil n'a pas de valeur, repli sur `default` (`SecretStore.resolvedAPIKey`). Cache Trousseau `WhenUnlockedThisDeviceOnly`. Jamais affichée ni journalisée.
 - Échec : bandeau `Clé API introuvable sur l'hôte pour le profil <id>`.
 
+## Préfixe `/p/<profil>/`
+
+Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway/platforms/api_server.py`) sert les préfixes `/p/<profil>/`. L'auth vérifie `API_SERVER_KEY` **du profil routé** (fichier `.env` de ce profil), pas celle de `default`. Un préfixe nommé sans clé propre échoue fermé (401). La clé de default reste valable seulement sur les routes sans préfixe et sur `/p/default/`. Sources publiques : [API Server — Multi-profile routing](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server), [`api_server.py` sur `main`](https://github.com/NousResearch/hermes-agent/blob/main/gateway/platforms/api_server.py). Le repli app sur `default` après SSH n'est donc pas accepté par Hermes sur un préfixe nommé.
+
 ## Transport
 
 - Résolution : `/usr/bin/ssh -G -vv` suivi des arguments de chaque lancement de `ssh` (tunnel, liste des profils, détection de Hermes Desktop). Chaque lancement est résolu et validé avec ses propres arguments. Le tunnel fournit l'aperçu affiché. Chaque `ssh -G` tourne sous un gardien : l'arrêt de l'app le tue, avec la commande d'un `Match exec`, et le délai de 8 s tue le groupe entier.
