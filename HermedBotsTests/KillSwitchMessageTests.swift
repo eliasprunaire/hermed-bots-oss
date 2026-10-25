@@ -504,6 +504,94 @@ final class KillSwitchMessageTests: XCTestCase {
         await model.stopAll()
         XCTAssertEqual(model.message, "")
     }
+
+    // vrai socket local : la requête part ou non, sans moquer KillSwitchAPI
+    func testAKeyReadThatOutlastsASwitchDoesNotSendTheStop() async throws {
+        let listener = try LoopbackListener()
+        let screen = Screen("A")
+        let api = KillSwitchAPI(baseURL: listener.url, apiKey: nil, apiKeyForProfile: { _ in
+            screen.show("B")
+            return "key"
+        })
+        do {
+            _ = try await api.cancel(runs[0], allow: { screen.current == "A" })
+            XCTFail("the stop must not complete after the switch")
+        } catch let error as URLError {
+            XCTAssertEqual(error.code, .cancelled)
+        }
+        XCTAssertFalse(listener.hasConnection(within: 300), "a stop reached the server after the switch")
+    }
+
+    func testTheStopReachesTheServerWhileTheConnectionStays() async throws {
+        let listener = try LoopbackListener()
+        let api = KillSwitchAPI(baseURL: listener.url, apiKey: nil, apiKeyForProfile: { _ in "key" })
+        let run = runs[0]
+        let stop = Task.detached { try? await api.cancel(run, allow: { true }) }
+        XCTAssertTrue(listener.hasConnection(within: 3000))
+        listener.dropConnection()
+        _ = await stop.value
+    }
+}
+
+private final class Screen: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String
+
+    init(_ value: String) { self.value = value }
+
+    var current: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func show(_ other: String) {
+        lock.lock()
+        value = other
+        lock.unlock()
+    }
+}
+
+private final class LoopbackListener {
+    private let descriptor: Int32
+    let url: URL
+
+    init() throws {
+        let socketDescriptor = socket(AF_INET, SOCK_STREAM, 0)
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let size = socklen_t(MemoryLayout<sockaddr_in>.size)
+        // port 0 : le noyau choisit un port libre
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socketDescriptor, $0, size) }
+        }
+        var length = size
+        let named = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(socketDescriptor, $0, &length) }
+        }
+        guard socketDescriptor >= 0, bound == 0, named == 0, listen(socketDescriptor, 4) == 0 else {
+            let code = POSIXErrorCode(rawValue: errno) ?? .EIO
+            close(socketDescriptor)
+            throw POSIXError(code)
+        }
+        descriptor = socketDescriptor
+        url = URL(string: "http://127.0.0.1:\(UInt16(bigEndian: address.sin_port))")!
+    }
+
+    deinit { close(descriptor) }
+
+    // une connexion en file d'attente suffit : le noyau l'accepte sans accept()
+    func hasConnection(within milliseconds: Int32) -> Bool {
+        var watched = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+        return poll(&watched, 1, milliseconds) > 0
+    }
+
+    func dropConnection() {
+        let client = accept(descriptor, nil, nil)
+        if client >= 0 { close(client) }
+    }
 }
 
 @MainActor

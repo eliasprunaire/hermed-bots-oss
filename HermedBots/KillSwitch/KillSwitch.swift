@@ -32,6 +32,8 @@ struct KillSwitchAPI: Sendable {
         if let apiKeyForProfile { key = try apiKeyForProfile(profile) }
         else { key = apiKey }
         if let key { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
+        // la lecture de clé peut durer : l'écran a pu changer depuis le premier contrôle
+        guard await allow() else { throw URLError(.cancelled) }
         let session = URLSession(configuration: .ephemeral, delegate: RedirectGuard(), delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         let (data, response) = try await session.data(for: request)
