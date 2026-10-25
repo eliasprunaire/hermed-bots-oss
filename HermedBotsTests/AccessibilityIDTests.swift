@@ -23,6 +23,7 @@ final class AccessibilityIDTests: XCTestCase {
         XCTAssertEqual(AccessibilityID.connectionKeyState.rawValue, "hd.connection.key-state")
         XCTAssertEqual(AccessibilityID.connectionTunnelState.rawValue, "hd.connection.tunnel-state")
         XCTAssertEqual(AccessibilityID.connectionMessage.rawValue, "hd.connection.message")
+        XCTAssertEqual(AccessibilityID.updatesCheck.rawValue, "hd.updates.check")
     }
 
     func testTheBotListIdsAreStable() {

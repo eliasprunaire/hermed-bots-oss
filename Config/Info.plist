@@ -11,8 +11,8 @@
     <key>SUVerifyUpdateBeforeExtraction</key>
     <true/>
     <key>SUEnableAutomaticChecks</key>
-    <true/>
+    <false/>
     <key>SUAutomaticallyUpdate</key>
-    <true/>
+    <false/>
 </dict>
 </plist>

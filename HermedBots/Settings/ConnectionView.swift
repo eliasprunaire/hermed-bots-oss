@@ -77,6 +77,9 @@ struct ConnectionView: View {
                     .accessibilityID(.connectionAPISave)
                     Text(verbatim: apiStatus).accessibilityID(.connectionAPIStatus)
                 }
+                Button("Rechercher les mises à jour…") { model.checkForUpdates() }
+                    .disabled(!model.canCheckForUpdates)
+                    .accessibilityID(.updatesCheck)
                 if let message = model.tunnel.state.failureMessage {
                     Text(message).foregroundStyle(.red).accessibilityID(.connectionMessage)
                 }

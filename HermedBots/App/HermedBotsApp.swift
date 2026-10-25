@@ -2,6 +2,7 @@ import HermesAdapter
 import Observation
 import SwiftUI
 import Sparkle
+import UpdateCheck
 
 @Observable
 @MainActor
@@ -83,6 +84,8 @@ final class AppModel {
     }
     private var port: Int
     private var environment: AppEnvironment
+    let updates: UpdateCheck
+    private(set) var updateRender = 0
     #if DEBUG
     /// Mode test seulement : date de l'intérieur les blocages du fil principal, que la sonde de perf lit par `hd.perf.hang`
     let mainThreadWatch: MainThreadWatch?
@@ -92,8 +95,19 @@ final class AppModel {
     private var sshBackend: SystemSSHBackend?
     private var sshConfig: SSHTunnelConfig?
 
-    init(environment: AppEnvironment) {
+    var canCheckForUpdates: Bool {
+        _ = updateRender
+        return updates.canCheck
+    }
+
+    func checkForUpdates() {
+        updates.checkForUpdates()
+        updateRender += 1
+    }
+
+    init(environment: AppEnvironment, updates: UpdateCheck = UpdateCheck(driver: NullUpdateDriver())) {
         self.environment = environment
+        self.updates = updates
         host = environment.ssh?.host ?? ""
         user = environment.ssh?.user ?? NSUserName()
         port = environment.ssh?.port ?? 22
@@ -107,6 +121,9 @@ final class AppModel {
         }
         #endif
         ProcessGroups.installTerminationHooks()
+        updates.onChange = { [weak self] in
+            Task { @MainActor in self?.updateRender += 1 }
+        }
     }
 
     /// L'adresse de l'API : le port du tunnel ouvert, ou l'adresse directe du mode test sans tunnel ; nil tant qu'aucune n'est joignable
@@ -450,14 +467,38 @@ private struct ModelSwitchProbe: View {
 @main
 struct HermedBotsApp: App {
     #if !DEBUG
-    private let updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+    private let sparkleDelegate: SparkleCycleDelegate
+    private let updater: SPUStandardUpdaterController
     #endif
-    @State private var model = AppModel(environment: .resolve(ProcessInfo.processInfo.environment))
+    @State private var model: AppModel
+
+    init() {
+        let environment = AppEnvironment.resolve(ProcessInfo.processInfo.environment)
+        #if DEBUG
+        let updates = UpdateCheck(driver: NullUpdateDriver())
+        _model = State(initialValue: AppModel(environment: environment, updates: updates))
+        #else
+        let driver = SparkleUpdateDriver()
+        let updates = UpdateCheck(driver: driver)
+        let delegate = SparkleCycleDelegate(updates: updates)
+        let updater = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: delegate, userDriverDelegate: nil)
+        driver.attach(updater)
+        sparkleDelegate = delegate
+        self.updater = updater
+        _model = State(initialValue: AppModel(environment: environment, updates: updates))
+        #endif
+    }
 
     var body: some Scene {
         Window("Hermed Bots", id: "main") {
             ContentView(model: model)
         }
         .defaultSize(width: 1280, height: 800)
+        .commands {
+            CommandGroup(after: .appInfo) {
+                Button("Rechercher les mises à jour…") { model.checkForUpdates() }
+                    .disabled(!model.canCheckForUpdates)
+            }
+        }
     }
 }

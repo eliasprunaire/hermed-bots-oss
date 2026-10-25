@@ -17,8 +17,11 @@ test("the app bundle carries the Sparkle feed, the public key and the signed-fee
   // The release script fills these two build settings at archive time
   assert.equal(plist.SUFeedURL, "<string>$(SPARKLE_FEED_URL)</string>");
   assert.equal(plist.SUPublicEDKey, "<string>$(SPARKLE_PUBLIC_KEY)</string>");
-  for (const key of ["SURequireSignedFeed", "SUVerifyUpdateBeforeExtraction", "SUEnableAutomaticChecks"]) {
+  for (const key of ["SURequireSignedFeed", "SUVerifyUpdateBeforeExtraction"]) {
     assert.equal(plist[key], "<true/>", key);
+  }
+  for (const key of ["SUEnableAutomaticChecks", "SUAutomaticallyUpdate"]) {
+    assert.equal(plist[key], "<false/>", key);
   }
 });
 

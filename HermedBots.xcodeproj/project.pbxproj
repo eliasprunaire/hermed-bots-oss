@@ -27,6 +27,8 @@
 		F15500000000000000000001 /* KillSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15500000000000000000002 /* KillSwitch.swift */; };
 		F14600000000000000000001 /* ResumeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14600000000000000000002 /* ResumeStore.swift */; };
 		F16400000000000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = F16400000000000000000003 /* Sparkle */; };
+		F12300000000000000000001 /* UpdateCheck in Frameworks */ = {isa = PBXBuildFile; productRef = F12300000000000000000003 /* UpdateCheck */; };
+		F12300000000000000000002 /* UpdateCheck in Frameworks */ = {isa = PBXBuildFile; productRef = F12300000000000000000004 /* UpdateCheck */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -97,6 +99,7 @@
 			files = (
 				7BE33CD3E32FF1AAFD5E4768 /* HermesAdapter in Frameworks */,
 				F12100000000000000000001 /* LoopGuard in Frameworks */,
+				F12300000000000000000001 /* UpdateCheck in Frameworks */,
 				F16400000000000000000001 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -107,6 +110,7 @@
 			files = (
 				7BE33CD3E32FF1AAFD5E4769 /* HermesAdapter in Frameworks */,
 				F12100000000000000000002 /* LoopGuard in Frameworks */,
+				F12300000000000000000002 /* UpdateCheck in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -240,6 +244,7 @@
 			packageProductDependencies = (
 				DA4C1C94CD32735911D411BC /* HermesAdapter */,
 				F12100000000000000000003 /* LoopGuard */,
+				F12300000000000000000003 /* UpdateCheck */,
 				F16400000000000000000003 /* Sparkle */,
 			);
 			productName = HermedBots;
@@ -287,6 +292,7 @@
 			packageProductDependencies = (
 				DA4C1C94CD32735911D411BD /* HermesAdapter */,
 				F12100000000000000000004 /* LoopGuard */,
+				F12300000000000000000004 /* UpdateCheck */,
 			);
 			productName = HermedBotsTests;
 			productReference = 09F93F8C10FA034CD23BDE16 /* HermedBotsTests.xctest */;
@@ -722,6 +728,8 @@
 		};
 		F12100000000000000000003 /* LoopGuard */ = {isa = XCSwiftPackageProductDependency; productName = LoopGuard; };
 		F12100000000000000000004 /* LoopGuard */ = {isa = XCSwiftPackageProductDependency; productName = LoopGuard; };
+		F12300000000000000000003 /* UpdateCheck */ = {isa = XCSwiftPackageProductDependency; productName = UpdateCheck; };
+		F12300000000000000000004 /* UpdateCheck */ = {isa = XCSwiftPackageProductDependency; productName = UpdateCheck; };
 /* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 359EED06494E38FF40D27457 /* Project object */;
