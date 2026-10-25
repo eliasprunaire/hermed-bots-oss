@@ -56,7 +56,7 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 | Serveur refuse l'identité | Le serveur refuse l'identité SSH. |
 | Clé d'hôte changée | La clé de l'hôte a changé. |
 | Hôte injoignable | Hôte injoignable. |
-| `perso-hermes` en mode test, sur l'alias ou l'hôte résolu ; l'alias tapé est refusé avant `ssh -G` | Cet hôte est refusé en mode test. |
+| `perso-hermes` en mode test, sur l'alias ou l'hôte résolu ; l'alias tapé est refusé avant `ssh -G`. Tout `ProxyJump` ou `ProxyCommand` est refusé en mode test | Cet hôte est refusé en mode test. |
 
 ## Vérification unitaire
 
