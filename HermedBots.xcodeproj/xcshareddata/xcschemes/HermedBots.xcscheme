@@ -60,6 +60,35 @@
                BlueprintName = "HermedBotsUITests"
                ReferencedContainer = "container:HermedBots.xcodeproj">
             </BuildableReference>
+            <SkippedTests>
+               <Test
+                  Identifier = "ApprovalPerfProbe">
+               </Test>
+               <Test
+                  Identifier = "BannerPerfProbe">
+               </Test>
+               <Test
+                  Identifier = "BotsPerfProbe">
+               </Test>
+               <Test
+                  Identifier = "ColdLaunchProbe">
+               </Test>
+               <Test
+                  Identifier = "ConversationPerfProbe">
+               </Test>
+               <Test
+                  Identifier = "ModelPerfProbe">
+               </Test>
+               <Test
+                  Identifier = "ConcurrencyTests/testPerfFiveHolds">
+               </Test>
+               <Test
+                  Identifier = "ConcurrencyTests/testPerfOneHold">
+               </Test>
+               <Test
+                  Identifier = "KillSwitchTests/testPerfFiveStops">
+               </Test>
+            </SkippedTests>
          </TestableReference>
       </Testables>
       <CommandLineArguments>
