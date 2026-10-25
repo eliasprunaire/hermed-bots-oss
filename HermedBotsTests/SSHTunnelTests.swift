@@ -83,6 +83,39 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertFalse(HermesAPIKey.missingMessage(profile: "cyber").contains(secret))
     }
 
+    @MainActor
+    func testAnExplicitRetryReopensTheKeyReadAfterATemporaryFailure() async throws {
+        let secret = "fetched-profile-key-VALUE"
+        var store = InMemorySecretStore(apiKey: nil)
+        let fetches = APIKeyFetches()
+        var reads: [String] = []
+        func read(_ name: String) async throws -> String? {
+            reads.append(name)
+            if reads.count == 1 { throw SSHFailure.unreachable("coupure") }
+            return secret
+        }
+
+        let failed = await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(failed)
+        XCTAssertFalse(fetches.gotValue("cyber"))
+        // le même refus ne relit pas
+        let sameRefusal = await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(sameRefusal)
+        XCTAssertEqual(reads, ["cyber"])
+
+        fetches.reset()
+        let retried = await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertEqual(retried, secret)
+        XCTAssertEqual(reads, ["cyber", "cyber"])
+        XCTAssertTrue(fetches.gotValue("cyber"))
+        XCTAssertEqual(try store.apiKey(profile: "cyber"), secret)
+
+        // une lecture réussie ne vaut que pour son profil
+        XCTAssertFalse(fetches.gotValue("sport"))
+        fetches.settle("cyber")
+        XCTAssertFalse(fetches.gotValue("cyber"))
+    }
+
     func testANamedProfileWithoutAKeyShowsTheMissingBannerAndNeverSendsTheDefaultKey() async throws {
         let defaultKey = "default-host-key-VALUE"
         var store = InMemorySecretStore(apiKey: defaultKey)
@@ -102,7 +135,8 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(message, "Clé API introuvable sur l'hôte pour le profil sport.")
         XCTAssertFalse(message.contains(defaultKey))
 
-        let api = ResumeAPI(baseURL: URL(string: "http://hermes.invalid")!, apiKey: defaultKey, apiKeyForProfile: { try store.resolvedAPIKey(profile: $0) })
+        let finalStore = store
+        let api = ResumeAPI(baseURL: URL(string: "http://hermes.invalid")!, apiKey: defaultKey, apiKeyForProfile: { try finalStore.resolvedAPIKey(profile: $0) })
         let request = try api.makeRequest(profile: "sport", input: "bonjour", session: "s", model: nil, key: "idem")
         XCTAssertEqual(request.url?.path, "/p/sport/v1/runs")
         XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))

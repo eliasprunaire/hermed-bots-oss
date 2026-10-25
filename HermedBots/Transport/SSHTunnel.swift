@@ -478,11 +478,39 @@ enum HermesProfileName: Error, Equatable {
 
 enum APIKeyRecovery {
     /// Lit uniquement `API_SERVER_KEY` du profil demandé ; pas de repli sur `default`
-    static func refresh(profile: String, into secrets: inout some SecretStore, fetch: (String) async throws -> String?) async throws -> String? {
+    nonisolated(nonsending) static func refresh(profile: String, into secrets: inout some SecretStore, fetch: (String) async throws -> String?) async throws -> String? {
         let profile = try HermesAPIKey.validate(profile)
         guard let value = try await fetch(profile), let key = HermesAPIKey.parse(value) else { return nil }
         try secrets.setAPIKey(key, profile: profile)
         return key
+    }
+}
+
+/// Une lecture SSH par profil et par refus ; un nouvel essai explicite de l'utilisateur la rouvre
+@MainActor
+final class APIKeyFetches {
+    private var attempted: Set<String> = []
+    private var recovered: Set<String> = []
+
+    /// nil si la garde est fermée pour ce profil, si la lecture échoue ou si la clé est introuvable ; la valeur n'est pas journalisée
+    func fetch(profile: String, into secrets: inout some SecretStore, read: (String) async throws -> String?) async -> String? {
+        guard attempted.insert(profile).inserted else { return nil }
+        guard let key = try? await APIKeyRecovery.refresh(profile: profile, into: &secrets, fetch: read) else { return nil }
+        recovered.insert(profile)
+        return key
+    }
+
+    func gotValue(_ profile: String) -> Bool { recovered.contains(profile) }
+
+    /// Le profil a répondu : le prochain refus peut relire
+    func settle(_ profile: String) {
+        attempted.remove(profile)
+        recovered.remove(profile)
+    }
+
+    func reset() {
+        attempted.removeAll()
+        recovered.removeAll()
     }
 }
 

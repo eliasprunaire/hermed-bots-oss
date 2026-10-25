@@ -21,7 +21,7 @@ final class ConversationModelTests: XCTestCase {
     /// `reachable: false` : aucun client, comme quand le tunnel n'est pas ouvert
     /// `bots`, `listedThread` et `startedReads` sont ce que la barre latérale sait : les profils actifs, ce que la liste des fils dit d'un fil (son modèle, le numéro de la lecture), et le numéro de la dernière lecture partie
     /// `approvalRetry` est l'attente entre deux essais d'une décision qui ne part pas
-    private func makeModel(reachable: Bool = true, bots: @escaping @MainActor () -> [Bot] = { [] }, listedThread: @escaping @MainActor (String, String) -> (model: String?, read: Int)? = { _, _ in nil }, startedReads: @escaping @MainActor () -> Int = { 0 }, approvalRetry: Duration = .milliseconds(20), resumeStore: ResumeStore? = nil, onAPIError: @escaping @MainActor (Error) -> Void = { _ in }) -> ConversationModel {
+    private func makeModel(reachable: Bool = true, bots: @escaping @MainActor () -> [Bot] = { [] }, listedThread: @escaping @MainActor (String, String) -> (model: String?, read: Int)? = { _, _ in nil }, startedReads: @escaping @MainActor () -> Int = { 0 }, approvalRetry: Duration = .milliseconds(20), resumeStore: ResumeStore? = nil, onAPIError: @escaping @MainActor (Error, String) -> Void = { _, _ in }) -> ConversationModel {
         GateProtocol.reset()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [GateProtocol.self]
@@ -253,7 +253,7 @@ final class ConversationModelTests: XCTestCase {
 
     func testARefusedKeyReportsOneFailureWithoutRetryingTheRun() async throws {
         var failures = 0
-        let model = makeModel(onAPIError: { _ in failures += 1 })
+        let model = makeModel(onAPIError: { _, _ in failures += 1 })
         try await openEmptyThread(model, session: "thread")
         model.draft = "hello"
         model.send()
@@ -261,6 +261,26 @@ final class ConversationModelTests: XCTestCase {
         await eventually("clé refusée signalée") { failures == 1 }
         XCTAssertNotNil(model.conversation.failure)
         XCTAssertEqual(GateProtocol.requests.count, 2)
+    }
+
+    func testRefusedKeysNameTheProfileOfEachFailedRequestNotTheOneOnScreen() async throws {
+        var reported: [String] = []
+        let model = makeModel(onAPIError: { _, profile in reported.append(profile) })
+        try await openEmptyThread(model, session: "a")
+        model.draft = "go"
+        model.send()
+        let first = try await held(1, "POST", "/v1/runs")
+        model.open(session: "b", of: "other-bot")
+        try await held(2, "GET", "/api/sessions/b/messages").reply(emptyTranscript)
+        await eventually("autre bot à l'écran") { model.botID == "other-bot" && !model.isLoading }
+        model.draft = "go"
+        model.send()
+        let second = try await held(3, "POST", "/v1/runs")
+        second.reply(#"{"error":{"message":"refused"}}"#, status: 401)
+        first.reply(#"{"error":{"message":"refused"}}"#, status: 401)
+        await eventually("deux refus signalés") { reported.count == 2 }
+        XCTAssertEqual(reported.sorted(), ["hv-bot", "other-bot"])
+        XCTAssertEqual(model.botID, "other-bot")
     }
 
     // MARK: nouvelle session

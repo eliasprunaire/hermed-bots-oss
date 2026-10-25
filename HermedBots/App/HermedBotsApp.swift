@@ -44,7 +44,7 @@ final class AppModel {
             try await self.startResumableRun(bot: bot, text: text, session: session, model: model, key: key)
         },
         onAPIRecovered: { [unowned self] in self.apiError = nil },
-        onAPIError: { [unowned self] in Task { await self.handleAPIError($0) } },
+        onAPIError: { [unowned self] error, profile in Task { await self.handleAPIError(error, profile: profile) } },
         notifyPause: { await LoopPauseNotifications.shared.post(cause: $0) }
     )
     @ObservationIgnored lazy var profileLock = ProfileLock(
@@ -93,9 +93,8 @@ final class AppModel {
     // de quoi lire la liste des profils par un second ssh : le même alias que le tunnel
     private var sshBackend: SystemSSHBackend?
     private var sshConfig: SSHTunnelConfig?
-    /// Profils déjà relus par SSH pour un 401/403 en cours : une seule récupération, puis le message d'échec
-    private var fetchedAPIKey: Set<String> = []
-    private var apiKeyFetchGotValue: Set<String> = []
+    /// Une relecture SSH par profil et par 401/403, puis le message d'échec ; « Réessayer » la rouvre
+    private let apiKeyFetches = APIKeyFetches()
 
     var canCheckForUpdates: Bool {
         _ = updateRender
@@ -160,6 +159,11 @@ final class AppModel {
         guard let apiURL else { return nil }
         let secrets = environment.secrets
         return HermesClient(baseURL: apiURL, timeout: 15, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) })
+    }
+
+    private func resumeAPI(_ apiURL: URL) -> ResumeAPI {
+        let secrets = environment.secrets
+        return ResumeAPI(baseURL: apiURL, apiKey: nil, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) })
     }
 
     /// `list_profiles` : `hermes profile list` par un second canal ssh en lecture seule (décision S6)
@@ -227,8 +231,7 @@ final class AppModel {
 
     /// Ouvre le tunnel vers l'alias saisi ; un alias vide, invalide ou refusé invalide la génération en cours sans lancer ssh
     func connect() {
-        fetchedAPIKey.removeAll()
-        apiKeyFetchGotValue.removeAll()
+        apiKeyFetches.reset()
         persistEndpoint()
         connector.begin(alias: host, refusePersoHermes: environment.refusePersoHermes, opened: { [weak self] config, preview in
             self?.preview = preview
@@ -306,8 +309,7 @@ final class AppModel {
             let value = try await readVersionRecovering(baseURL, profile: profile)
             guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
             version = value.map(Version.known) ?? .unknown
-            fetchedAPIKey.remove(profile)
-            apiKeyFetchGotValue.remove(profile)
+            apiKeyFetches.settle(profile)
         } catch {
             guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
             version = .unknown
@@ -334,7 +336,15 @@ final class AppModel {
         }
     }
 
+    /// Bouton « Réessayer » : une lecture SSH échouée plus tôt peut repartir
     func retryAPI() async {
+        guard !isCheckingAPI else { return }
+        apiKeyFetches.reset()
+        await recheckAPI()
+    }
+
+    /// Sans rouvrir la garde : la relecture qui suit une clé récupérée ne boucle pas sur un 401 persistant
+    private func recheckAPI() async {
         guard !isCheckingAPI else { return }
         await refreshVersion()
         guard apiError == nil else { return }
@@ -356,18 +366,18 @@ final class AppModel {
         }
     }
 
-    private func handleAPIError(_ error: Error, profile: String? = nil) async {
-        let profile = profile ?? versionProfile
-        guard Self.isUnauthorized(error), let profile else {
+    /// `profile` est celui de la requête refusée, pas forcément celui qui est à l'écran
+    private func handleAPIError(_ error: Error, profile: String) async {
+        guard Self.isUnauthorized(error) else {
             apiError = Self.apiMessage(error)
             return
         }
         if await fetchRemoteAPIKey(profile) != nil {
             apiError = nil
-            await retryAPI()
+            await recheckAPI()
             return
         }
-        apiError = apiKeyFetchGotValue.contains(profile)
+        apiError = apiKeyFetches.gotValue(profile)
             ? String(localized: "La clé API est refusée pour le profil \(profile).")
             : HermesAPIKey.missingMessage(profile: profile)
     }
@@ -375,19 +385,13 @@ final class AppModel {
     /// Une lecture SSH par profil et par refus : le Trousseau est mis à jour, la valeur n'est pas journalisée
     @discardableResult
     private func fetchRemoteAPIKey(_ profile: String) async -> String? {
-        guard fetchedAPIKey.insert(profile).inserted else { return nil }
         guard let sshBackend, let sshConfig, case .open = tunnel.state else { return nil }
-        do {
-            var secrets = environment.secrets
-            let key = try await APIKeyRecovery.refresh(profile: profile, into: &secrets) { name in
-                try await sshBackend.readAPIKey(sshConfig, profile: name)
-            }
-            environment.secrets = secrets
-            if key != nil { apiKeyFetchGotValue.insert(profile) }
-            return key
-        } catch {
-            return nil
+        var secrets = environment.secrets
+        let key = await apiKeyFetches.fetch(profile: profile, into: &secrets) { name in
+            try await sshBackend.readAPIKey(sshConfig, profile: name)
         }
+        if key != nil { environment.secrets = secrets }
+        return key
     }
 
     private static func isUnauthorized(_ error: Error) -> Bool {

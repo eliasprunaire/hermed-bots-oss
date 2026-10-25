@@ -35,6 +35,8 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché. 
 - Commande distante figée : `hermes -p <profil> config get API_SERVER_KEY --raw`. Le profil passe une liste blanche.
 - Uniquement la clé du profil demandé (`hermes -p <profil> …`). Pas de repli sur `default`. Cache Trousseau `WhenUnlockedThisDeviceOnly`. Jamais affichée ni journalisée.
 - Échec : bandeau `Clé API introuvable sur l'hôte pour le profil <id>`. Un profil nommé sans clé n'envoie jamais la clé de `default`.
+- Le profil relu est celui de la requête refusée, pas celui du bot à l'écran : un 401 d'un bot en arrière-plan relit la clé de ce bot.
+- Une lecture par profil et par refus. « Réessayer » rouvre la lecture après un échec ; la connexion et une réponse valide la rouvrent aussi.
 
 ## Préfixe `/p/<profil>/`
 
@@ -75,5 +77,7 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 - Recette HD-07 : `new_alias` (`docs/spike/hd07-instruments/lib.sh`) crée une clé éphémère et les alias `hv-hd07` (clé installée dans le conteneur) et `hv-hd07-refused` (clé jamais installée). Il les écrit dans un bloc `Include` marqué en tête de `~/.ssh/config` du compte qui lance la lane. `drop_alias` retire le bloc, puis les clés. Il réécrit la config à travers un lien symbolique et la laisse identique à l'octet près. Si le bloc ne part pas, il échoue avec un message et garde les clés. `new_alias` refuse un lien symbolique sans cible et une config illisible : il n'écrit rien et la config garde ses octets. Test : `test/hd07-alias-lib.test.js`. L'app n'a plus de variable de clé ni d'utilisateur.
 - Arguments exacts de la commande de clé, profil invalide refusé, 401 → récupération du profil seulement, clé absente des messages.
 - Profil nommé sans clé : bandeau introuvable, Authorization absent, clé de `default` jamais envoyée.
+- Échec temporaire de la lecture SSH, puis « Réessayer » : la lecture repart et la clé est récupérée (`APIKeyFetches`).
+- Deux bots refusés en même temps : chaque refus nomme son bot, pas celui à l'écran (`onAPIError`).
 - Affichage en lecture seule sans secret ni saisie API.
 - Le magasin de secrets ne lit plus de clé SSH dans le Trousseau. Mode test : pas de `SecItem*`.
