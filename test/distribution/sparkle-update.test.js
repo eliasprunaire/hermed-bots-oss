@@ -123,3 +123,168 @@ test("published mode refuses when github.com is not reachable over HTTPS", () =>
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+function fakePlist(version) {
+  return [
+    '<?xml version="1.0" encoding="UTF-8"?>',
+    '<plist version="1.0"><dict>',
+    "<key>CFBundleShortVersionString</key>",
+    `<string>${version}</string>`,
+    "<key>CFBundleIdentifier</key>",
+    "<string>com.hermedbots.HermedBots</string>",
+    "</dict></plist>",
+    "",
+  ].join("\n");
+}
+
+function writeFakeApp(dir, version) {
+  fs.mkdirSync(path.join(dir, "Contents"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "Contents", "Info.plist"), fakePlist(version));
+  return dir;
+}
+
+function lsregisterDump(entries) {
+  return entries
+    .map(
+      (entry) =>
+        [
+          "--------------------------------------------------------------------------------",
+          "bundle  id:            1",
+          `\tpath:          ${entry.path}`,
+          `\tidentifier:    ${entry.id}`,
+        ].join("\n"),
+    )
+    .join("\n");
+}
+
+function countCopies({ home, buildDir, target, mdfind, lsregister }) {
+  const box = fs.mkdtempSync(path.join(os.tmpdir(), "sparkle-count-"));
+  const mdFile = path.join(box, "mdfind.txt");
+  const lsFile = path.join(box, "lsregister.txt");
+  fs.writeFileSync(mdFile, mdfind || "");
+  fs.writeFileSync(lsFile, lsregister || "");
+  try {
+    return spawnSync(
+      "bash",
+      ["-c", "SPARKLE_PROOF_SOURCE=1; . scripts/sparkle-update-proof.sh; count_hermedbots_copies"],
+      {
+        encoding: "utf8",
+        cwd: path.join(__dirname, "../.."),
+        env: {
+          PATH: process.env.PATH,
+          HOME: home,
+          SPARKLE_PROOF_TARGET_VERSION: target,
+          SPARKLE_PROOF_BUILD_DIR: buildDir || "",
+          SPARKLE_PROOF_MDFIND_FILE: mdFile,
+          SPARKLE_PROOF_LSREGISTER_FILE: lsFile,
+        },
+      },
+    );
+  } finally {
+    fs.rmSync(box, { recursive: true, force: true });
+  }
+}
+
+test("the proof line records single-copy and discovers the shipping identifier after relaunch", () => {
+  const source = fs.readFileSync(PROOF, "utf8");
+  assert.match(source, /mdfind "kMDItemCFBundleIdentifier == 'com\.hermedbots\.HermedBots'"/);
+  assert.match(source, /lsregister -dump/);
+  assert.match(source, /SPARKLE_PROOF_BUILD_DIR/);
+  assert.match(source, /count_hermedbots_copies/);
+  assert.match(
+    source,
+    /SPARKLE-PROOF-PUBLISHED from=\$\{from:-none\} to=\$\{to:-none\} feed=\$feed install=\$install installed-after-relaunch=\$installed_after codesign=\$codesign_verdict spctl=\$spctl_verdict single-copy \$single_copy/,
+  );
+  assert.match(
+    source,
+    /SPARKLE-PROOF N=\$n N1=\$n1 feed-signature=pass install=pass installed-after-relaunch=\$installed_after_update altered-feed=refused altered-archive=refused single-copy \$single_copy/,
+  );
+  const published = source.slice(
+    source.indexOf("prove_published()"),
+    source.indexOf('if [ "$mode" = published ]'),
+  );
+  assert.ok(published.lastIndexOf("launch_published") < published.indexOf("prove_single_copy"));
+  assert.match(published, /\[ "\$single_copy" = pass \]/);
+  const afterUpdate = source.slice(source.indexOf("pass update"));
+  assert.ok(afterUpdate.indexOf("prove_single_copy") < afterUpdate.indexOf("pass feed-signature"));
+  assert.match(afterUpdate, /\[ "\$single_copy" = pass \] \|\| exit 1/);
+});
+
+test("count_hermedbots_copies covers empty, one, two, wrong version, vanished, and build-dir copies", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-copies-"));
+  try {
+    const keep = writeFakeApp(path.join(root, "keep.app"), "1.2.3");
+    const extra = writeFakeApp(path.join(root, "extra.app"), "1.2.3");
+    const stale = writeFakeApp(path.join(root, "stale.app"), "0.0.1");
+    const built = writeFakeApp(path.join(root, "build", "Built.app"), "1.2.3");
+    const gone = path.join(root, "gone.app");
+    const id = "com.hermedbots.HermedBots";
+
+    const empty = countCopies({
+      home: root,
+      target: "1.2.3",
+      mdfind: "",
+      lsregister: "",
+    });
+    assert.notEqual(empty.status, 0);
+    assert.match(empty.stdout, /single-copy count=0/);
+
+    const one = countCopies({
+      home: root,
+      target: "1.2.3",
+      mdfind: `${keep}\n`,
+      lsregister: lsregisterDump([{ path: keep, id }]),
+    });
+    assert.equal(one.status, 0, one.stderr);
+    assert.match(one.stdout, /single-copy count=1/);
+    assert.match(one.stdout, /copy version=1\.2\.3 path=~\/keep\.app/);
+
+    const two = countCopies({
+      home: root,
+      target: "1.2.3",
+      mdfind: `${keep}\n${extra}\n`,
+      lsregister: lsregisterDump([
+        { path: keep, id },
+        { path: extra, id },
+      ]),
+    });
+    assert.notEqual(two.status, 0);
+    assert.match(two.stdout, /single-copy count=2/);
+
+    const wrong = countCopies({
+      home: root,
+      target: "1.2.3",
+      mdfind: `${stale}\n`,
+      lsregister: "",
+    });
+    assert.notEqual(wrong.status, 0);
+    assert.match(wrong.stdout, /single-copy count=1/);
+    assert.match(wrong.stdout, /copy version=0\.0\.1 /);
+
+    const vanished = countCopies({
+      home: root,
+      target: "1.2.3",
+      mdfind: `${gone}\n${keep}\n`,
+      lsregister: lsregisterDump([{ path: gone, id }]),
+    });
+    assert.equal(vanished.status, 0, vanished.stderr);
+    assert.match(vanished.stdout, /single-copy count=1/);
+    assert.doesNotMatch(vanished.stdout, /gone\.app/);
+
+    const excluded = countCopies({
+      home: root,
+      buildDir: path.join(root, "build"),
+      target: "1.2.3",
+      mdfind: `${keep}\n${built}\n`,
+      lsregister: lsregisterDump([{ path: built, id }]),
+    });
+    assert.equal(excluded.status, 0, excluded.stderr);
+    assert.match(excluded.stdout, /single-copy count=1/);
+    assert.doesNotMatch(excluded.stdout, /Built\.app/);
+
+    const leaked = `${one.stdout}\n${two.stdout}\n${empty.stdout}\n${wrong.stdout}\n${vanished.stdout}\n${excluded.stdout}`;
+    assert.doesNotMatch(leaked, /\/Users\/|\/home\/[^/\s]+/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
