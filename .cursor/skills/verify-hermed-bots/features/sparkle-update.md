@@ -25,4 +25,4 @@ Discovery:
 - A missing tool or a nonzero exit of `mdfind` or `lsregister` fails the check (`single-copy discovery-failed source=<tool>`), because the list would be incomplete
 - Another identifier is never counted: an independent production install does not hide a second proof copy, and does not count as one
 
-Printed copy paths must be relative or redacted (`~` for the home prefix). The mechanism is `count_hermedbots_copies` in `scripts/sparkle-update-proof.sh`.
+Printed copy paths must be relative or redacted (`~` for the home prefix, `<ABS>/` plus the last component for any other absolute path, including work, app, and temporary folders). The mechanism is `count_hermedbots_copies` in `scripts/sparkle-update-proof.sh`.

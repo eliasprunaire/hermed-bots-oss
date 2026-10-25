@@ -217,6 +217,8 @@ test("the proof line records single-copy and discovers the identifier under test
 
 test("count_hermedbots_copies covers empty, one, two, wrong version, vanished, and build-dir copies", () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-copies-"));
+  let homeOnly;
+  let appsOnly;
   try {
     const keep = writeFakeApp(path.join(root, "keep.app"), "1.2.3");
     const extra = writeFakeApp(path.join(root, "extra.app"), "1.2.3");
@@ -287,10 +289,31 @@ test("count_hermedbots_copies covers empty, one, two, wrong version, vanished, a
     assert.match(excluded.stdout, /single-copy count=1/);
     assert.doesNotMatch(excluded.stdout, /Built\.app/);
 
-    const leaked = `${one.stdout}\n${two.stdout}\n${empty.stdout}\n${wrong.stdout}\n${vanished.stdout}\n${excluded.stdout}`;
+    homeOnly = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-home-"));
+    appsOnly = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-apps-"));
+    const away = writeFakeApp(path.join(appsOnly, "keep.app"), "1.2.3");
+    const outsideHome = countCopies({
+      home: homeOnly,
+      target: "1.2.3",
+      mdfind: `${away}\n`,
+      lsregister: lsregisterDump([{ path: away, id }]),
+    });
+    assert.equal(outsideHome.status, 0, outsideHome.stderr);
+    assert.match(outsideHome.stdout, /single-copy count=1/);
+    assert.match(outsideHome.stdout, /copy version=1\.2\.3 path=<ABS>\/keep\.app/);
+    assert.doesNotMatch(outsideHome.stdout, /path=\//);
+    assert.doesNotMatch(
+      outsideHome.stdout,
+      new RegExp(appsOnly.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&")),
+    );
+
+    const leaked = `${one.stdout}\n${two.stdout}\n${empty.stdout}\n${wrong.stdout}\n${vanished.stdout}\n${excluded.stdout}\n${outsideHome.stdout}`;
     assert.doesNotMatch(leaked, /\/Users\/|\/home\/[^/\s]+/);
+    assert.doesNotMatch(leaked, /path=\//);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+    if (homeOnly) fs.rmSync(homeOnly, { recursive: true, force: true });
+    if (appsOnly) fs.rmSync(appsOnly, { recursive: true, force: true });
   }
 });
 

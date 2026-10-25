@@ -97,6 +97,9 @@ def redact(path):
         return "~" + rp[len(home_real):]
     if home and (path == home or path.startswith(home.rstrip("/") + "/")):
         return "~" + path[len(home.rstrip("/")):]
+    if os.path.isabs(rp) or os.path.isabs(path):
+        name = os.path.basename(str(rp).rstrip(os.sep)) or os.path.basename(str(path).rstrip(os.sep))
+        return "<ABS>/" + (name or "path")
     return rp
 
 def short_version(app):
