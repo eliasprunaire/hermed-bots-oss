@@ -455,7 +455,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 - [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
 - [ ] The owner squash-merges its own PR after the operator's click.
 
-## Open the SSH tunnel with the key in the Keychain (HD-07)
+## Open the SSH tunnel from an SSH alias (HD-07)
 
 **Depends on.** HD-06.
 
@@ -469,7 +469,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 **Build.**
 
-- [ ] Observe S12 first. Compare system `ssh` with a library for a local forward to `127.0.0.1:8642`, with the key in the Keychain. Record the chosen option in `docs/spike/S12-tunnel.md`.
+- [ ] Observe S12 first. Compare system `ssh` with a library for a local forward to `127.0.0.1:8642`, with the identity that the user's SSH config names for the alias. A key management service manages the keys outside the app, and the app never asks for a private key. Record the chosen option in `docs/spike/S12-tunnel.md`.
 - [ ] Start the `ssh` child in its own process group and kill the group on quit and on timeout, so no orphan survives.
 - [ ] Keep the key out of argv, logs, files, and screenshots.
 - [ ] In test mode, open the tunnel to an SSH endpoint inside `hv-hermes-test`. Refuse any host that contains `perso-hermes`.

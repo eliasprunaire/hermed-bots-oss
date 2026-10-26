@@ -86,7 +86,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 **Build.**
 
 - [ ] Encode panes as `SettingsPane` cases `connection` and `updates`. Titles are `Connexion` and `Mises à jour`. The view iterates `allCases`.
-- [ ] Move `SSHEndpoint` into `AppSettings` with the same `ssh.host`, `ssh.user`, and `ssh.port` keys. A later `stored(in:)` reads what `save(to:)` wrote.
+- [ ] Move `SSHEndpoint` into `AppSettings` with the same `ssh.host` key and no user or port key. The SSH alias gives the user, the port, and the identity. A later `stored(in:)` reads what `save(to:)` wrote.
 - [ ] Persist a non-empty host from the Connexion pane without waiting for Connect. Test mode still skips user defaults.
 - [ ] Add `Settings { SettingsWindow(model:) }`. Replace the sidebar sheet button with `SettingsLink`. Remove `.sheet` for connection.
 - [ ] Put `Rechercher les mises à jour…` on the updates pane. Keep the app-menu command. Remove that button from `ConnectionView`.
@@ -96,8 +96,8 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 **You see.**
 
 - [ ] The main window has bots, chat, and the kill switch. It has no connection form and no update button.
-- [ ] Settings has two tabs. Connexion keeps host, user, keys, and Connect. Mises a jour runs the update action.
-- [ ] A later launch fills host and user from the last saved endpoint.
+- [ ] Settings has two tabs. Connexion keeps the SSH alias, the API key fields, and Connect, with no user field and no port field. Mises a jour runs the update action.
+- [ ] A later launch fills the SSH alias from the last saved endpoint.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
@@ -111,7 +111,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Lane 3. Read `HermedBots/App/HermedBotsApp.swift` for `Settings`. Save `st01-scene.png`. Pass when a `Settings` scene hosts `SettingsWindow` and `ContentView` has no connection `.sheet`.
 - [ ] Lane 4. Read `HermedBots/Settings/UpdatesSettingsView.swift` and `ConnectionView.swift`. Save `st01-updates.png`. Pass when the updates pane uses `SettingsCopy.checkForUpdates` and `ConnectionView` does not.
 - [ ] Lane 5. Search new UI strings for Sparkle, `SUFeedURL`, `appcast`, and loopback binds. Save `st01-copy.png`. Pass when none of those strings appear in user-facing text.
-- [ ] Lane 6. Save an endpoint, construct a new store, and read `stored(in:)`. Save `st01-persist.png`. Pass when host, user, and port match.
+- [ ] Lane 6. Save an endpoint, construct a new store, and read `stored(in:)`. Save `st01-persist.png`. Pass when the host matches.
 - [ ] Lane 7. Run `UpdatesSettingsAction.perform` twice on a fake driver before `noteSessionEnded()`. Save `st01-once.png`. Pass when the driver records one start.
 - [ ] Lane 8. Run `npm test` and `npm run lint` at head. Save `st01-node.png`. Pass when both exit 0.
 - [ ] Lane 9. Confirm `MACOSX_DEPLOYMENT_TARGET` is `27.0` and `SWIFT_VERSION` is `6.0`. Save `st01-toolchain.png`. Pass when both values hold and the diff adds no `#available` fallback.

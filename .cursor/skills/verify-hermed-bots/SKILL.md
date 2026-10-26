@@ -29,4 +29,4 @@ Lire `features/connection.md`.
 
 L'utilisateur saisit un alias SSH. L'app résout tout le reste avec `/usr/bin/ssh -G <alias>` (config par défaut, `Include` compris). Le tunnel et `hermes profile list` passent par `/usr/bin/ssh` et le même alias. Pas de `-F /dev/null`, pas de `-i`, pas d'agent privé, pas de lecture de clé SSH dans le Trousseau.
 
-Les tests unitaires n'utilisent que des alias et des hôtes `.invalid`, des chemins fictifs, et des sorties `ssh -G` simulées.
+Les tests du parser et du planificateur n'utilisent que des alias et des hôtes `.invalid`, des chemins fictifs, et des sorties `ssh -G` simulées. Les tests unitaires contiennent aussi des adresses de boucle locale, sans aucune connexion : l'argument `-L 127.0.0.1:<port>:127.0.0.1:8642` dans `SSHTunnelTests`, une config `hostname: "127.0.0.1"` port 1 dans `SystemSSHBackendTests` (le test ferme le backend avant `open`, aucun `ssh` ne démarre) et l'URL d'API `http://127.0.0.1:18642` dans `AppEnvironmentTests`.
