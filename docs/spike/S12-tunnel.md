@@ -46,9 +46,11 @@ A key protected by a passphrase failed at step 2 in 0.01 s (`rc=1`, `Enter passp
 
 ## Current product
 
-The app launches `/usr/bin/ssh` with the user's alias and the default user config. It does not start `ssh-agent`, does not run `ssh-add`, does not write `key.pub`, and does not keep a temporary `known_hosts`. Identity comes from the session `SSH_AUTH_SOCK` and from `IdentityAgent` in the user's config. Arguments force `ForkAfterAuthentication=no` and `LogLevel=ERROR`.
+The app launches `/usr/bin/ssh` with the user's alias and the default user config. It does not start `ssh-agent`, does not run `ssh-add`, does not write `key.pub`, and does not keep a temporary `known_hosts`. Identity comes from the session `SSH_AUTH_SOCK` and from `IdentityAgent` in the user's config. `IdentityAgent none` turns the agent off, the session socket included, and the connection view then shows a file identity. Arguments force `ForkAfterAuthentication=no` and `LogLevel=ERROR`.
 
 Resolution runs `/usr/bin/ssh -G -vv` once per launch of `ssh`, with the arguments of that launch: the tunnel (`-N -T -L …`), the profile list (`hermes profile list`) and the Desktop lock read (one fixed remote command). A `Match sessiontype none` block applies only to the tunnel. A `Match command` block applies only to a launch with a remote command. One dump of the bare alias cannot validate the three launches.
+
+An alias is known only when a `Host` or `Match` block that names it appears in the `-vv` output (`Applying options for <pattern>`, or `originally <alias>` then `match found`). `Host *` does not make a name known, whatever values it sets (`User`, `Port`, `HostName`, an identity): `ssh -G` accepts any name.
 
 The app refuses any alias whose resolved config holds a ProxyJump or a ProxyCommand, in every mode, before the tunnel `ssh`. The value does not matter, and any one of the three launches is enough to refuse. Only `none`, which removes an inherited relay, is not a relay. The name of a hop does not prove where the hop leads: an alias can lead to `perso-hermes`. The message tells the user to use an alias that connects directly.
 
@@ -77,6 +79,7 @@ A path with spaces in a `-o` value needs quotes. `-o "UserKnownHostsFile=/a b/kh
 - A first smoke run sent SIGTERM to the app. The app crashed (`Trace/BPT trap`) and left `ssh` and `ssh-agent` alive. The cause is inferred: the signal handler closure was isolated to the main actor and ran on a global queue. The handler is now not isolated, and the crash did not come back.
 - SIGKILL cannot be caught. The group leader is a `sh` that reads a pipe only the app holds open. When the app dies the kernel closes the pipe and the `sh` runs `kill -KILL 0`, which kills its whole group. With this watchdog, SIGTERM and SIGKILL on the app left no `ssh` or `sh` behind (smoke run), and the lanes of HD-07 show the same for Cmd-Q and `terminate()`. The spike also had a private `ssh-agent` in that group; the product does not.
 - The watchdog and every `ssh` share one process group. A reopen starts a new `ssh` in the same group.
+- Each `ssh -G` runs under its own watchdog too. The call registers the group for the termination hooks, and kills the whole group at the timeout and at the end of the call. A `Match exec` command that sleeps keeps `ssh -G` alive: `killAll` ends both within 2 s (`testTerminatingTheAppLeavesNoSshDumpAlive`), and a timeout leaves no grandchild (`testATimedOutGuardedRunKillsEveryProcessOfItsGroup`). SIGKILL on the app uses the same watchdog as the tunnel. No test kills its own host, so that case follows from the watchdog tests and was not observed on `ssh -G`.
 
 ## When the host disappears
 

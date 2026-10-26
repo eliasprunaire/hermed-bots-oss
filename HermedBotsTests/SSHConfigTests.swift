@@ -48,7 +48,7 @@ final class SSHConfigTests: XCTestCase {
     }
 
     func testAnIncludedHostBlockResolvesEveryFieldWithoutSecrets() {
-        let preview = parse(includedDump, alias: "lab", existing: ["/tmp/fake-id.invalid-cert.pub"])
+        let preview = parse(includedDump, alias: "lab", debug: matchedDebug("lab"), existing: ["/tmp/fake-id.invalid-cert.pub"])
         XCTAssertFalse(preview.isUnknownAlias)
         XCTAssertEqual(preview.hostname, "gateway.invalid")
         XCTAssertEqual(preview.user, "operator")
@@ -95,7 +95,7 @@ final class SSHConfigTests: XCTestCase {
             identityfile ~/.ssh/id_rsa
             proxyjump none
             """
-        let preview = parse(dump, alias: "lab.invalid", existing: ["/tmp/fake-id.invalid.pub"])
+        let preview = parse(dump, alias: "lab.invalid", debug: matchedDebug("lab.invalid"), existing: ["/tmp/fake-id.invalid.pub"])
         XCTAssertFalse(preview.isUnknownAlias)
         XCTAssertEqual(preview.identity, .file)
         XCTAssertTrue(preview.identityPresent)
@@ -135,7 +135,7 @@ final class SSHConfigTests: XCTestCase {
             port 22
             identityfile /tmp/fake-id.invalid
             """
-        let preview = parse(dump, alias: "lab.invalid")
+        let preview = parse(dump, alias: "lab.invalid", debug: matchedDebug("lab.invalid"))
         XCTAssertFalse(preview.isUnknownAlias)
         XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
             XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
@@ -161,6 +161,51 @@ final class SSHConfigTests: XCTestCase {
             XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
                 XCTAssertEqual($0 as? SSHFailure, .unknownAlias)
             }
+        }
+    }
+
+    /// `Host *` qui fixe des valeurs ne fait pas d'un nom quelconque un alias : seul un bloc Host ou Match qui nomme l'alias le rend connu
+    func testAnAliasWithNoBlockOfItsOwnIsUnknownWhateverHostStarSets() {
+        let dumps = [
+            "user otheroperator": defaultDump.replacingOccurrences(of: "user operator", with: "user otheroperator"),
+            "port 2222": defaultDump.replacingOccurrences(of: "port 22", with: "port 2222"),
+            "hostname other.invalid": defaultDump.replacingOccurrences(of: "unknown-alias.invalid", with: "other.invalid"),
+            "identityfile": "identityfile /tmp/fake-id.invalid\n" + defaultDump,
+            "identityagent": defaultDump + "\nidentityagent /tmp/fake-agent.invalid",
+            "certificatefile": defaultDump + "\ncertificatefile /tmp/fake-id.invalid-cert.pub",
+        ]
+        for (what, dump) in dumps {
+            let unnamed = parse(dump, alias: "unknown-alias.invalid", debug: unmatchedDebug)
+            XCTAssertTrue(unnamed.isUnknownAlias, what)
+            XCTAssertThrowsError(try SSHConnectionPlanner.config(from: unnamed, refusePersoHermes: true), what) {
+                XCTAssertEqual($0 as? SSHFailure, .unknownAlias, what)
+            }
+            let named = parse(dump, alias: "unknown-alias.invalid", debug: matchedDebug("unknown-alias.invalid"))
+            XCTAssertFalse(named.isUnknownAlias, what)
+        }
+    }
+
+    /// `ssh -G -vv` écrit `originally <alias>` puis `match found` quand un bloc Match couvre l'alias
+    func testAMatchBlockThatCoversTheAliasMakesItKnown() {
+        let debug = """
+            debug1: Reading configuration data /dev/null
+            debug2: checking match for 'host lab.invalid' host lab.invalid originally lab.invalid
+            debug2: match found
+            """
+        let preview = parse(defaultDump.replacingOccurrences(of: "user operator", with: "user otheroperator"), alias: "lab.invalid", debug: debug)
+        XCTAssertFalse(preview.isUnknownAlias)
+    }
+
+    /// `IdentityAgent none` désactive l'agent : la socket de la session ne compte plus, quelle que soit la casse
+    func testIdentityAgentNoneUsesNoAgentEvenWithASessionSocket() {
+        for value in ["none", "NONE"] {
+            let standard = parse(defaultDump + "\nidentityagent \(value)", alias: "lab.invalid", debug: matchedDebug("lab.invalid"), existing: [NSHomeDirectory() + "/.ssh/id_ed25519", "/tmp/example-agent.invalid"], authSock: "/tmp/example-agent.invalid")
+            XCTAssertEqual(standard.identity, .file, value)
+            XCTAssertNotEqual(standard.identity.label, "agent SSH", value)
+            XCTAssertTrue(standard.identityPresent, value)
+            let custom = parse("user operator\nhostname lab.invalid\nport 22\nidentityagent \(value)\nidentityfile /tmp/fake-id.invalid", alias: "lab.invalid", debug: matchedDebug("lab.invalid"), existing: ["/tmp/example-agent.invalid"], authSock: "/tmp/example-agent.invalid")
+            XCTAssertEqual(custom.identity, .file, value)
+            XCTAssertFalse(custom.identityPresent, "\(value) : seule la socket existe, et l'agent est désactivé")
         }
     }
 
@@ -195,7 +240,7 @@ final class SSHConfigTests: XCTestCase {
 
     /// OpenSSH écrit `none` pour supprimer un relais hérité : ce n'est pas un relais
     func testNoneIsNotARelay() {
-        let preview = parse(includedDump, alias: "lab", existing: ["/tmp/fake-id.invalid-cert.pub"])
+        let preview = parse(includedDump, alias: "lab", debug: matchedDebug("lab"), existing: ["/tmp/fake-id.invalid-cert.pub"])
         XCTAssertFalse(preview.hasRelay)
         XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: false))
     }

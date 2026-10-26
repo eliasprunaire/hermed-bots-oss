@@ -216,6 +216,79 @@ final class ProcessGroupTests: XCTestCase {
     }
 }
 
+/// `ssh -G` avec un `Match exec` reste en vie tant que la commande dort : l'arrêt de l'app doit l'atteindre
+final class GuardedSpawnTests: XCTestCase {
+    private func temporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hb-test-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        return directory
+    }
+
+    private func processID(in file: URL) async throws -> pid_t {
+        for _ in 0..<100 {
+            if let text = try? String(contentsOf: file, encoding: .utf8), let value = pid_t(text.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                addTeardownBlock { kill(value, SIGKILL) }
+                return value
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        throw XCTSkip("le processus n'a pas écrit son identifiant")
+    }
+
+    private func gone(_ pid: pid_t) async -> Bool {
+        for _ in 0..<60 {
+            if kill(pid, 0) == -1, errno == ESRCH { return true }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return false
+    }
+
+    func testTerminatingTheAppLeavesNoSshDumpAlive() async throws {
+        let directory = try temporaryDirectory()
+        let pidFile = directory.appendingPathComponent("pid")
+        let config = directory.appendingPathComponent("config")
+        try "Match exec \"echo $$ > \(pidFile.path); exec sleep 30\"\nHost lab.invalid\n".write(to: config, atomically: true, encoding: .utf8)
+        let resolver = SystemSSHConfigResolver(configFile: config.path)
+        let dump = Task { try await resolver.dump(alias: "lab.invalid", invocation: .tunnel) }
+        let sleeper = try await processID(in: pidFile)
+        XCTAssertEqual(kill(sleeper, 0), 0, "la commande du Match exec doit vivre avant l'arrêt")
+        ProcessGroups.killAll()
+        let started = ContinuousClock.now
+        _ = await dump.result
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(2), "ssh -G a survécu à l'arrêt")
+        let wasGone = await gone(sleeper)
+        XCTAssertTrue(wasGone, "la commande du Match exec a survécu à l'arrêt")
+    }
+
+    func testATimedOutGuardedRunKillsEveryProcessOfItsGroup() async throws {
+        let pidFile = try temporaryDirectory().appendingPathComponent("pid")
+        // un petit-enfant qui garde la sortie d'erreur ouverte : tuer le seul shell laisserait l'appel attendre ses 30 s
+        let script = "sleep 30 & echo $! > \(pidFile.path); wait"
+        let started = ContinuousClock.now
+        do {
+            _ = try await Spawn.runGuarded("/bin/sh", ["-c", script], environment: ["PATH": "/usr/bin:/bin"], timeout: .milliseconds(500))
+            XCTFail("le délai devait expirer")
+        } catch SpawnError.timedOut {}
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(5), "l'appel a attendu le petit-enfant")
+        let grandchild = try await processID(in: pidFile)
+        let wasGone = await gone(grandchild)
+        XCTAssertTrue(wasGone, "le petit-enfant a survécu au délai")
+    }
+
+    func testAGuardedRunLeavesNoProcessGroupBehind() async throws {
+        let output = try await Spawn.runGuarded("/bin/sh", ["-c", "ps -o pgid= -p $$"], environment: ["PATH": "/usr/bin:/bin"], timeout: .seconds(5))
+        let group = try XCTUnwrap(pid_t(output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)))
+        XCTAssertNotEqual(group, getpgrp(), "le processus doit tourner dans son propre groupe")
+        var remaining = true
+        for _ in 0..<60 where remaining {
+            remaining = !(killpg(group, 0) == -1 && errno == ESRCH)
+            if remaining { try await Task.sleep(for: .milliseconds(50)) }
+        }
+        XCTAssertFalse(remaining, "le gardien du groupe a survécu à l'appel")
+    }
+}
+
 @MainActor
 final class SSHTunnelSupervisorTests: XCTestCase {
     private let config = try! SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refusePersoHermes: true)

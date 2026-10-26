@@ -49,21 +49,24 @@ protocol SSHConfigResolving: Sendable {
 /// `/usr/bin/ssh -G -vv <arguments du lancement>` : stdout = config aplatie ; stderr nomme Host et Match (`match found` n'apparaît qu'à `-vv`)
 struct SystemSSHConfigResolver: SSHConfigResolving {
     let environment: [String: String]
+    /// `-F` : un test seulement ; l'app résout toujours avec la config de l'utilisateur
+    let configFile: String?
 
-    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
+    init(environment: [String: String] = ProcessInfo.processInfo.environment, configFile: String? = nil) {
         self.environment = environment
+        self.configFile = configFile
     }
 
-    static func arguments(alias: String, invocation: SSHInvocation) -> [String] {
-        ["-G", "-vv"] + SSHTunnelConfig.arguments(invocation, alias: alias)
+    static func arguments(alias: String, invocation: SSHInvocation, configFile: String? = nil) -> [String] {
+        ["-G", "-vv"] + (configFile.map { ["-F", $0] } ?? []) + SSHTunnelConfig.arguments(invocation, alias: alias)
     }
 
     func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
         let output: Spawn.Output
         do {
-            output = try await Spawn.run(
+            output = try await Spawn.runGuarded(
                 "/usr/bin/ssh",
-                Self.arguments(alias: alias, invocation: invocation),
+                Self.arguments(alias: alias, invocation: invocation, configFile: configFile),
                 environment: SSHChildEnvironment.make(environment),
                 timeout: .seconds(8),
                 stderrLimit: 65_536
@@ -127,18 +130,7 @@ enum SSHConfig {
             authSock: authSock,
             filesExist: filesExist
         )
-        let unknown = isUnknownAlias(
-            alias: alias,
-            hostname: hostname,
-            port: port,
-            user: user,
-            localUser: localUser,
-            hasRelay: hasRelay,
-            certificates: certificates,
-            agent: agent,
-            identityFiles: identityFiles,
-            debug: debug
-        )
+        let unknown = isUnknownAlias(alias: alias, debug: debug)
         return SSHConnectionPreview(
             alias: alias,
             hostname: hostname,
@@ -151,28 +143,11 @@ enum SSHConfig {
         )
     }
 
-    /// Un alias est inconnu seulement s'il n'a pas de bloc Host/Match (stderr de `ssh -G -vv`) et que `ssh -G` reste aux valeurs standard
-    /// Une config sans aucune ligne « Applying options for » (fichier vide, ou seuls d'autres alias) ne couvre pas l'alias : il est inconnu
+    /// Un alias est inconnu s'il n'a pas de bloc Host ou Match qui le nomme (stderr de `ssh -G -vv`)
+    /// Les valeurs de `ssh -G` ne comptent pas : un `Host *` qui fixe un User, un Port ou une identité les donne à n'importe quel nom
     /// Un bloc Host ou Match qui ne change aucune valeur reste un alias valide
-    static func isUnknownAlias(
-        alias: String,
-        hostname: String,
-        port: Int,
-        user: String,
-        localUser: String,
-        hasRelay: Bool,
-        certificates: [String],
-        agent: String?,
-        identityFiles: [String],
-        debug: String = ""
-    ) -> Bool {
-        if hostBlock(matches: alias, debug: debug) || matchBlock(matches: alias, debug: debug) { return false }
-        guard hostname.caseInsensitiveCompare(alias) == .orderedSame, port == 22 else { return false }
-        if user != localUser { return false }
-        if hasRelay { return false }
-        if !certificates.isEmpty { return false }
-        if let agent, !isNone(agent), agent != "SSH_AUTH_SOCK" { return false }
-        return identityFiles.allSatisfy { defaultIdentityNames.contains(URL(fileURLWithPath: $0).lastPathComponent) }
+    static func isUnknownAlias(alias: String, debug: String) -> Bool {
+        !(hostBlock(matches: alias, debug: debug) || matchBlock(matches: alias, debug: debug))
     }
 
     /// `debug2: checking match for 'host …' originally <alias>` puis `match found` (`-vv`)
@@ -221,10 +196,12 @@ enum SSHConfig {
 
     private static func kind(certificates: [String], agent: String?, identityFiles: [String], authSock: String?) -> SSHIdentityKind {
         if !certificates.isEmpty { return .certificate }
+        // `IdentityAgent none` désactive l'agent, la socket de la session comprise
+        if let agent, isNone(agent) { return .file }
         let customFiles = identityFiles.contains { !defaultIdentityNames.contains(URL(fileURLWithPath: $0).lastPathComponent) }
-        if let agent, !isNone(agent), agent != "SSH_AUTH_SOCK" { return .agent }
+        if let agent, agent != "SSH_AUTH_SOCK" { return .agent }
         if customFiles { return .file }
-        if let agent, !isNone(agent) { return .agent }
+        if agent != nil { return .agent }
         if let authSock, !authSock.isEmpty { return .agent }
         return .file
     }
@@ -246,7 +223,7 @@ enum SSHConfig {
                 return filesExist(expanded) || filesExist(expanded + ".pub")
             }
         case .agent:
-            if let agent, !isNone(agent), agent != "SSH_AUTH_SOCK" { return filesExist(expand(agent)) }
+            if let agent, agent != "SSH_AUTH_SOCK" { return filesExist(expand(agent)) }
             if let authSock, !authSock.isEmpty { return filesExist(authSock) }
             return false
         }

@@ -39,9 +39,9 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 
 ## Transport
 
-- Résolution : `/usr/bin/ssh -G -vv` suivi des arguments de chaque lancement de `ssh` (tunnel, liste des profils, détection de Hermes Desktop). Un bloc `Match sessiontype none` ne vaut que pour le tunnel, un bloc `Match command` que pour une commande distante : chaque lancement est résolu et validé avec ses propres arguments. Le tunnel fournit l'aperçu affiché.
+- Résolution : `/usr/bin/ssh -G -vv` suivi des arguments de chaque lancement de `ssh` (tunnel, liste des profils, détection de Hermes Desktop). Un bloc `Match sessiontype none` ne vaut que pour le tunnel, un bloc `Match command` que pour une commande distante : chaque lancement est résolu et validé avec ses propres arguments. Le tunnel fournit l'aperçu affiché. Chaque `ssh -G` tourne sous un gardien : l'arrêt de l'app le tue, avec la commande d'un `Match exec`, et le délai de 8 s tue le groupe entier.
 - Tunnel : `/usr/bin/ssh` + alias, `-N -T`, `-L 127.0.0.1:<port libre>:127.0.0.1:<remotePort>`, `BatchMode=yes`, `ExitOnForwardFailure=yes`, `ForwardAgent=no`, `ControlMaster=no`, `ControlPath=none`, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, `ConnectTimeout`, `ServerAliveInterval`, `ServerAliveCountMax`.
-- `SSH_AUTH_SOCK` vient de la session. `IdentityAgent` de la config ssh a priorité.
+- `SSH_AUTH_SOCK` vient de la session. `IdentityAgent` de la config ssh a priorité. `IdentityAgent none` désactive l'agent, socket de la session comprise : l'identité affichée est un fichier.
 - Liste des profils : second `/usr/bin/ssh` avec l'alias, commande `hermes profile list`.
 - Une nouvelle demande de connexion, y compris un refus local (alias vide ou invalide), invalide la génération en cours.
 
@@ -49,7 +49,7 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 
 | Cas | Message |
 | --- | --- |
-| Alias inconnu (`ssh -G -vv` n'applique aucun bloc Host nommé ; un bloc Host aux valeurs standard reste valide) | Cet alias SSH est inconnu. |
+| Alias inconnu (`ssh -G -vv` n'applique aucun bloc Host ou Match qui nomme l'alias ; `Host *` ne suffit pas, quelles que soient ses valeurs ; un bloc nommé aux valeurs standard reste valide) | Cet alias SSH est inconnu. |
 | Agent verrouillé ou vide | L'agent SSH est verrouillé ou vide. |
 | Certificat expiré | Le certificat SSH a expiré. |
 | Serveur refuse l'identité | Le serveur refuse l'identité SSH. |

@@ -315,19 +315,32 @@ enum Spawn {
     }
 
     /// Lance, attend la fin et rend les sorties ; au bout de `timeout` le processus est tué et l'appel échoue
-    static func run(_ path: String, _ arguments: [String], environment: [String: String], joining leader: pid_t? = nil, stdin: Data? = nil, timeout: Duration, stderrLimit: Int = maxStderr) async throws -> Output {
+    /// `killingGroup` : au délai, tue le groupe de `leader` entier, pas seulement le processus lancé
+    static func run(_ path: String, _ arguments: [String], environment: [String: String], joining leader: pid_t? = nil, killingGroup: Bool = false, stdin: Data? = nil, timeout: Duration, stderrLimit: Int = maxStderr) async throws -> Output {
         let child = try start(path, arguments, environment: environment, joining: leader, stdin: stdin, captureStdout: true, stderrLimit: stderrLimit)
         let fired = OSAllocatedUnfairLock(initialState: false)
         let timer = Task {
             try await Task.sleep(for: timeout)
             fired.withLock { $0 = true }
-            // le groupe entier si le processus en est le chef, sinon lui seul
-            if child.ownsGroup { killpg(child.group, SIGKILL) } else { kill(child.pid, SIGKILL) }
+            // le groupe entier si le processus en est le chef ou si l'appelant le demande, sinon lui seul
+            if child.ownsGroup || killingGroup { killpg(child.group, SIGKILL) } else { kill(child.pid, SIGKILL) }
         }
         let output = await child.finished()
         timer.cancel()
         if fired.withLock({ $0 }) { throw SpawnError.timedOut }
         return output
+    }
+
+    /// Comme `run`, sous un gardien : le groupe est inscrit au registre d'arrêt, et le gardien le tue si l'app disparaît, même par SIGKILL
+    /// Le groupe entier est tué au délai et à la fin de l'appel : la commande qu'un `Match exec` a lancée ne survit pas à `ssh -G`
+    static func runGuarded(_ path: String, _ arguments: [String], environment: [String: String], timeout: Duration, stderrLimit: Int = maxStderr) async throws -> Output {
+        let watchdog = try startWatchdog()
+        ProcessGroups.register(watchdog.group)
+        defer {
+            ProcessGroups.unregister(watchdog.group)
+            watchdog.closeStdin()
+        }
+        return try await run(path, arguments, environment: environment, joining: watchdog.pid, killingGroup: true, timeout: timeout, stderrLimit: stderrLimit)
     }
 
     /// Un appel bloquant (waitpid, read) hors du pool coopératif de Swift
