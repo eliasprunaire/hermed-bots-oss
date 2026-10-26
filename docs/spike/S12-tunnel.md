@@ -50,7 +50,11 @@ The app launches `/usr/bin/ssh` with the user's alias and the default user confi
 
 Resolution runs `/usr/bin/ssh -G -vv` once per launch of `ssh`, with the arguments of that launch: the tunnel (`-N -T -L …`), the profile list (`hermes profile list`) and the Desktop lock read (one fixed remote command). A `Match sessiontype none` block applies only to the tunnel. A `Match command` block applies only to a launch with a remote command. One dump of the bare alias cannot validate the three launches.
 
-Test mode refuses `perso-hermes` on the typed alias, before any `ssh`. It refuses it on the resolved host of each launch. It refuses any ProxyJump or ProxyCommand that any launch sees, before the tunnel `ssh`. The name of a hop does not prove where the hop leads: an alias can lead to `perso-hermes`. The check runs when the user connects. A config file edited afterwards is read again at the next connection or reopening, without a new check.
+The app refuses any alias whose resolved config holds a ProxyJump or a ProxyCommand, in every mode, before the tunnel `ssh`. The value does not matter, and any one of the three launches is enough to refuse. Only `none`, which removes an inherited relay, is not a relay. The name of a hop does not prove where the hop leads: an alias can lead to `perso-hermes`. The message tells the user to use an alias that connects directly.
+
+Test mode also refuses `perso-hermes` on the typed alias, before any `ssh`, and on the resolved host of each launch.
+
+The check runs when the user connects. A config file edited afterwards is read again at the next connection or reopening, without a new check.
 
 ## The forward
 

@@ -10,6 +10,7 @@ import os
 /// Seul `unreachable` donne lieu à une réouverture : une clé refusée ou un hôte changé ne se règle pas en réessayant
 enum SSHFailure: Error, Equatable, Sendable {
     case forbiddenHost
+    case relayRefused
     case invalidHost
     case invalidPort
     case unknownAlias
@@ -46,6 +47,7 @@ extension SSHFailure {
     var message: String {
         switch self {
         case .forbiddenHost: String(localized: "Cet hôte est refusé en mode test.")
+        case .relayRefused: String(localized: "Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte.")
         case .invalidHost: String(localized: "L'alias SSH n'est pas valide.")
         case .invalidPort: String(localized: "Le port n'est pas valide.")
         case .unknownAlias: String(localized: "Cet alias SSH est inconnu.")

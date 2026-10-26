@@ -53,7 +53,7 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertEqual(preview.hostname, "gateway.invalid")
         XCTAssertEqual(preview.user, "operator")
         XCTAssertEqual(preview.port, 2222)
-        XCTAssertEqual(preview.jumpCount, 0)
+        XCTAssertFalse(preview.hasRelay)
         XCTAssertEqual(preview.identity, .certificate)
         XCTAssertEqual(preview.identity.label, "certificat")
         XCTAssertTrue(preview.identityPresent)
@@ -69,7 +69,7 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertTrue(preview.isUnknownAlias)
         XCTAssertEqual(preview.hostname, "unknown-alias.invalid")
         XCTAssertEqual(preview.port, 22)
-        XCTAssertEqual(preview.jumpCount, 0)
+        XCTAssertFalse(preview.hasRelay)
         XCTAssertEqual(preview.identity, .file)
         XCTAssertFalse(preview.identityPresent)
         XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
@@ -120,7 +120,7 @@ final class SSHConfigTests: XCTestCase {
 
     func testReadonlyLabelsNeverIncludeAPathOrAKey() {
         let preview = parse(includedDump, alias: "lab")
-        for text in [preview.user, preview.hostname, preview.jumpLabel, preview.identity.label, preview.identityPresentLabel, preview.identityPresentTitle] {
+        for text in [preview.user, preview.hostname, preview.identity.label, preview.identityPresentLabel, preview.identityPresentTitle] {
             XCTAssertFalse(text.contains("PRIVATE"))
             XCTAssertFalse(text.contains("BEGIN"))
             XCTAssertFalse(text.contains("Trousseau"))
@@ -164,14 +164,16 @@ final class SSHConfigTests: XCTestCase {
         }
     }
 
-    /// Un saut est un hôte que l'app ne sait pas valider par son nom (il peut être un alias qui mène à perso-hermes) : le mode test refuse tout relais
-    func testTestModeRefusesAnyProxyJumpOrProxyCommand() {
+    /// Un alias dont la config résolue contient un ProxyJump ou un ProxyCommand est refusé, quelle que soit la valeur, en mode test comme hors mode test
+    func testAnyProxyJumpOrProxyCommandIsRefusedInEveryMode() {
         let relays = [
             "proxyjump bastion.invalid",
             "proxyjump operator@bastion.invalid:2222,second.invalid",
             "proxyjump perso-hermes.invalid",
+            "proxyjump -",
             "proxycommand /usr/bin/nc bastion.invalid 22",
             "proxycommand /usr/bin/ssh -W %h:%p perso-hermes.invalid",
+            "proxycommand true",
         ]
         for relay in relays {
             let dump = """
@@ -182,11 +184,20 @@ final class SSHConfigTests: XCTestCase {
                 \(relay)
                 """
             let preview = parse(dump, alias: "lab.invalid", debug: matchedDebug("lab.invalid"))
-            XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true), relay) {
-                XCTAssertEqual($0 as? SSHFailure, .forbiddenHost, relay)
+            XCTAssertTrue(preview.hasRelay, relay)
+            for refuse in [true, false] {
+                XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: refuse), relay) {
+                    XCTAssertEqual($0 as? SSHFailure, .relayRefused, relay)
+                }
             }
-            XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: false), relay)
         }
+    }
+
+    /// OpenSSH écrit `none` pour supprimer un relais hérité : ce n'est pas un relais
+    func testNoneIsNotARelay() {
+        let preview = parse(includedDump, alias: "lab", existing: ["/tmp/fake-id.invalid-cert.pub"])
+        XCTAssertFalse(preview.hasRelay)
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: false))
     }
 
     /// Un bloc `Match sessiontype none` ou `Match command` ne s'applique qu'à un lancement : `ssh -G` reçoit les arguments exacts de chaque lancement réel
@@ -302,35 +313,26 @@ final class SSHConnectorTests: XCTestCase {
         XCTAssertEqual(refused, [])
     }
 
-    /// Une route que seul un lancement voit (`Match sessiontype none` pour le tunnel, `Match command` pour les lectures) est refusée en mode test
-    func testTestModeRefusesARelayThatOnlyOneInvocationSees() async {
+    /// Un relais que seul un lancement voit (`Match sessiontype none` pour le tunnel, `Match command` pour les lectures) est refusé, en mode test comme hors mode test
+    func testARelayThatOnlyOneInvocationSeesIsRefusedInEveryMode() async {
         let relays: [(SSHInvocation, String)] = [
-            (.tunnel, "proxyjump perso-hermes.invalid"),
+            (.tunnel, "proxyjump bastion.invalid"),
             (.profileList, "proxycommand /usr/bin/nc bastion.invalid 22"),
             (.profileLocks, "proxyjump bastion.invalid"),
         ]
-        for (invocation, relay) in relays {
-            var dumps: [SSHInvocation: SSHConfigDump] = [.tunnel: dump(), .profileList: dump(), .profileLocks: dump()]
-            dumps[invocation] = dump(relay)
-            let connector = SSHConnector(resolver: ScriptedSSHResolver(dumps: dumps), localUser: "operator")
-            var opened: [String] = []
-            var refused: [SSHFailure] = []
-            connector.begin(alias: "lab.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
-            await eventually { !refused.isEmpty || !opened.isEmpty }
-            XCTAssertEqual(refused, [.forbiddenHost], "\(invocation)")
-            XCTAssertEqual(opened, [], "\(invocation)")
+        for refuse in [true, false] {
+            for (invocation, relay) in relays {
+                var dumps: [SSHInvocation: SSHConfigDump] = [.tunnel: dump(), .profileList: dump(), .profileLocks: dump()]
+                dumps[invocation] = dump(relay)
+                let connector = SSHConnector(resolver: ScriptedSSHResolver(dumps: dumps), localUser: "operator")
+                var opened: [String] = []
+                var refused: [SSHFailure] = []
+                connector.begin(alias: "lab.invalid", refusePersoHermes: refuse, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+                await eventually { !refused.isEmpty || !opened.isEmpty }
+                XCTAssertEqual(refused, [.relayRefused], "\(invocation) refuse=\(refuse)")
+                XCTAssertEqual(opened, [], "\(invocation) refuse=\(refuse)")
+            }
         }
-    }
-
-    func testOutsideTestModeARelayThatOnlyOneInvocationSeesIsAccepted() async {
-        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump(), .profileList: dump("proxycommand /usr/bin/nc bastion.invalid 22"), .profileLocks: dump()])
-        let connector = SSHConnector(resolver: resolver, localUser: "operator")
-        var opened: [String] = []
-        var refused: [SSHFailure] = []
-        connector.begin(alias: "lab.invalid", refusePersoHermes: false, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
-        await eventually { !refused.isEmpty || !opened.isEmpty }
-        XCTAssertEqual(opened, ["lab.invalid"])
-        XCTAssertEqual(refused, [])
     }
 
     func testPersoHermesIsRefusedWithoutDumpingTheConfig() async {

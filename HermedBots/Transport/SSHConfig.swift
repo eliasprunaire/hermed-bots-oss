@@ -20,17 +20,10 @@ struct SSHConnectionPreview: Equatable, Sendable {
     let hostname: String
     let user: String
     let port: Int
-    let jumpCount: Int
-    let hopHosts: [String]
-    let proxyCommand: String?
+    let hasRelay: Bool
     let identity: SSHIdentityKind
     let identityPresent: Bool
     let isUnknownAlias: Bool
-
-    var jumpLabel: String {
-        let unit = jumpCount <= 1 ? String(localized: "saut") : String(localized: "sauts")
-        return "\(jumpCount) \(unit)"
-    }
 
     var identityPresentLabel: String {
         if identity == .certificate {
@@ -120,10 +113,8 @@ enum SSHConfig {
         let hostname = first(values["hostname"]) ?? alias
         let user = first(values["user"]) ?? localUser
         let port = Int(first(values["port"]) ?? "") ?? 22
-        let proxyJump = first(values["proxyjump"])
-        let hops = hopHosts(proxyJump)
-        let jumps = hops.count
-        let proxyCommand = first(values["proxycommand"]).flatMap { isNone($0) ? nil : $0 }
+        // `none` supprime un relais hérité : toute autre valeur de ProxyJump ou de ProxyCommand est un relais
+        let hasRelay = ["proxyjump", "proxycommand"].contains { first(values[$0]).map { !isNone($0) } ?? false }
         let certificates = (values["certificatefile"] ?? []).filter { !isNone($0) }
         let identityFiles = values["identityfile"] ?? []
         let agent = first(values["identityagent"])
@@ -142,8 +133,7 @@ enum SSHConfig {
             port: port,
             user: user,
             localUser: localUser,
-            jumps: jumps,
-            proxyCommand: proxyCommand,
+            hasRelay: hasRelay,
             certificates: certificates,
             agent: agent,
             identityFiles: identityFiles,
@@ -154,9 +144,7 @@ enum SSHConfig {
             hostname: hostname,
             user: user,
             port: port,
-            jumpCount: jumps,
-            hopHosts: hops,
-            proxyCommand: proxyCommand,
+            hasRelay: hasRelay,
             identity: identity,
             identityPresent: present,
             isUnknownAlias: unknown
@@ -172,8 +160,7 @@ enum SSHConfig {
         port: Int,
         user: String,
         localUser: String,
-        jumps: Int,
-        proxyCommand: String?,
+        hasRelay: Bool,
         certificates: [String],
         agent: String?,
         identityFiles: [String],
@@ -182,8 +169,7 @@ enum SSHConfig {
         if hostBlock(matches: alias, debug: debug) || matchBlock(matches: alias, debug: debug) { return false }
         guard hostname.caseInsensitiveCompare(alias) == .orderedSame, port == 22 else { return false }
         if user != localUser { return false }
-        if jumps > 0 { return false }
-        if let proxyCommand, !isNone(proxyCommand) { return false }
+        if hasRelay { return false }
         if !certificates.isEmpty { return false }
         if let agent, !isNone(agent), agent != "SSH_AUTH_SOCK" { return false }
         return identityFiles.allSatisfy { defaultIdentityNames.contains(URL(fileURLWithPath: $0).lastPathComponent) }
@@ -266,19 +252,6 @@ enum SSHConfig {
         }
     }
 
-    static func hopHosts(_ value: String?) -> [String] {
-        guard let value, !isNone(value) else { return [] }
-        return value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.compactMap { hop in
-            guard !hop.isEmpty, !isNone(String(hop)) else { return nil }
-            var host = String(hop)
-            if let at = host.lastIndex(of: "@") { host = String(host[host.index(after: at)...]) }
-            if let colon = host.lastIndex(of: ":"), host[host.index(after: colon)...].allSatisfy(\.isNumber) {
-                host = String(host[..<colon])
-            }
-            return host
-        }
-    }
-
     private static func dictionary(from dump: String) -> [String: [String]] {
         var values: [String: [String]] = [:]
         for line in dump.split(whereSeparator: \.isNewline) {
@@ -306,8 +279,8 @@ enum SSHConfig {
 
 enum SSHConnectionPlanner {
     static func config(from preview: SSHConnectionPreview, refusePersoHermes: Bool, remotePort: Int = 8642) throws -> SSHTunnelConfig {
-        // un saut est un hôte que son nom ne permet pas de valider (un alias peut mener à perso-hermes) : le mode test n'en accepte aucun
-        if refusePersoHermes, preview.jumpCount > 0 || preview.proxyCommand != nil { throw SSHFailure.forbiddenHost }
+        // un relais mène à un hôte que l'app ne sait pas valider : tout alias qui en contient un est refusé, en mode test comme hors mode test
+        if preview.hasRelay { throw SSHFailure.relayRefused }
         let config = try SSHTunnelConfig(
             alias: preview.alias,
             hostname: preview.hostname,

@@ -46,9 +46,6 @@ struct ConnectionView: View {
                 LabeledContent("Port") {
                     Text(verbatim: model.preview.map { String($0.port) } ?? "—").accessibilityID(.connectionPort)
                 }
-                LabeledContent("ProxyJump") {
-                    Text(verbatim: model.preview?.jumpLabel ?? "—").accessibilityID(.connectionJumps)
-                }
                 LabeledContent("Identité") {
                     Text(verbatim: model.preview?.identity.label ?? "—").accessibilityID(.connectionIdentity)
                 }

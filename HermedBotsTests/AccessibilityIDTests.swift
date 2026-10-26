@@ -24,7 +24,6 @@ final class AccessibilityIDTests: XCTestCase {
         XCTAssertEqual(AccessibilityID.connectionUser.rawValue, "hd.connection.user")
         XCTAssertEqual(AccessibilityID.connectionResolvedHost.rawValue, "hd.connection.resolved-host")
         XCTAssertEqual(AccessibilityID.connectionPort.rawValue, "hd.connection.port")
-        XCTAssertEqual(AccessibilityID.connectionJumps.rawValue, "hd.connection.jumps")
         XCTAssertEqual(AccessibilityID.connectionIdentity.rawValue, "hd.connection.identity")
         XCTAssertEqual(AccessibilityID.connectionIdentityPresent.rawValue, "hd.connection.identity-present")
         XCTAssertEqual(AccessibilityID.connectionTunnelState.rawValue, "hd.connection.tunnel-state")

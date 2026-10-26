@@ -60,7 +60,6 @@ enum AccessibilityID: String, CaseIterable {
     case connectionUser = "hd.connection.user"
     case connectionResolvedHost = "hd.connection.resolved-host"
     case connectionPort = "hd.connection.port"
-    case connectionJumps = "hd.connection.jumps"
     case connectionIdentity = "hd.connection.identity"
     case connectionIdentityPresent = "hd.connection.identity-present"
     case connectionTunnelState = "hd.connection.tunnel-state"

@@ -66,6 +66,11 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "This host is refused in test mode." } }
       }
     },
+    "Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This alias goes through a relay (ProxyJump or ProxyCommand). Hermed Bots refuses it: use an alias that connects directly to the host." } }
+      }
+    },
     "Changement du modèle…" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Changing the model…" } }

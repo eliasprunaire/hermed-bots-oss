@@ -78,9 +78,16 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(SSHFailure.classify(stderr: ""), .unreachable(""))
         let retried = [SSHFailure.unreachable("x")].filter(\.retries)
         XCTAssertEqual(retried.count, 1)
-        for terminal in [SSHFailure.wrongKey, .hostKeyChanged, .unknownAlias, .agentLockedOrEmpty, .certificateExpired, .forbiddenHost, .invalidHost, .invalidPort] {
+        for terminal in [SSHFailure.wrongKey, .hostKeyChanged, .unknownAlias, .agentLockedOrEmpty, .certificateExpired, .forbiddenHost, .relayRefused, .invalidHost, .invalidPort] {
             XCTAssertFalse(terminal.retries, "\(terminal)")
         }
+    }
+
+    func testTheRelayRefusalBannerNamesTheRelayKeywordsAndNoMode() {
+        let text = SSHFailure.relayRefused.message
+        XCTAssertEqual(text, "Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte.")
+        XCTAssertFalse(text.contains("mode test"))
+        XCTAssertFalse(text.contains("docs/"))
     }
 
     func testTheForbiddenHostBannerNamesNoMachine() {
