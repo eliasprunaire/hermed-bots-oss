@@ -628,8 +628,10 @@ test("every description is at most 140 characters", () => {
   const viaPatch = decide({
     headSha: HEAD,
     headPatchId: "d".repeat(40),
+    headExactId: "c".repeat(40),
     onPull: [OTHER],
     patchIds: { [OTHER]: "d".repeat(40) },
+    exactIds: { [OTHER]: "c".repeat(40) },
     comments: [comment("9", 9, marked("PASS+NOTES", OTHER))],
   });
   const cases = [
@@ -993,10 +995,10 @@ function initGitDir() {
   return { dir, git };
 }
 
-function patchIdAgainst(git, sha, base) {
+function patchIdAgainst(git, sha, base, flag = "--stable") {
   const mergeBase = git(["merge-base", sha, base]).stdout.trim();
   const diff = git(["diff", "--no-ext-diff", "--binary", mergeBase, sha]);
-  return git(["patch-id", "--stable"], diff.stdout).stdout.trim().split(/\s+/)[0];
+  return git(["patch-id", flag], diff.stdout).stdout.trim().split(/\s+/)[0];
 }
 
 function attachGit(io, dir) {
@@ -1028,6 +1030,10 @@ function featureRepo() {
   const patchId = patchIdAgainst(git, sha1, baseSha);
   assert.equal(patchId, patchIdAgainst(git, sha2, baseSha));
   assert.equal(patchId.length, 40);
+  assert.equal(
+    patchIdAgainst(git, sha1, baseSha, "--verbatim"),
+    patchIdAgainst(git, sha2, baseSha, "--verbatim"),
+  );
   return { dir, git, baseSha, sha1, sha2, patchId };
 }
 
@@ -1082,13 +1088,16 @@ async function gateOnReplay({
 
 const AUTHOR = { login: "eliasprunaire", type: "User" };
 const PID = "e".repeat(40);
+const XID = "a".repeat(40);
 
 test("a clean rebase PASS with the same patch-id passes and names origin sha and patch-id", () => {
   const decision = decide({
     headSha: HEAD,
     headPatchId: PID,
+    headExactId: XID,
     onPull: [OTHER, HEAD],
     patchIds: { [OTHER]: PID },
+    exactIds: { [OTHER]: XID },
     comments: [comment("1", 1, marked("PASS+NOTES", OTHER))],
   });
   assert.deepEqual(decision, {
@@ -1105,8 +1114,10 @@ test("a modified diff with a different patch-id is refused", () => {
   const decision = decide({
     headSha: HEAD,
     headPatchId: PID,
+    headExactId: XID,
     onPull: [OTHER, HEAD],
     patchIds: { [OTHER]: "f".repeat(40) },
+    exactIds: { [OTHER]: XID },
     comments: [comment("1", 1, marked("PASS", OTHER))],
   });
   assert.equal(decision.kind, "fail");
@@ -1117,14 +1128,47 @@ test("a modified diff with a different patch-id is refused", () => {
   );
 });
 
+test("the same patch-id with a different verbatim id is refused", () => {
+  const decision = decide({
+    headSha: HEAD,
+    headPatchId: PID,
+    headExactId: XID,
+    onPull: [OTHER, HEAD],
+    patchIds: { [OTHER]: PID },
+    exactIds: { [OTHER]: "b".repeat(40) },
+    comments: [comment("1", 1, marked("PASS", OTHER))],
+  });
+  assert.equal(decision.kind, "fail");
+  assert.equal(decision.reason.code, "sha-mismatch");
+  assert.equal(
+    decision.description,
+    `VERDICT PASS @ ${OTHER} does not match head ${HEAD}`,
+  );
+});
+
+test("a missing verbatim id on either side is refused", () => {
+  const stableOnly = {
+    headSha: HEAD,
+    headPatchId: PID,
+    onPull: [OTHER, HEAD],
+    patchIds: { [OTHER]: PID },
+    comments: [comment("1", 1, marked("PASS", OTHER))],
+  };
+  assert.equal(decide(stableOnly).kind, "fail");
+  assert.equal(decide({ ...stableOnly, headExactId: XID }).kind, "fail");
+  assert.equal(decide({ ...stableOnly, exactIds: { [OTHER]: XID } }).kind, "fail");
+});
+
 test("author verdict is refused even with a matching patch-id", () => {
   const decision = decide({
     headSha: HEAD,
     authorLogin: "eliasprunaire",
     verifiers: [AUTHOR],
     headPatchId: PID,
+    headExactId: XID,
     onPull: [OTHER],
     patchIds: { [OTHER]: PID },
+    exactIds: { [OTHER]: XID },
     comments: [comment("1", 1, marked("PASS", OTHER), AUTHOR)],
   });
   assert.equal(decision.reason.code, "author-match");
@@ -1135,8 +1179,10 @@ test("a SHA that is not on the pull is refused even with the same patch-id", () 
   const decision = decide({
     headSha: HEAD,
     headPatchId: PID,
+    headExactId: XID,
     onPull: [HEAD],
     patchIds: { [OTHER]: PID },
+    exactIds: { [OTHER]: XID },
     comments: [comment("1", 1, marked("PASS", OTHER))],
   });
   assert.equal(decision.reason.code, "not-on-pull");
@@ -1151,8 +1197,10 @@ test("a later FAIL on the same patch-id or on the head wins", () => {
   const failHead = decide({
     headSha: HEAD,
     headPatchId: PID,
+    headExactId: XID,
     onPull: [OTHER, HEAD],
     patchIds: { [OTHER]: PID },
+    exactIds: { [OTHER]: XID },
     comments: [older, comment("2", 2, marked("FAIL", HEAD))],
   });
   assert.equal(failHead.kind, "fail");
@@ -1161,8 +1209,10 @@ test("a later FAIL on the same patch-id or on the head wins", () => {
   const failPatch = decide({
     headSha: HEAD,
     headPatchId: PID,
+    headExactId: XID,
     onPull: [OTHER, HEAD],
     patchIds: { [OTHER]: PID },
+    exactIds: { [OTHER]: XID },
     comments: [older, comment("3", 3, marked("FAIL", OTHER))],
   });
   assert.equal(failPatch.kind, "fail");
@@ -1174,8 +1224,10 @@ test("an empty patch-id is refused even when both sides are empty", () => {
   const decision = decide({
     headSha: HEAD,
     headPatchId: "",
+    headExactId: "",
     onPull: [OTHER, HEAD],
     patchIds: { [OTHER]: "" },
+    exactIds: { [OTHER]: "" },
     comments: [comment("1", 1, marked("PASS", OTHER))],
   });
   assert.equal(decision.description, `empty patch-id refused for ${OTHER}`);
@@ -1248,6 +1300,50 @@ test("main refuses a cited SHA whose diff against the current base changed", asy
     );
   } finally {
     rmSync(repo.dir, { recursive: true, force: true });
+  }
+});
+
+test("main refuses a PASS when only the indentation changed behaviour", async () => {
+  const { dir, git } = initGitDir();
+  try {
+    writeFileSync(join(dir, "app.py"), "x = 1\n");
+    git(["add", "app.py"]);
+    assert.equal(git(["commit", "-qm", "base"]).status, 0);
+    const baseSha = git(["rev-parse", "HEAD"]).stdout.trim();
+    // reviewed: print stays inside the dead branch
+    writeFileSync(join(dir, "app.py"), 'x = 1\nif False:\n    pass\n    print("run")\n');
+    git(["commit", "-aqm", "reviewed"]);
+    const sha1 = git(["rev-parse", "HEAD"]).stdout.trim();
+    assert.equal(git(["reset", "-q", "--hard", baseSha]).status, 0);
+    // shipped: same tokens, print moved out of the branch
+    writeFileSync(join(dir, "app.py"), 'x = 1\nif False:\n    pass\nprint("run")\n');
+    git(["commit", "-aqm", "shipped"]);
+    const sha2 = git(["rev-parse", "HEAD"]).stdout.trim();
+    assert.equal(
+      patchIdAgainst(git, sha1, baseSha),
+      patchIdAgainst(git, sha2, baseSha),
+    );
+    assert.notEqual(
+      patchIdAgainst(git, sha1, baseSha, "--verbatim"),
+      patchIdAgainst(git, sha2, baseSha, "--verbatim"),
+    );
+    const { code, posts } = await gateOnReplay({
+      dir,
+      baseSha,
+      sha1,
+      sha2,
+      body: marked("PASS", sha1),
+      commits: [sha1, sha2],
+      force: [[sha1, sha2]],
+    });
+    assert.equal(code, 0);
+    assert.equal(posts[0].body.state, "failure");
+    assert.equal(
+      posts[0].body.description,
+      `VERDICT PASS @ ${sha1} does not match head ${sha2}`,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 

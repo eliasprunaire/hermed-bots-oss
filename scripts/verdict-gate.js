@@ -312,29 +312,43 @@ function foldLogin(value) {
   return value.toLowerCase();
 }
 
-function headPatchIdOf(input) {
-  if (typeof input.headPatchId !== "string") {
+function headIdOf(value) {
+  if (typeof value !== "string") {
     return null;
   }
-  if (input.headPatchId === "") {
+  if (value === "") {
     return "";
   }
-  const id = input.headPatchId.toLowerCase();
+  const id = value.toLowerCase();
   return HEX_PATCH.test(id) ? id : null;
 }
 
-function qualifies(sha, headSha, onPull, patches, headPatchId) {
+// a reused verdict needs both fingerprints equal: --stable ignores whitespace, --verbatim does not
+function qualifies(sha, headSha, onPull, ids) {
   if (sha === headSha) {
-    return { via: "head", patchId: headPatchId };
+    return { via: "head", patchId: ids.headPatchId };
   }
   if (!onPull.has(sha)) {
     return null;
   }
-  if (headPatchId == null || headPatchId === "") {
+  if (
+    ids.headPatchId == null ||
+    ids.headPatchId === "" ||
+    ids.headExactId == null ||
+    ids.headExactId === ""
+  ) {
     return null;
   }
-  const patchId = patches[sha];
-  if (typeof patchId !== "string" || patchId === "" || patchId !== headPatchId) {
+  const patchId = ids.patches[sha];
+  const exactId = ids.exacts[sha];
+  if (
+    typeof patchId !== "string" ||
+    patchId === "" ||
+    patchId !== ids.headPatchId ||
+    typeof exactId !== "string" ||
+    exactId === "" ||
+    exactId !== ids.headExactId
+  ) {
     return null;
   }
   return { via: "patch", patchId };
@@ -345,14 +359,18 @@ function mismatchDescription(
   citedSha,
   headSha,
   onPull,
-  patches,
-  headPatchId,
+  ids,
   onPullProvided,
 ) {
   if (onPullProvided && !onPull.has(citedSha) && citedSha !== headSha) {
     return render(`VERDICT ${verdict} @ ${citedSha} is not on this pull`);
   }
-  if (headPatchId === "" || patches[citedSha] === "") {
+  if (
+    ids.headPatchId === "" ||
+    ids.patches[citedSha] === "" ||
+    ids.headExactId === "" ||
+    ids.exacts[citedSha] === ""
+  ) {
     return render(`empty patch-id refused for ${citedSha}`);
   }
   return render(`VERDICT ${verdict} @ ${citedSha} does not match head ${headSha}`);
@@ -371,8 +389,12 @@ function decide(input) {
   const onPullProvided = Object.prototype.hasOwnProperty.call(input, "onPull");
   const onPull = shaSet(input.onPull);
   onPull.add(headSha);
-  const patches = patchMap(input.patchIds);
-  const headPatchId = headPatchIdOf(input);
+  const ids = {
+    patches: patchMap(input.patchIds),
+    headPatchId: headIdOf(input.headPatchId),
+    exacts: patchMap(input.exactIds),
+    headExactId: headIdOf(input.headExactId),
+  };
   let seenLine = false;
   let seenMarker = false;
   let winner = null;
@@ -395,7 +417,7 @@ function decide(input) {
       continue;
     }
     const anyQualifies = lines.some(
-      (line) => qualifies(line.sha, headSha, onPull, patches, headPatchId) != null,
+      (line) => qualifies(line.sha, headSha, onPull, ids) != null,
     );
     const row = {
       id: comment.id,
@@ -432,8 +454,7 @@ function decide(input) {
           first.sha,
           headSha,
           onPull,
-          patches,
-          headPatchId,
+          ids,
           onPullProvided,
         ),
       };
@@ -463,7 +484,7 @@ function decide(input) {
     };
   }
 
-  const match = qualifies(first.sha, headSha, onPull, patches, headPatchId);
+  const match = qualifies(first.sha, headSha, onPull, ids);
   if (match == null) {
     return {
       kind: "fail",
@@ -479,8 +500,7 @@ function decide(input) {
         first.sha,
         headSha,
         onPull,
-        patches,
-        headPatchId,
+        ids,
         onPullProvided,
       ),
     };
@@ -711,14 +731,16 @@ function diffPatchId(io, sha, baseSha) {
     return { kind: "empty" };
   }
   const patch = gitRun(io, ["patch-id", "--stable"], diff.stdout);
-  if (patch.status !== 0) {
+  const exact = gitRun(io, ["patch-id", "--verbatim"], diff.stdout);
+  if (patch.status !== 0 || exact.status !== 0) {
     return { kind: "missing" };
   }
   const id = patch.stdout.trim().split(/\s+/)[0] || "";
-  if (!HEX_PATCH.test(id)) {
+  const exactId = exact.stdout.trim().split(/\s+/)[0] || "";
+  if (!HEX_PATCH.test(id) || !HEX_PATCH.test(exactId)) {
     return { kind: "empty" };
   }
-  return { kind: "ok", patchId: id };
+  return { kind: "ok", patchId: id, exactId };
 }
 
 async function loadHistoryShas(io, token, owner, repo, number) {
@@ -817,12 +839,16 @@ async function loadHistoryShas(io, token, owner, repo, number) {
 
 function patchIdentity(io, shas, headSha, baseSha) {
   const patchIds = Object.create(null);
+  const exactIds = Object.create(null);
   const head = diffPatchId(io, headSha, baseSha);
   let headPatchId = null;
+  let headExactId = null;
   if (head.kind === "empty") {
     headPatchId = "";
+    headExactId = "";
   } else if (head.kind === "ok") {
     headPatchId = head.patchId;
+    headExactId = head.exactId;
   }
   for (const sha of shas) {
     if (sha === headSha) {
@@ -831,11 +857,13 @@ function patchIdentity(io, shas, headSha, baseSha) {
     const result = diffPatchId(io, sha, baseSha);
     if (result.kind === "empty") {
       patchIds[sha] = "";
+      exactIds[sha] = "";
     } else if (result.kind === "ok") {
       patchIds[sha] = result.patchId;
+      exactIds[sha] = result.exactId;
     }
   }
-  return { headPatchId, patchIds };
+  return { headPatchId, patchIds, headExactId, exactIds };
 }
 
 async function postStatus(io, token, owner, repo, sha, state, description) {
@@ -996,7 +1024,9 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
   const offHead = citedOffHead(comments, verifiers, headSha);
   const onPull = new Set([headSha]);
   let headPatchId;
+  let headExactId;
   let patchIds = Object.create(null);
+  let exactIds = Object.create(null);
   if (offHead.size > 0 && head.baseSha != null) {
     const history = await loadHistoryShas(
       io,
@@ -1022,6 +1052,8 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     const identity = patchIdentity(io, onPull, headSha, head.baseSha);
     headPatchId = identity.headPatchId;
     patchIds = identity.patchIds;
+    headExactId = identity.headExactId;
+    exactIds = identity.exactIds;
   }
 
   const decision = decide({
@@ -1032,6 +1064,8 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     onPull,
     headPatchId,
     patchIds,
+    headExactId,
+    exactIds,
   });
   const state = decision.kind === "pass" ? "success" : "failure";
   return postStatus(
