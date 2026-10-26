@@ -47,7 +47,9 @@ new_alias() {
     && "$ENDPOINT" authorize < "$KEYDIR/good.pub" \
     && { [ -d "$(dirname "$SSH_CONFIG")" ] || mkdir -m 700 "$(dirname "$SSH_CONFIG")"; } || { trash "$KEYDIR"; return 1; }
   [ -e "$SSH_CONFIG" ] && : > "$KEYDIR/had-config"
-  { printf '# hv-hd07 begin\nInclude %s\n# hv-hd07 end\n' "$KEYDIR/config"; cat "$SSH_CONFIG" 2>/dev/null; } > "$KEYDIR/config.new"
+  # une config illisible arrête la fonction avant toute écriture : sinon le bloc remplacerait le contenu
+  { printf '# hv-hd07 begin\nInclude %s\n# hv-hd07 end\n' "$KEYDIR/config"; if [ -e "$SSH_CONFIG" ]; then cat "$SSH_CONFIG"; fi; } > "$KEYDIR/config.new" \
+    || { echo "$SSH_CONFIG est illisible : bloc hv-hd07 non écrit, config inchangée" >&2; trash "$KEYDIR"; return 1; }
   cat "$KEYDIR/config.new" > "$SSH_CONFIG" || { trash "$KEYDIR"; return 1; }
   export HV_ALIAS_READY=1 HV_ALIAS_OWNER=$$
 }

@@ -169,6 +169,26 @@ test(
   },
 );
 
+test(
+  "new_alias keeps an unreadable config byte for byte and fails loudly",
+  { skip: SKIP || (process.getuid?.() === 0 && "root lit malgré chmod") },
+  () => {
+    const run = lane('new_alias; echo "new=$?"', ({ config }) => {
+      writeFileSync(config, ORIGINAL);
+      chmodSync(config, 0o200); // inscriptible, illisible
+    });
+    try {
+      assert.match(run.result.stdout, /new=1\n/);
+      assert.match(run.result.stderr, /hv-hd07/);
+      chmodSync(run.config, 0o600);
+      assert.equal(readFileSync(run.config, "utf8"), ORIGINAL);
+      assert.equal(existsSync(run.keydir), false);
+    } finally {
+      done(run);
+    }
+  },
+);
+
 test("new_alias refuses a dangling symbolic-link config before writing anything", { skip: SKIP }, () => {
   const run = lane('new_alias; echo "new=$?"', ({ dir, config }) => {
     symlinkSync(join(dir, "missing", "ssh_config"), config);
