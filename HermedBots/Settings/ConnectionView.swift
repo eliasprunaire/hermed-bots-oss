@@ -88,13 +88,20 @@ struct ConnectionView: View {
                 model.refreshPreview()
             }
             HStack {
-                Button("Tester la connexion") { Task { await model.refreshVersion() } }.accessibilityID(.connectionCheck)
-                Spacer()
-                Button("Fermer") { dismiss() }.accessibilityID(.connectionClose)
-                Button("Connecter") { model.connect() }.keyboardShortcut(.defaultAction).accessibilityID(.connectionConnect)
+                Button("Tester la connexion") { Task { await model.refreshVersion() } }
+                    .accessibilityID(.connectionCheck)
+                    .accessibilityRespondsToUserInteraction(true)
+                Spacer(minLength: 0)
+                Button("Fermer") { dismiss() }
+                    .accessibilityID(.connectionClose)
+                    .accessibilityRespondsToUserInteraction(true)
+                Button("Connecter") { model.connect() }
+                    .keyboardShortcut(.defaultAction)
+                    .accessibilityID(.connectionConnect)
+                    .accessibilityRespondsToUserInteraction(true)
             }
             .padding()
+            .accessibilityElement(children: .contain)
         }
-        .frame(width: 480)
     }
 }

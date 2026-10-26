@@ -12,7 +12,12 @@ enum HVShot {
 
     @discardableResult
     static func capture(_ name: String, _ app: XCUIApplication) -> XCUIScreenshot {
-        let screenshot = app.windows.firstMatch.screenshot()
+        capture(name, app.windows.firstMatch)
+    }
+
+    @discardableResult
+    static func capture(_ name: String, _ window: XCUIElement) -> XCUIScreenshot {
+        let screenshot = window.screenshot()
         print("HV-SHOT \(name)")
         XCTContext.runActivity(named: "capture \(name)") { activity in
             let attachment = XCTAttachment(screenshot: screenshot)
