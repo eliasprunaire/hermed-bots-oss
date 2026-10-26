@@ -1,10 +1,16 @@
 name: Protected paths
 
+# pull_request_target: GitHub reads this definition from the base branch, so a pull cannot
+# disable the job by editing this file (for example with `if: false`)
+# the job checks out the base branch only: nothing from the pull is checked out or run
+
 on:
-  pull_request:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   protected-agent-config:
@@ -22,13 +28,11 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_AUTHOR_LOGIN: ${{ github.event.pull_request.user.login }}
         run: |
-          # run the checker as it exists on the base branch, so a PR cannot weaken its own gate
-          checker="$RUNNER_TEMP/check-protected-paths.js"
-          if git cat-file -e "$BASE_SHA:scripts/check-protected-paths.js" 2>/dev/null; then
-            git show "$BASE_SHA:scripts/check-protected-paths.js" > "$checker"
-          else
-            echo "::notice::scripts/check-protected-paths.js is absent on the base: using the PR copy"
-            cp scripts/check-protected-paths.js "$checker"
-          fi
-          node "$checker" --base "$BASE_SHA" --head "$HEAD_SHA"
+          # the head commit comes in as git objects only; git diff reads them, nothing is extracted
+          # the anonymous fetch works because the repository is public; a private one needs a token here
+          git fetch --no-tags origin "$HEAD_SHA"
+          node scripts/check-protected-paths.js --base "$BASE_SHA" --head "$HEAD_SHA"

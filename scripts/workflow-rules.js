@@ -14,7 +14,7 @@ module.exports = Object.freeze([
     job: "pr-attribution",
   }),
   Object.freeze({
-    rule: "Marked PASS or PASS+NOTES, posted by an allowlisted verifier, on the exact head SHA",
+    rule: "Marked PASS or PASS+NOTES, posted by an allowlisted verifier, on the head SHA or a same-PR SHA with identical git patch-ids (--stable and --verbatim) and an exact replay tree against the PR base",
     script: "scripts/verdict-gate.js",
     test: "test/verdict-gate.test.js",
     job: "record-verdict",
@@ -32,7 +32,7 @@ module.exports = Object.freeze([
     job: "check-plans",
   }),
   Object.freeze({
-    rule: "No change to .claude/, .codex/ or .mcp.json in a PR",
+    rule: "No change to .claude/, .codex/ or .mcp.json in a PR, and no change to gate files without an owner gate-change-approved label",
     script: "scripts/check-protected-paths.js",
     test: "test/check-protected-paths.test.js",
     job: "protected-agent-config",

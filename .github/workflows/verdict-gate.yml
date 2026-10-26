@@ -40,4 +40,14 @@ jobs:
       - name: Post verdict-gate on the head SHA
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/verdict-gate.js
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+        run: |
+          # run the gate as it exists on the base branch, so a PR cannot weaken its own gate
+          checker="$RUNNER_TEMP/verdict-gate.js"
+          if git cat-file -e "$BASE_SHA:scripts/verdict-gate.js" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/verdict-gate.js" > "$checker"
+          else
+            echo "::notice::scripts/verdict-gate.js is absent on the base: using the PR copy"
+            cp scripts/verdict-gate.js "$checker"
+          fi
+          node "$checker"
