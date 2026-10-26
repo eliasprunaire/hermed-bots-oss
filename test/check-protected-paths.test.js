@@ -295,3 +295,14 @@ test("the workflow runs the checker from the base commit, not the PR branch", ()
   assert.match(workflow, /git show "\$BASE_SHA:scripts\/check-protected-paths\.js"/);
   assert.doesNotMatch(workflow, /node scripts\/check-protected-paths\.js/);
 });
+
+test("the workflow fetches the head as git objects before the checker, without checking it out", () => {
+  const workflow = readFileSync(join(root, ".github/workflows/protected-paths.yml"), "utf8");
+  const fetchAt = workflow.indexOf('git fetch --no-tags origin "$HEAD_SHA"');
+  const checkerAt = workflow.indexOf('node "$checker"');
+  assert.ok(fetchAt !== -1, "the head SHA of a fork is not in the base clone: fetch it");
+  assert.ok(fetchAt < checkerAt, "fetch before the checker reads the head");
+  assert.doesNotMatch(workflow, /^\s+ref:/m);
+  assert.match(workflow, /^\s+pull_request:$/m);
+  assert.match(workflow, /^\s+pull_request_target:$/m);
+});

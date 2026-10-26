@@ -32,4 +32,6 @@ jobs:
             echo "::notice::scripts/check-protected-paths.js is absent on the base: using the PR copy"
             cp scripts/check-protected-paths.js "$checker"
           fi
+          # on pull_request_target the clone is the base: a fork head is absent, so fetch its objects (nothing is checked out or run)
+          git fetch --no-tags origin "$HEAD_SHA"
           node "$checker" --base "$BASE_SHA" --head "$HEAD_SHA"
