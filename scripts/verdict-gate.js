@@ -323,7 +323,8 @@ function headIdOf(value) {
   return HEX_PATCH.test(id) ? id : null;
 }
 
-// a reused verdict needs both fingerprints equal: --stable ignores whitespace, --verbatim does not
+// a reused verdict needs three equal fingerprints: --stable ignores whitespace, --verbatim ignores
+// hunk position, and only the replay tree proves the head holds exactly the cited changes
 function qualifies(sha, headSha, onPull, ids) {
   if (sha === headSha) {
     return { via: "head", patchId: ids.headPatchId };
@@ -331,23 +332,24 @@ function qualifies(sha, headSha, onPull, ids) {
   if (!onPull.has(sha)) {
     return null;
   }
-  if (
-    ids.headPatchId == null ||
-    ids.headPatchId === "" ||
-    ids.headExactId == null ||
-    ids.headExactId === ""
-  ) {
-    return null;
+  for (const id of [ids.headPatchId, ids.headExactId, ids.headReplayId]) {
+    if (id == null || id === "") {
+      return null;
+    }
   }
   const patchId = ids.patches[sha];
   const exactId = ids.exacts[sha];
+  const replayId = ids.replays[sha];
   if (
     typeof patchId !== "string" ||
     patchId === "" ||
     patchId !== ids.headPatchId ||
     typeof exactId !== "string" ||
     exactId === "" ||
-    exactId !== ids.headExactId
+    exactId !== ids.headExactId ||
+    typeof replayId !== "string" ||
+    replayId === "" ||
+    replayId !== ids.headReplayId
   ) {
     return null;
   }
@@ -394,6 +396,8 @@ function decide(input) {
     headPatchId: headIdOf(input.headPatchId),
     exacts: patchMap(input.exactIds),
     headExactId: headIdOf(input.headExactId),
+    replays: patchMap(input.replayIds),
+    headReplayId: headIdOf(input.headReplayId),
   };
   let seenLine = false;
   let seenMarker = false;
@@ -740,7 +744,7 @@ function diffPatchId(io, sha, baseSha) {
   if (!HEX_PATCH.test(id) || !HEX_PATCH.test(exactId)) {
     return { kind: "empty" };
   }
-  return { kind: "ok", patchId: id, exactId };
+  return { kind: "ok", patchId: id, exactId, mergeBase: base };
 }
 
 async function loadHistoryShas(io, token, owner, repo, number) {
@@ -837,18 +841,45 @@ async function loadHistoryShas(io, token, owner, repo, number) {
   return shas;
 }
 
+// tree git builds by replaying the cited diff (shaBase..sha) onto headBase; null on conflict or error
+// shortcut: needs git 2.40+ (merge-tree --write-tree), an older git yields null and the verdict is refused
+function replayTree(io, sha, shaBase, headBase) {
+  const result = gitRun(io, [
+    "merge-tree",
+    "--write-tree",
+    `--merge-base=${shaBase}`,
+    headBase,
+    sha,
+  ]);
+  if (result.status !== 0) {
+    return null;
+  }
+  const tree = result.stdout.split("\n")[0].trim();
+  return HEX_PATCH.test(tree) ? tree : null;
+}
+
+function treeOf(io, sha) {
+  const result = gitRun(io, ["rev-parse", "--verify", `${sha}^{tree}`]);
+  const tree = result.stdout.trim();
+  return result.status === 0 && HEX_PATCH.test(tree) ? tree : null;
+}
+
 function patchIdentity(io, shas, headSha, baseSha) {
   const patchIds = Object.create(null);
   const exactIds = Object.create(null);
+  const replayIds = Object.create(null);
   const head = diffPatchId(io, headSha, baseSha);
   let headPatchId = null;
   let headExactId = null;
+  let headReplayId = null;
   if (head.kind === "empty") {
     headPatchId = "";
     headExactId = "";
+    headReplayId = "";
   } else if (head.kind === "ok") {
     headPatchId = head.patchId;
     headExactId = head.exactId;
+    headReplayId = treeOf(io, headSha);
   }
   for (const sha of shas) {
     if (sha === headSha) {
@@ -858,12 +889,26 @@ function patchIdentity(io, shas, headSha, baseSha) {
     if (result.kind === "empty") {
       patchIds[sha] = "";
       exactIds[sha] = "";
+      replayIds[sha] = "";
     } else if (result.kind === "ok") {
       patchIds[sha] = result.patchId;
       exactIds[sha] = result.exactId;
+      if (head.kind === "ok") {
+        const tree = replayTree(io, sha, result.mergeBase, head.mergeBase);
+        if (tree != null) {
+          replayIds[sha] = tree;
+        }
+      }
     }
   }
-  return { headPatchId, patchIds, headExactId, exactIds };
+  return {
+    headPatchId,
+    patchIds,
+    headExactId,
+    exactIds,
+    headReplayId,
+    replayIds,
+  };
 }
 
 async function postStatus(io, token, owner, repo, sha, state, description) {
@@ -1025,8 +1070,10 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
   const onPull = new Set([headSha]);
   let headPatchId;
   let headExactId;
+  let headReplayId;
   let patchIds = Object.create(null);
   let exactIds = Object.create(null);
+  let replayIds = Object.create(null);
   if (offHead.size > 0 && head.baseSha != null) {
     const history = await loadHistoryShas(
       io,
@@ -1054,6 +1101,8 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     patchIds = identity.patchIds;
     headExactId = identity.headExactId;
     exactIds = identity.exactIds;
+    headReplayId = identity.headReplayId;
+    replayIds = identity.replayIds;
   }
 
   const decision = decide({
@@ -1066,6 +1115,8 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     patchIds,
     headExactId,
     exactIds,
+    headReplayId,
+    replayIds,
   });
   const state = decision.kind === "pass" ? "success" : "failure";
   return postStatus(
