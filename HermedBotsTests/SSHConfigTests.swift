@@ -196,6 +196,60 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertFalse(preview.isUnknownAlias)
     }
 
+    /// Lignes verbatim de `ssh -G -vv` (OpenSSH 10.3) : les critères sont écrits tels qu'ils figurent dans la config
+    private func matchDebug(_ criteria: String, alias: String = "lab", found: Bool = true) -> String {
+        "debug2: checking match for '\(criteria)' host \(alias) originally \(alias)\ndebug2: match \(found ? "found" : "not found")\n"
+    }
+
+    /// Un `Match` qui vaut pour tout nom ne nomme pas l'alias, même quand `ssh -G -vv` écrit `match found`
+    func testAMatchBlockThatAppliesToEveryNameDoesNotNameTheAlias() {
+        let global = [
+            "all", "user *", "host *", "originalhost *", "host **", "localuser *", "exec true",
+            "host real,*", "!originalhost real", "all # host lab", "exec \"echo host lab \"", "final all", "originalhost real",
+        ]
+        for criteria in global {
+            let preview = parse(defaultDump, alias: "lab", debug: matchDebug(criteria))
+            XCTAssertTrue(preview.isUnknownAlias, criteria)
+            XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true), criteria) {
+                XCTAssertEqual($0 as? SSHFailure, .unknownAlias, criteria)
+            }
+        }
+    }
+
+    /// Un `Match` dont un critère `host` ou `originalhost` couvre l'alias, sans le prendre à `*`, le nomme
+    func testAMatchBlockWithAHostCriterionOfItsOwnNamesTheAlias() {
+        let named = [
+            "host lab", "originalhost lab", "Host lab", "host \"lab\"", "originalhost=lab", "host la*", "host l?b",
+            "originalhost lab,real", "originalhost real,lab", "originalhost lab host *", "host\tlab  user   *",
+            "exec \"echo x\" host lab", "originalhost lab # host *", "final host lab", "canonical host lab", "host la*,!lax",
+        ]
+        for criteria in named {
+            let preview = parse(defaultDump, alias: "lab", debug: matchDebug(criteria))
+            XCTAssertFalse(preview.isUnknownAlias, criteria)
+        }
+    }
+
+    func testAMatchBlockThatDoesNotMatchDoesNotNameTheAlias() {
+        let preview = parse(defaultDump, alias: "lab", debug: matchDebug("host lab", found: false))
+        XCTAssertTrue(preview.isUnknownAlias)
+    }
+
+    /// `final` : une première passe sans correspondance, puis une seconde avec
+    func testAFinalMatchPassIsJudgedOnItsOwnCriteria() {
+        let passes = { (criteria: String) in
+            self.matchDebug(criteria, found: false) + "debug1: configuration requests final Match pass\n" + self.matchDebug(criteria)
+        }
+        XCTAssertFalse(parse(defaultDump, alias: "lab", debug: passes("final host lab")).isUnknownAlias)
+        XCTAssertTrue(parse(defaultDump, alias: "lab", debug: passes("final all")).isUnknownAlias)
+    }
+
+    /// Un bloc `Match` global ne rend pas connu un nom que seul un autre `Match` global ou `Host **` couvre
+    func testAGlobalHostPatternDoesNotNameTheAlias() {
+        let debug = "debug1: /tmp/config line 1: Applying options for **\n" + matchDebug("all")
+        XCTAssertTrue(parse(defaultDump, alias: "lab", debug: debug).isUnknownAlias)
+        XCTAssertFalse(parse(defaultDump, alias: "lab", debug: debug + matchDebug("originalhost lab")).isUnknownAlias)
+    }
+
     /// `IdentityAgent none` désactive l'agent : la socket de la session ne compte plus, quelle que soit la casse
     func testIdentityAgentNoneUsesNoAgentEvenWithASessionSocket() {
         for value in ["none", "NONE"] {
@@ -438,5 +492,32 @@ private actor ScriptedSSHResolver: SSHConfigResolving {
     func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
         asked.append(invocation)
         return dumps[invocation] ?? SSHConfigDump(stdout: "")
+    }
+}
+
+/// Le vrai `/usr/bin/ssh -G -vv -F <config>` : le format des lignes de débogage vient d'OpenSSH, pas d'un échantillon écrit à la main
+final class RealSshMatchTests: XCTestCase {
+    private func isUnknown(_ config: String, alias: String = "lab.invalid") async throws -> Bool {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("hb-test-\(UUID().uuidString.prefix(8))")
+        try config.write(to: file, atomically: true, encoding: .utf8)
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        let dump = try await SystemSSHConfigResolver(configFile: file.path).dump(alias: alias, invocation: .tunnel)
+        return SSHConfig.parse(dump, alias: alias, localUser: "operator").isUnknownAlias
+    }
+
+    func testAMatchBlockThatAppliesToEveryNameLeavesTheAliasUnknown() async throws {
+        for criteria in ["all", "user *", "host *", "originalhost *", "localuser *", "exec true", "exec \"echo host lab.invalid \""] {
+            let unknown = try await isUnknown("Match \(criteria)\nUser operator\n")
+            XCTAssertTrue(unknown, criteria)
+        }
+        let unknown = try await isUnknown("Host *\nUser operator\n")
+        XCTAssertTrue(unknown, "Host *")
+    }
+
+    func testABlockThatNamesTheAliasMakesItKnown() async throws {
+        for block in ["Host lab.invalid", "Match host lab.invalid", "Match originalhost lab.invalid", "Match originalhost la*", "Match all\nMatch originalhost lab.invalid"] {
+            let unknown = try await isUnknown("\(block)\nUser operator\n")
+            XCTAssertFalse(unknown, block)
+        }
     }
 }

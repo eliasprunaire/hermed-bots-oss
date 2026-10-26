@@ -49,7 +49,7 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 
 | Cas | Message |
 | --- | --- |
-| Alias inconnu (`ssh -G -vv` n'applique aucun bloc Host ou Match qui nomme l'alias ; `Host *` ne suffit pas, quelles que soient ses valeurs ; un bloc nommé aux valeurs standard reste valide) | Cet alias SSH est inconnu. |
+| Alias inconnu (`ssh -G -vv` n'applique aucun bloc Host ou Match qui nomme l'alias ; `Host *` ne suffit pas, quelles que soient ses valeurs ; `Match all`, `Match user *`, `Match host *`, `Match originalhost *` ou `Match exec` seul ne suffisent pas non plus : un `Match` nomme l'alias par un critère `host` ou `originalhost` qui lui est propre ; un bloc nommé aux valeurs standard reste valide) | Cet alias SSH est inconnu. |
 | Agent verrouillé ou vide | L'agent SSH est verrouillé ou vide. |
 | Certificat expiré | Le certificat SSH a expiré. |
 | Serveur refuse l'identité | Le serveur refuse l'identité SSH. |

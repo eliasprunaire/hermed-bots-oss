@@ -146,36 +146,89 @@ enum SSHConfig {
     /// Un alias est inconnu s'il n'a pas de bloc Host ou Match qui le nomme (stderr de `ssh -G -vv`)
     /// Les valeurs de `ssh -G` ne comptent pas : un `Host *` qui fixe un User, un Port ou une identité les donne à n'importe quel nom
     /// Un bloc Host ou Match qui ne change aucune valeur reste un alias valide
+    /// Un bloc qui vaut pour tout nom (`Host *`, `Match all`, `Match user *`, `Match host *`) ne nomme pas l'alias
     static func isUnknownAlias(alias: String, debug: String) -> Bool {
         !(hostBlock(matches: alias, debug: debug) || matchBlock(matches: alias, debug: debug))
     }
 
-    /// `debug2: checking match for 'host …' originally <alias>` puis `match found` (`-vv`)
+    /// `debug2: checking match for '<critères>' host … originally …` puis `match found` (`-vv`)
+    /// Seul un critère `host` ou `originalhost` propre à l'alias compte : les autres critères ne nomment aucun hôte
     static func matchBlock(matches alias: String, debug: String) -> Bool {
-        var pending = false
+        var names = false
         for line in debug.split(whereSeparator: \.isNewline) {
             let text = String(line)
-            if let range = text.range(of: "originally ") {
-                let original = String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces)
-                pending = glob(original, matches: alias) || glob(alias, matches: original)
-            } else if text.localizedCaseInsensitiveContains("checking match for") {
-                pending = text.localizedCaseInsensitiveContains(alias)
+            if text.contains("checking match for") {
+                names = false
+                if let start = text.range(of: "checking match for '"), let end = text.range(of: "' host ", options: .backwards), start.upperBound <= end.lowerBound {
+                    names = criteria(String(text[start.upperBound..<end.lowerBound]), name: alias)
+                }
+            } else if names, text.localizedCaseInsensitiveContains("match found") {
+                return true
             }
-            if pending, text.localizedCaseInsensitiveContains("match found") { return true }
         }
         return false
     }
 
-    /// `debug1: … Applying options for <pattern>` : un motif autre que `*` qui couvre l'alias
+    /// `debug1: … Applying options for <pattern>` : un motif propre qui couvre l'alias
     static func hostBlock(matches alias: String, debug: String) -> Bool {
         for line in debug.split(whereSeparator: \.isNewline) {
             let text = String(line)
             guard let range = text.range(of: "Applying options for ") else { continue }
-            let pattern = String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces)
-            if pattern.isEmpty || pattern == "*" { continue }
-            if glob(pattern, matches: alias) { return true }
+            if ownPattern(String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces), matches: alias) { return true }
         }
         return false
+    }
+
+    /// Un critère `host` ou `originalhost` non nié dont la liste contient un motif propre qui couvre l'alias
+    private static func criteria(_ text: String, name alias: String) -> Bool {
+        let tokens = words(in: text)
+        var index = 0
+        while index < tokens.count {
+            var keyword = tokens[index].lowercased()
+            index += 1
+            let negated = keyword.hasPrefix("!")
+            if negated { keyword.removeFirst() }
+            if ["all", "canonical", "final"].contains(keyword) { continue }
+            guard index < tokens.count else { break }
+            let argument = tokens[index]
+            index += 1
+            if !negated, keyword == "host" || keyword == "originalhost",
+               argument.split(separator: ",").contains(where: { ownPattern(String($0), matches: alias) }) { return true }
+        }
+        return false
+    }
+
+    /// Un motif non nié, qui n'est pas `*` seul, et qui couvre l'alias
+    private static func ownPattern(_ pattern: String, matches alias: String) -> Bool {
+        !pattern.hasPrefix("!") && pattern.contains { $0 != "*" } && glob(pattern, matches: alias)
+    }
+
+    /// Découpe comme OpenSSH : espaces, tabulations et `=` séparent, les guillemets groupent, un `#` hors guillemets ouvre un commentaire
+    /// shortcut: les échappements `\"` ne sont pas lus, un exec qui en contient dérègle le découpage de ses mots, à revoir si un cas réel apparaît
+    private static func words(in text: String) -> [String] {
+        var words: [String] = []
+        var word = ""
+        var quote: Character?
+        var open = false
+        for character in text {
+            if let current = quote {
+                if character == current { quote = nil } else { word.append(character) }
+            } else if character == "\"" || character == "'" {
+                quote = character
+                open = true
+            } else if character == " " || character == "\t" || character == "=" {
+                if open { words.append(word) }
+                word = ""
+                open = false
+            } else if character == "#", !open {
+                return words
+            } else {
+                word.append(character)
+                open = true
+            }
+        }
+        if open { words.append(word) }
+        return words
     }
 
     private static func glob(_ pattern: String, matches value: String) -> Bool {
