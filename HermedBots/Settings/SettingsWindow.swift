@@ -16,6 +16,6 @@ struct SettingsWindow: View {
                 .accessibilityIdentifier(pane.accessibilityID)
             }
         }
-        .frame(minWidth: SettingsLayout.defaultWidth, minHeight: SettingsLayout.defaultHeight)
+        .frame(minWidth: SettingsLayout.defaultWidth)
     }
 }

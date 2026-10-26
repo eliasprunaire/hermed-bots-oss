@@ -45,44 +45,44 @@ struct ConnectionView: View {
     @State private var apiStatus = ""
 
     var body: some View {
-        VStack(spacing: 0) {
-            Form {
-                TextField("Hôte", text: $model.host).accessibilityID(.connectionHost)
-                TextField("Utilisateur", text: $model.user).accessibilityID(.connectionUser)
-                LabeledContent("Clé SSH") { Text(model.keyState.label).accessibilityID(.connectionKeyState) }
-                LabeledContent("Tunnel") { Text(model.tunnel.state.label).accessibilityID(.connectionTunnelState) }
-                LabeledContent("Version de Hermes") { model.version.text.accessibilityID(.connectionVersion) }
-                Section("Clé API par profil") {
-                    Picker("Profil", selection: $apiProfile) {
-                        ForEach(Array(Set(["default"] + (model.bots.list.shown ?? []).map(\.id))).sorted(), id: \.self) { profile in
-                            Text(verbatim: profile).tag(profile)
-                        }
+        Form {
+            TextField("Hôte", text: $model.host).accessibilityID(.connectionHost)
+            TextField("Utilisateur", text: $model.user).accessibilityID(.connectionUser)
+            LabeledContent("Clé SSH") { Text(model.keyState.label).accessibilityID(.connectionKeyState) }
+            LabeledContent("Tunnel") { Text(model.tunnel.state.label).accessibilityID(.connectionTunnelState) }
+            LabeledContent("Version de Hermes") { model.version.text.accessibilityID(.connectionVersion) }
+            Section("Clé API par profil") {
+                Picker("Profil", selection: $apiProfile) {
+                    ForEach(Array(Set(["default"] + (model.bots.list.shown ?? []).map(\.id))).sorted(), id: \.self) { profile in
+                        Text(verbatim: profile).tag(profile)
                     }
-                    .accessibilityID(.connectionAPIProfile)
-                    .onChange(of: apiProfile) { apiKey = ""; apiStatus = "" }
-                    SecureField("Nouvelle clé API", text: $apiKey).accessibilityID(.connectionAPIKey)
-                    Button("Enregistrer la clé") {
-                        do {
-                            try model.saveAPIKey(apiKey, profile: apiProfile)
-                            apiKey = ""
-                            apiStatus = String(localized: "Clé enregistrée.")
-                            Task { await model.retryAPI() }
-                        } catch {
-                            apiKey = ""
-                            apiStatus = String(localized: "La clé n’a pas pu être enregistrée.")
-                        }
+                }
+                .accessibilityID(.connectionAPIProfile)
+                .onChange(of: apiProfile) { apiKey = ""; apiStatus = "" }
+                SecureField("Nouvelle clé API", text: $apiKey).accessibilityID(.connectionAPIKey)
+                Button("Enregistrer la clé") {
+                    do {
+                        try model.saveAPIKey(apiKey, profile: apiProfile)
+                        apiKey = ""
+                        apiStatus = String(localized: "Clé enregistrée.")
+                        Task { await model.retryAPI() }
+                    } catch {
+                        apiKey = ""
+                        apiStatus = String(localized: "La clé n’a pas pu être enregistrée.")
                     }
-                    .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .accessibilityID(.connectionAPISave)
-                    Text(verbatim: apiStatus).accessibilityID(.connectionAPIStatus)
                 }
-                if let message = model.tunnel.state.failureMessage {
-                    Text(message).foregroundStyle(.red).accessibilityID(.connectionMessage)
-                }
+                .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .accessibilityID(.connectionAPISave)
+                Text(verbatim: apiStatus).accessibilityID(.connectionAPIStatus)
             }
-            .formStyle(.grouped)
-            .onChange(of: model.host) { model.persistEndpoint() }
-            .onChange(of: model.user) { model.persistEndpoint() }
+            if let message = model.tunnel.state.failureMessage {
+                Text(message).foregroundStyle(.red).accessibilityID(.connectionMessage)
+            }
+        }
+        .formStyle(.grouped)
+        .onChange(of: model.host) { model.persistEndpoint() }
+        .onChange(of: model.user) { model.persistEndpoint() }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             HStack {
                 Button("Tester la connexion") { Task { await model.refreshVersion() } }.accessibilityID(.connectionCheck)
                 Spacer()

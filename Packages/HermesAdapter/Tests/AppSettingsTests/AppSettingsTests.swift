@@ -27,7 +27,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(SettingsCopy.checkForUpdates, "Rechercher les mises à jour…")
     }
 
-    func testTheSettingsWindowOpensAt1024By680Points() {
+    func testTheSettingsLayoutDefaultSizeIs1024By680Points() {
         XCTAssertEqual(SettingsLayout.defaultWidth, 1024)
         XCTAssertEqual(SettingsLayout.defaultHeight, 680)
     }
