@@ -40,6 +40,7 @@ EOF
 new_alias() {
   [ -z "${HV_ALIAS_READY:-}" ] || return 0
   if grep -qs '^# hv-hd07 begin$' "$SSH_CONFIG"; then echo "bloc hv-hd07 déjà dans $SSH_CONFIG : une lane précédente s'est arrêtée sans drop_alias" >&2; return 1; fi
+  if [ -L "$SSH_CONFIG" ] && [ ! -e "$SSH_CONFIG" ]; then echo "$SSH_CONFIG est un lien symbolique sans cible : bloc hv-hd07 non écrit" >&2; return 1; fi
   mkdir -m 700 "$KEYDIR" || return 1
   /usr/bin/ssh-keygen -q -t ed25519 -N '' -C hv-hd07 -f "$KEYDIR/good" && /usr/bin/ssh-keygen -q -t ed25519 -N '' -C hv-hd07-wrong -f "$KEYDIR/bad" \
     && { alias_block "$SSH_ALIAS" "$KEYDIR/good"; alias_block "$SSH_ALIAS_REFUSED" "$KEYDIR/bad"; } > "$KEYDIR/config" \
@@ -52,11 +53,17 @@ new_alias() {
 }
 
 # drop_alias : retire le bloc de ~/.ssh/config, puis les clés ; sans effet pour un script qui n'a pas créé l'alias
+# la config est réécrite à travers un éventuel lien symbolique (sed -i le remplacerait par un fichier ordinaire)
+# si le bloc ne part pas, la fonction échoue avec un message et garde les clés, que le bloc Include nomme encore
 drop_alias() {
   [ "${HV_ALIAS_OWNER:-}" = "$$" ] || return 0
-  sed -i '' '/^# hv-hd07 begin$/,/^# hv-hd07 end$/d' "$SSH_CONFIG" 2>/dev/null
-  [ -e "$KEYDIR/had-config" ] || [ -s "$SSH_CONFIG" ] || trash "$SSH_CONFIG" 2>/dev/null
-  trash "$KEYDIR"
+  if [ -e "$SSH_CONFIG" ]; then
+    sed '/^# hv-hd07 begin$/,/^# hv-hd07 end$/d' "$SSH_CONFIG" > "$KEYDIR/config.rm" && cat "$KEYDIR/config.rm" > "$SSH_CONFIG" \
+      || { echo "drop_alias : le bloc hv-hd07 reste dans $SSH_CONFIG ; retire-le à la main, les clés restent dans $KEYDIR" >&2; return 1; }
+    [ -e "$KEYDIR/had-config" ] || [ -s "$SSH_CONFIG" ] || trash "$SSH_CONFIG" \
+      || { echo "drop_alias : $SSH_CONFIG vide n'a pas été mis à la corbeille" >&2; return 1; }
+  fi
+  trash "$KEYDIR" || { echo "drop_alias : $KEYDIR n'a pas été mis à la corbeille" >&2; return 1; }
   unset HV_ALIAS_READY HV_ALIAS_OWNER
 }
 
