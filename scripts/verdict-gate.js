@@ -1,5 +1,6 @@
 "use strict";
 
+const { spawnSync } = require("node:child_process");
 const { readFileSync } = require("node:fs");
 
 const MARKER = "<!-- dev-lead-verifier -->";
@@ -8,6 +9,27 @@ const VERDICT_LINE = /^VERDICT: (PASS\+NOTES|PASS|FAIL) @ ([0-9a-fA-F]{40})$/;
 const DESCRIPTION_MAX = 140;
 const UNREADABLE_DESCRIPTION = "could not read PR comments";
 const HEX_SHA = /^[0-9a-fA-F]{40}$/;
+const HEX_PATCH = /^[0-9a-f]{40}$/;
+const GRAPHQL_URL = "https://api.github.com/graphql";
+const FORCE_PUSH_QUERY = `query($owner:String!,$name:String!,$number:Int!,$commitsCursor:String,$timelineCursor:String){
+  repository(owner:$owner,name:$name){
+    pullRequest(number:$number){
+      commits(first:100,after:$commitsCursor){
+        pageInfo{hasNextPage endCursor}
+        nodes{commit{oid}}
+      }
+      timelineItems(first:100,after:$timelineCursor,itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT]){
+        pageInfo{hasNextPage endCursor}
+        nodes{
+          ... on HeadRefForcePushedEvent{
+            beforeCommit{oid}
+            afterCommit{oid}
+          }
+        }
+      }
+    }
+  }
+}`;
 const VERIFIERS = Object.freeze([
   Object.freeze({ login: "app-pilote-verifier[bot]", type: "Bot" }),
 ]);
@@ -188,6 +210,77 @@ function nonEmpty(value) {
   return typeof value === "string" && value !== "";
 }
 
+function addHexSha(set, value) {
+  if (typeof value === "string" && HEX_SHA.test(value)) {
+    set.add(value.toLowerCase());
+  }
+}
+
+function harvestShas(raw, set) {
+  if (raw == null || typeof raw !== "object") {
+    return;
+  }
+  addHexSha(set, raw.sha);
+  addHexSha(set, raw.oid);
+  addHexSha(set, raw.commit_id);
+  if (typeof raw.before === "string") {
+    addHexSha(set, raw.before);
+  }
+  if (typeof raw.after === "string") {
+    addHexSha(set, raw.after);
+  }
+  if (raw.commit != null && typeof raw.commit === "object") {
+    harvestShas(raw.commit, set);
+  }
+  if (raw.beforeCommit != null && typeof raw.beforeCommit === "object") {
+    harvestShas(raw.beforeCommit, set);
+  }
+  if (raw.afterCommit != null && typeof raw.afterCommit === "object") {
+    harvestShas(raw.afterCommit, set);
+  }
+}
+
+// referenced, closed and merged events also carry a commit_id, from any branch or repo
+const MEMBERSHIP_EVENTS = new Set(["committed", "head_ref_force_pushed"]);
+
+function harvestTimelineShas(raw, set) {
+  if (raw != null && typeof raw === "object" && MEMBERSHIP_EVENTS.has(raw.event)) {
+    harvestShas(raw, set);
+  }
+}
+
+function shaSet(value) {
+  const out = new Set();
+  if (value == null) {
+    return out;
+  }
+  const list = value instanceof Set || Array.isArray(value) ? value : [];
+  for (const item of list) {
+    addHexSha(out, item);
+  }
+  return out;
+}
+
+function patchMap(value) {
+  const out = Object.create(null);
+  if (value == null || typeof value !== "object" || Array.isArray(value)) {
+    return out;
+  }
+  for (const [key, patchId] of Object.entries(value)) {
+    if (!HEX_SHA.test(key)) {
+      continue;
+    }
+    if (patchId === "") {
+      out[key.toLowerCase()] = "";
+      continue;
+    }
+    if (typeof patchId === "string" && HEX_PATCH.test(patchId.toLowerCase())) {
+      out[key.toLowerCase()] = patchId.toLowerCase();
+    }
+  }
+  return out;
+}
+
 // absent list: default; invalid list or entry: empty (fail closed)
 function usableVerifiers(verifiers) {
   if (verifiers == null) {
@@ -219,12 +312,97 @@ function foldLogin(value) {
   return value.toLowerCase();
 }
 
+function headIdOf(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  if (value === "") {
+    return "";
+  }
+  const id = value.toLowerCase();
+  return HEX_PATCH.test(id) ? id : null;
+}
+
+// a reused verdict needs three equal fingerprints: --stable ignores whitespace, --verbatim ignores
+// hunk position, and only the replay tree proves the head holds exactly the cited changes
+function qualifies(sha, headSha, onPull, ids) {
+  if (sha === headSha) {
+    return { via: "head", patchId: ids.headPatchId };
+  }
+  if (!onPull.has(sha)) {
+    return null;
+  }
+  for (const id of [ids.headPatchId, ids.headExactId, ids.headReplayId]) {
+    if (id == null || id === "") {
+      return null;
+    }
+  }
+  const patchId = ids.patches[sha];
+  const exactId = ids.exacts[sha];
+  const replayId = ids.replays[sha];
+  if (
+    typeof patchId !== "string" ||
+    patchId === "" ||
+    patchId !== ids.headPatchId ||
+    typeof exactId !== "string" ||
+    exactId === "" ||
+    exactId !== ids.headExactId ||
+    typeof replayId !== "string" ||
+    replayId === "" ||
+    replayId !== ids.headReplayId
+  ) {
+    return null;
+  }
+  return { via: "patch", patchId };
+}
+
+function mismatchDescription(
+  verdict,
+  citedSha,
+  headSha,
+  onPull,
+  ids,
+  onPullProvided,
+) {
+  if (onPullProvided && !onPull.has(citedSha) && citedSha !== headSha) {
+    return render(`VERDICT ${verdict} @ ${citedSha} is not on this pull`);
+  }
+  if (
+    ids.headPatchId === "" ||
+    ids.patches[citedSha] === "" ||
+    ids.headExactId === "" ||
+    ids.exacts[citedSha] === ""
+  ) {
+    return render(`empty patch-id refused for ${citedSha}`);
+  }
+  return render(`VERDICT ${verdict} @ ${citedSha} does not match head ${headSha}`);
+}
+
+function passDescription(verdict, sha, via, patchId) {
+  if (via === "patch" && typeof patchId === "string" && HEX_PATCH.test(patchId)) {
+    return render(`VERDICT ${verdict} @ ${sha} pid ${patchId}`);
+  }
+  return render(`VERDICT ${verdict} @ ${sha}`);
+}
+
 function decide(input) {
   const headSha = requireHead(input.headSha);
   const verifiers = usableVerifiers(input.verifiers);
+  const onPullProvided = Object.prototype.hasOwnProperty.call(input, "onPull");
+  const onPull = shaSet(input.onPull);
+  onPull.add(headSha);
+  const ids = {
+    patches: patchMap(input.patchIds),
+    headPatchId: headIdOf(input.headPatchId),
+    exacts: patchMap(input.exactIds),
+    headExactId: headIdOf(input.headExactId),
+    replays: patchMap(input.replayIds),
+    headReplayId: headIdOf(input.headReplayId),
+  };
   let seenLine = false;
   let seenMarker = false;
   let winner = null;
+  let unmatched = null;
 
   for (const comment of input.comments) {
     if (!isVerifier(comment, verifiers)) {
@@ -242,17 +420,49 @@ function decide(input) {
     if (!hasMarker || lines.length === 0) {
       continue;
     }
-    if (winner == null || isNewer(comment, winner)) {
-      winner = {
-        id: comment.id,
-        createdAtMs: comment.createdAtMs,
-        lines,
-        login: foldLogin(readLogin(comment.user)),
-      };
+    const anyQualifies = lines.some(
+      (line) => qualifies(line.sha, headSha, onPull, ids) != null,
+    );
+    const row = {
+      id: comment.id,
+      createdAtMs: comment.createdAtMs,
+      lines,
+      login: foldLogin(readLogin(comment.user)),
+    };
+    if (anyQualifies) {
+      if (winner == null || isNewer(comment, winner)) {
+        winner = row;
+      }
+    } else if (unmatched == null || isNewer(comment, unmatched)) {
+      unmatched = row;
     }
   }
 
   if (winner == null) {
+    if (unmatched != null) {
+      const first = unmatched.lines[0];
+      return {
+        kind: "fail",
+        reason: {
+          code:
+            onPullProvided && !onPull.has(first.sha)
+              ? "not-on-pull"
+              : "sha-mismatch",
+          verdict: first.verdict,
+          citedSha: first.sha,
+          headSha,
+          commentId: unmatched.id,
+        },
+        description: mismatchDescription(
+          first.verdict,
+          first.sha,
+          headSha,
+          onPull,
+          ids,
+          onPullProvided,
+        ),
+      };
+    }
     let hint = "neither";
     if (seenLine) {
       hint = "line-without-marker";
@@ -278,7 +488,8 @@ function decide(input) {
     };
   }
 
-  if (first.sha !== headSha) {
+  const match = qualifies(first.sha, headSha, onPull, ids);
+  if (match == null) {
     return {
       kind: "fail",
       reason: {
@@ -288,8 +499,13 @@ function decide(input) {
         headSha,
         commentId: winner.id,
       },
-      description: render(
-        `VERDICT ${first.verdict} @ ${first.sha} does not match head ${headSha}`,
+        description: mismatchDescription(
+        first.verdict,
+        first.sha,
+        headSha,
+        onPull,
+        ids,
+        onPullProvided,
       ),
     };
   }
@@ -324,7 +540,10 @@ function decide(input) {
     return {
       kind: "fail",
       reason: { code: "verdict-fail", headSha, commentId: winner.id },
-      description: render(`VERDICT FAIL @ ${headSha}`),
+      description:
+        match.via === "patch"
+          ? passDescription("FAIL", first.sha, match.via, match.patchId)
+          : render(`VERDICT FAIL @ ${headSha}`),
     };
   }
 
@@ -333,7 +552,7 @@ function decide(input) {
     verdict: first.verdict,
     sha: first.sha,
     commentId: winner.id,
-    description: render(`VERDICT ${first.verdict} @ ${first.sha}`),
+    description: passDescription(first.verdict, first.sha, match.via, match.patchId),
   };
 }
 
@@ -346,10 +565,11 @@ function apiHeaders(token) {
   };
 }
 
-async function githubGet(io, token, url) {
+async function githubRequest(io, token, url, init = {}) {
+  const headers = { ...apiHeaders(token), ...(init.headers || {}) };
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const response = await io.fetch(url, { headers: apiHeaders(token) });
+      const response = await io.fetch(url, { ...init, headers });
       if (response && response.ok) {
         return response;
       }
@@ -357,7 +577,11 @@ async function githubGet(io, token, url) {
       continue;
     }
   }
-  throw new Error("GET failed");
+  throw new Error("request failed");
+}
+
+async function githubGet(io, token, url) {
+  return githubRequest(io, token, url);
 }
 
 function nextUrl(link) {
@@ -400,21 +624,291 @@ function toComment(raw) {
   };
 }
 
-async function loadComments(io, token, owner, repo, number) {
-  const comments = [];
-  let url = `https://api.github.com/repos/${owner}/${repo}/issues/${number}/comments?per_page=100`;
+async function loadPages(io, token, startUrl) {
+  const pages = [];
+  let url = startUrl;
   while (url) {
     const response = await githubGet(io, token, url);
     const page = await response.json();
     if (!Array.isArray(page)) {
-      throw new Error("comment page is unreadable");
+      throw new Error("page is unreadable");
     }
+    pages.push(page);
+    url = nextUrl(response.headers.get("link"));
+  }
+  return pages;
+}
+
+async function loadComments(io, token, owner, repo, number) {
+  const comments = [];
+  const pages = await loadPages(
+    io,
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/issues/${number}/comments?per_page=100`,
+  );
+  for (const page of pages) {
     for (const raw of page) {
       comments.push(toComment(raw));
     }
-    url = nextUrl(response.headers.get("link"));
   }
   return comments;
+}
+
+function citedOffHead(comments, verifiers, headSha) {
+  const shas = new Set();
+  for (const comment of comments) {
+    if (!isVerifier(comment, verifiers)) {
+      continue;
+    }
+    if (!plainMarker(comment.body)) {
+      continue;
+    }
+    for (const line of verdictLines(comment.body)) {
+      if (line.sha !== headSha) {
+        shas.add(line.sha);
+      }
+    }
+  }
+  return shas;
+}
+
+function gitRun(io, args, input) {
+  if (typeof io.run !== "function") {
+    return { status: 1, stdout: "" };
+  }
+  const result = io.run(["git", ...args], input);
+  if (result == null || typeof result !== "object") {
+    return { status: 1, stdout: "" };
+  }
+  return {
+    status: typeof result.status === "number" ? result.status : 1,
+    stdout: typeof result.stdout === "string" ? result.stdout : "",
+  };
+}
+
+function hasCommit(io, sha) {
+  const result = gitRun(io, ["cat-file", "-t", sha]);
+  return result.status === 0 && result.stdout.trim() === "commit";
+}
+
+function hasOrigin(io) {
+  return gitRun(io, ["remote", "get-url", "origin"]).status === 0;
+}
+
+function fetchCommit(io, sha) {
+  if (hasCommit(io, sha)) {
+    return true;
+  }
+  if (!hasOrigin(io)) {
+    return false;
+  }
+  // no --depth: a cut history leaves merge-base without a common ancestor
+  // shortcut: a shallow clone whose base moved past the fork point still fails, the workflow uses fetch-depth 0
+  gitRun(io, ["fetch", "--no-tags", "origin", sha]);
+  return hasCommit(io, sha);
+}
+
+function isAncestor(io, maybeAncestor, headSha) {
+  if (!hasCommit(io, maybeAncestor) || !hasCommit(io, headSha)) {
+    return false;
+  }
+  return gitRun(io, ["merge-base", "--is-ancestor", maybeAncestor, headSha]).status === 0;
+}
+
+function diffPatchId(io, sha, baseSha) {
+  if (!fetchCommit(io, sha) || !fetchCommit(io, baseSha)) {
+    return { kind: "missing" };
+  }
+  const mergeBase = gitRun(io, ["merge-base", sha, baseSha]);
+  if (mergeBase.status !== 0) {
+    return { kind: "missing" };
+  }
+  const base = mergeBase.stdout.trim();
+  if (!HEX_SHA.test(base)) {
+    return { kind: "missing" };
+  }
+  const diff = gitRun(io, ["diff", "--no-ext-diff", "--binary", base, sha]);
+  if (diff.status !== 0) {
+    return { kind: "missing" };
+  }
+  if (diff.stdout === "") {
+    return { kind: "empty" };
+  }
+  const patch = gitRun(io, ["patch-id", "--stable"], diff.stdout);
+  const exact = gitRun(io, ["patch-id", "--verbatim"], diff.stdout);
+  if (patch.status !== 0 || exact.status !== 0) {
+    return { kind: "missing" };
+  }
+  const id = patch.stdout.trim().split(/\s+/)[0] || "";
+  const exactId = exact.stdout.trim().split(/\s+/)[0] || "";
+  if (!HEX_PATCH.test(id) || !HEX_PATCH.test(exactId)) {
+    return { kind: "empty" };
+  }
+  return { kind: "ok", patchId: id, exactId, mergeBase: base };
+}
+
+async function loadHistoryShas(io, token, owner, repo, number) {
+  const shas = new Set();
+  try {
+    const commitPages = await loadPages(
+      io,
+      token,
+      `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/commits?per_page=100`,
+    );
+    for (const page of commitPages) {
+      for (const raw of page) {
+        harvestShas(raw, shas);
+      }
+    }
+  } catch {
+    // fail closed: only SHAs gathered elsewhere count
+  }
+  try {
+    const timelinePages = await loadPages(
+      io,
+      token,
+      `https://api.github.com/repos/${owner}/${repo}/issues/${number}/timeline?per_page=100`,
+    );
+    for (const page of timelinePages) {
+      for (const raw of page) {
+        harvestTimelineShas(raw, shas);
+      }
+    }
+  } catch {
+    // fail closed
+  }
+  let commitsCursor = null;
+  let timelineCursor = null;
+  let commitsDone = false;
+  let timelineDone = false;
+  for (let page = 0; page < 20 && (!commitsDone || !timelineDone); page += 1) {
+    let payload;
+    try {
+      const response = await githubRequest(io, token, GRAPHQL_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          query: FORCE_PUSH_QUERY,
+          variables: {
+            owner,
+            name: repo,
+            number,
+            commitsCursor,
+            timelineCursor,
+          },
+        }),
+      });
+      payload = await response.json();
+    } catch {
+      break;
+    }
+    const pull =
+      payload && payload.data && payload.data.repository
+        ? payload.data.repository.pullRequest
+        : null;
+    if (pull == null) {
+      break;
+    }
+    if (!commitsDone) {
+      const commits = pull.commits;
+      if (commits && Array.isArray(commits.nodes)) {
+        for (const node of commits.nodes) {
+          harvestShas(node, shas);
+        }
+      }
+      const info = commits && commits.pageInfo;
+      if (info && info.hasNextPage === true && nonEmpty(info.endCursor)) {
+        commitsCursor = info.endCursor;
+      } else {
+        commitsDone = true;
+      }
+    }
+    if (!timelineDone) {
+      const items = pull.timelineItems;
+      if (items && Array.isArray(items.nodes)) {
+        for (const node of items.nodes) {
+          harvestShas(node, shas);
+        }
+      }
+      const info = items && items.pageInfo;
+      if (info && info.hasNextPage === true && nonEmpty(info.endCursor)) {
+        timelineCursor = info.endCursor;
+      } else {
+        timelineDone = true;
+      }
+    }
+  }
+  return shas;
+}
+
+// tree git builds by replaying the cited diff (shaBase..sha) onto headBase; null on conflict or error
+// shortcut: needs git 2.40+ (merge-tree --write-tree), an older git yields null and the verdict is refused
+function replayTree(io, sha, shaBase, headBase) {
+  const result = gitRun(io, [
+    "merge-tree",
+    "--write-tree",
+    `--merge-base=${shaBase}`,
+    headBase,
+    sha,
+  ]);
+  if (result.status !== 0) {
+    return null;
+  }
+  const tree = result.stdout.split("\n")[0].trim();
+  return HEX_PATCH.test(tree) ? tree : null;
+}
+
+function treeOf(io, sha) {
+  const result = gitRun(io, ["rev-parse", "--verify", `${sha}^{tree}`]);
+  const tree = result.stdout.trim();
+  return result.status === 0 && HEX_PATCH.test(tree) ? tree : null;
+}
+
+function patchIdentity(io, shas, headSha, baseSha) {
+  const patchIds = Object.create(null);
+  const exactIds = Object.create(null);
+  const replayIds = Object.create(null);
+  const head = diffPatchId(io, headSha, baseSha);
+  let headPatchId = null;
+  let headExactId = null;
+  let headReplayId = null;
+  if (head.kind === "empty") {
+    headPatchId = "";
+    headExactId = "";
+    headReplayId = "";
+  } else if (head.kind === "ok") {
+    headPatchId = head.patchId;
+    headExactId = head.exactId;
+    headReplayId = treeOf(io, headSha);
+  }
+  for (const sha of shas) {
+    if (sha === headSha) {
+      continue;
+    }
+    const result = diffPatchId(io, sha, baseSha);
+    if (result.kind === "empty") {
+      patchIds[sha] = "";
+      exactIds[sha] = "";
+      replayIds[sha] = "";
+    } else if (result.kind === "ok") {
+      patchIds[sha] = result.patchId;
+      exactIds[sha] = result.exactId;
+      if (head.kind === "ok") {
+        const tree = replayTree(io, sha, result.mergeBase, head.mergeBase);
+        if (tree != null) {
+          replayIds[sha] = tree;
+        }
+      }
+    }
+  }
+  return {
+    headPatchId,
+    patchIds,
+    headExactId,
+    exactIds,
+    headReplayId,
+    replayIds,
+  };
 }
 
 async function postStatus(io, token, owner, repo, sha, state, description) {
@@ -453,6 +947,14 @@ function repositoryParts(repository) {
   return { owner: parts[0], repo: parts[1] };
 }
 
+function readBaseSha(pull) {
+  const sha = pull && pull.base ? pull.base.sha : undefined;
+  if (typeof sha === "string" && HEX_SHA.test(sha)) {
+    return sha.toLowerCase();
+  }
+  return null;
+}
+
 async function resolveHead(io, token, owner, repo, eventName, payload) {
   if (eventName === "issue_comment") {
     const issue = payload.issue;
@@ -481,9 +983,10 @@ async function resolveHead(io, token, owner, repo, eventName, payload) {
       number: issue.number,
       sha,
       authorLogin: readLogin(pull && pull.user),
+      baseSha: readBaseSha(pull),
     };
   }
-  if (eventName === "pull_request") {
+  if (eventName === "pull_request" || eventName === "pull_request_target") {
     const pullRequest = payload.pull_request;
     const sha =
       pullRequest && pullRequest.head ? pullRequest.head.sha : undefined;
@@ -493,6 +996,7 @@ async function resolveHead(io, token, owner, repo, eventName, payload) {
       number,
       sha,
       authorLogin: readLogin(pullRequest && pullRequest.user),
+      baseSha: readBaseSha(pullRequest),
     };
   }
   return { action: "exit", code: 1 };
@@ -561,11 +1065,58 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     );
   }
 
+  const verifiers = usableVerifiers(io.verifiers);
+  const offHead = citedOffHead(comments, verifiers, headSha);
+  const onPull = new Set([headSha]);
+  let headPatchId;
+  let headExactId;
+  let headReplayId;
+  let patchIds = Object.create(null);
+  let exactIds = Object.create(null);
+  let replayIds = Object.create(null);
+  if (offHead.size > 0 && head.baseSha != null) {
+    const history = await loadHistoryShas(
+      io,
+      token,
+      names.owner,
+      names.repo,
+      head.number,
+    );
+    fetchCommit(io, headSha);
+    fetchCommit(io, head.baseSha);
+    for (const sha of history) {
+      if (sha === headSha) {
+        continue;
+      }
+      if (!fetchCommit(io, sha)) {
+        continue;
+      }
+      if (isAncestor(io, sha, head.baseSha)) {
+        continue;
+      }
+      onPull.add(sha);
+    }
+    const identity = patchIdentity(io, onPull, headSha, head.baseSha);
+    headPatchId = identity.headPatchId;
+    patchIds = identity.patchIds;
+    headExactId = identity.headExactId;
+    exactIds = identity.exactIds;
+    headReplayId = identity.headReplayId;
+    replayIds = identity.replayIds;
+  }
+
   const decision = decide({
     headSha,
     comments,
     authorLogin: head.authorLogin,
     verifiers: io.verifiers,
+    onPull,
+    headPatchId,
+    patchIds,
+    headExactId,
+    exactIds,
+    headReplayId,
+    replayIds,
   });
   const state = decision.kind === "pass" ? "success" : "failure";
   return postStatus(
@@ -586,6 +1137,18 @@ const defaultIo = {
   },
   fetch(url, init) {
     return globalThis.fetch(url, init);
+  },
+  run(argv, input) {
+    const result = spawnSync(argv[0], argv.slice(1), {
+      encoding: "utf8",
+      input,
+      maxBuffer: 32 * 1024 * 1024,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    });
+    return {
+      status: result.status == null ? 1 : result.status,
+      stdout: result.stdout || "",
+    };
   },
   stderr(line) {
     console.error(line);
