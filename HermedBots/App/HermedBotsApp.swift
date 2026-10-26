@@ -511,5 +511,6 @@ struct HermedBotsApp: App {
         Settings {
             SettingsWindow(model: model)
         }
+        .defaultSize(width: SettingsLayout.defaultWidth, height: SettingsLayout.defaultHeight)
     }
 }

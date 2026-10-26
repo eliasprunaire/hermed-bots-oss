@@ -91,6 +91,5 @@ struct ConnectionView: View {
             }
             .padding()
         }
-        .frame(width: 480)
     }
 }
