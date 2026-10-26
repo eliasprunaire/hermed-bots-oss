@@ -16,6 +16,16 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ characters not shown out of %@: refuse if you cannot judge the command." } }
       }
     },
+    "absent" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "absent" } }
+      }
+    },
+    "absente" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "absent" } }
+      }
+    },
     "absente du Trousseau" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "missing from the Keychain" } }
@@ -24,6 +34,11 @@
     "Afficher la nouvelle liste" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Show the new list" } }
+      }
+    },
+    "agent SSH" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "SSH agent" } }
       }
     },
     "Ajouté : %@" : {
@@ -56,9 +71,29 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "No parameters." } }
       }
     },
-    "Aucune clé SSH dans le Trousseau. Ajoute-la, puis réessaie." : {
+    "Certificat" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "No SSH key in the Keychain. Add it, then retry." } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Certificate" } }
+      }
+    },
+    "certificat" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "certificate" } }
+      }
+    },
+    "Cet alias SSH est inconnu." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This SSH alias is unknown." } }
+      }
+    },
+    "Ta config SSH contient un bloc Match. Hermed Bots ne l'interprète pas et refuse l'alias : remplace le bloc Match par des blocs Host." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your SSH config contains a Match block. Hermed Bots does not interpret it and refuses the alias: replace the Match block with Host blocks." } }
+      }
+    },
+    "Hermed Bots ne lit pas cette config SSH avec certitude : erreur de syntaxe, Include sans fichier ou journal trop long. L'alias est refusé." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hermed Bots cannot read this SSH config with certainty: syntax error, Include without a file or log too long. The alias is refused." } }
       }
     },
     "Cet hôte est refusé en mode test." : {
@@ -66,9 +101,19 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "This host is refused in test mode." } }
       }
     },
+    "Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This alias goes through a relay (ProxyJump or ProxyCommand). Hermed Bots refuses it: use an alias that connects directly to the host." } }
+      }
+    },
     "Changement du modèle…" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Changing the model…" } }
+      }
+    },
+    "Clé publique" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Public key" } }
       }
     },
     "Clé SSH" : {
@@ -104,6 +149,11 @@
     "fermé" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "closed" } }
+      }
+    },
+    "fichier" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "file" } }
       }
     },
     "Hermes a refusé la réponse : %@" : {
@@ -156,6 +206,16 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "unknown" } }
       }
     },
+    "L'agent SSH est verrouillé ou vide." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The SSH agent is locked or empty." } }
+      }
+    },
+    "L'alias SSH n'est pas valide." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The SSH alias is not valid." } }
+      }
+    },
     "L'hôte n'est pas valide." : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The host is not valid." } }
@@ -169,11 +229,6 @@
     "La clé de l'hôte a changé. Le tunnel reste fermé." : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The host key changed. The tunnel stays closed." } }
-      }
-    },
-    "La clé SSH du Trousseau est illisible." : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "The SSH key in the Keychain is unreadable." } }
       }
     },
     "La commande « hermes profile list » a échoué (code %@) : %@" : {
@@ -216,6 +271,11 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The bot is replying…" } }
       }
     },
+    "Le certificat SSH a expiré." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The SSH certificate has expired." } }
+      }
+    },
     "Le flux s'est arrêté avant la fin du tour." : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The stream stopped before the end of the turn." } }
@@ -226,9 +286,9 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The port is not valid." } }
       }
     },
-    "Le serveur refuse la clé SSH. Vérifie la clé du Trousseau, puis réessaie." : {
+    "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie." : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "The server rejects the SSH key. Check the key in the Keychain, then retry." } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The server refuses the SSH identity. Check the alias config, then try again." } }
       }
     },
     "Le tunnel est tombé. Réouverture en cours." : {
@@ -289,6 +349,16 @@
     "pas encore lue" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "not read yet" } }
+      }
+    },
+    "présent" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "present" } }
+      }
+    },
+    "présente" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "present" } }
       }
     },
     "présente dans le Trousseau" : {

@@ -29,7 +29,7 @@ echo "hv-guard.sh target host.example : code $g (0 attendu)"
 [ "$g" = 0 ] || { echo "RESULT FAIL : hv-guard.sh target host.example code $g, 0 attendu, aucune lane lancée"; exit 1; }
 
 lane "lane 1 trunk contre head" "$HERE/lane-regression.sh" "$EVD/lane1"
-lane "lanes 2 et 8 (saisie), tests UI" "$HERE/run-ui.sh" "$EVD/lane2-8" testTheConnectionViewShowsTheHostAndTheKeyStateButNeverTheKey testAHostThatNamesPersoHermesIsRefusedBeforeAnyConnection
+lane "lanes 2 et 8 (saisie), tests UI" "$HERE/run-ui.sh" "$EVD/lane2-8" testTheConnectionViewShowsTheAliasAndDerivedFieldsButNeverASecret testAHostThatNamesPersoHermesIsRefusedBeforeAnyConnection
 lane "lane 3 ssh tué" "$HERE/lane-reopen.sh" "$EVD/lane3" kill
 lane "lane 4 quitter" "$HERE/lane-processes.sh" "$EVD/lane4" testQuittingWithCommandQClosesTheAppAndItsTunnel testTerminateClosesTheAppAndItsTunnel
 lane "lane 5 clé refusée" "$HERE/lane-wrongkey.sh" "$EVD/lane5"

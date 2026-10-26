@@ -14,6 +14,7 @@
 		7BE33CD3E32FF1AAFD5E4769 /* HermesAdapter in Frameworks */ = {isa = PBXBuildFile; productRef = DA4C1C94CD32735911D411BD /* HermesAdapter */; };
 		D38EDC3C712F8F95FBC572B9 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = D852961B587E19128FA0D037 /* AppEnvironment.swift */; };
 		A7C1D2E3F4B5069788AABB02 /* SSHTunnel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C1D2E3F4B5069788AABB01 /* SSHTunnel.swift */; };
+		A7C1D2E3F4B5069788AABB12 /* SSHConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C1D2E3F4B5069788AABB11 /* SSHConfig.swift */; };
 		B0B0D8A1C2E3F40596A7B801 /* BotList.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0B0D8A1C2E3F40596A7B802 /* BotList.swift */; };
 		B0B0D8A1C2E3F40596A7B811 /* BotsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0B0D8A1C2E3F40596A7B812 /* BotsModel.swift */; };
 		C0C0D9B1C2E3F40596A7C801 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C802 /* Conversation.swift */; };
@@ -52,6 +53,7 @@
 		B937F7C524E0D41815DE05AF /* HermedBots.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HermedBots.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D852961B587E19128FA0D037 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		A7C1D2E3F4B5069788AABB01 /* SSHTunnel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHTunnel.swift; sourceTree = "<group>"; };
+		A7C1D2E3F4B5069788AABB11 /* SSHConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConfig.swift; sourceTree = "<group>"; };
 		B0B0D8A1C2E3F40596A7B802 /* BotList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotList.swift; sourceTree = "<group>"; };
 		B0B0D8A1C2E3F40596A7B812 /* BotsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotsModel.swift; sourceTree = "<group>"; };
 		C0C0D9B1C2E3F40596A7C802 /* Conversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conversation.swift; sourceTree = "<group>"; };
@@ -202,6 +204,7 @@
 			isa = PBXGroup;
 			children = (
 				A7C1D2E3F4B5069788AABB01 /* SSHTunnel.swift */,
+				A7C1D2E3F4B5069788AABB11 /* SSHConfig.swift */,
 				F14400000000000000000002 /* ProfileLock.swift */,
 			);
 			path = Transport;
@@ -404,6 +407,7 @@
 				D38EDC3C712F8F95FBC572B9 /* AppEnvironment.swift in Sources */,
 				3044136BDC4080ACEF153610 /* SecretStore.swift in Sources */,
 				A7C1D2E3F4B5069788AABB02 /* SSHTunnel.swift in Sources */,
+				A7C1D2E3F4B5069788AABB12 /* SSHConfig.swift in Sources */,
 				F14400000000000000000001 /* ProfileLock.swift in Sources */,
 				B0B0D8A1C2E3F40596A7B801 /* BotList.swift in Sources */,
 				B0B0D8A1C2E3F40596A7B811 /* BotsModel.swift in Sources */,

@@ -6,30 +6,73 @@ HVW=${HV_WORK:-$HOME/hermed-bots-work}
 SK=$REPO/.cursor/skills/verify-hermed-bots/scripts
 ENDPOINT=$HERE/hv-ssh-endpoint.sh
 APPD=${APPD:-$HVW/dd/Build/Products/Debug/HermedBots.app/Contents/MacOS/HermedBots}
-# dossier de la clé de test : chemin fixe, créé puis supprimé dans la même fonction, hors de tout dossier de preuves
+# dossier des clés de test : chemin fixe, hors de tout dossier de preuves, supprimé par drop_alias
 KEYDIR=$HVW/hd07-key
 SSH_HOST=host.example
+# alias de la config OpenSSH écrits par new_alias : le premier est accepté par le conteneur, le second jamais (sa clé n'est pas installée)
+SSH_ALIAS=hv-hd07
+SSH_ALIAS_REFUSED=hv-hd07-refused
+SSH_CONFIG=$HOME/.ssh/config
 export PATH="$PATH:/usr/sbin"
 
 say() { printf '[%s Paris] %s\n' "$(TZ=Europe/Paris date +%H:%M:%S)" "$*"; }
 # affiche la commande puis son résultat ; ne propage pas le code (il est imprimé)
 cmd() { printf '$ %s\n' "$*"; "$@"; local rc=$?; printf 'rc=%s\n' "$rc"; return 0; }
 
-# new_keys : exporte HV_TEST_SSH_KEY (clé acceptée par le conteneur) et HV_TEST_SSH_WRONG_KEY (clé jamais installée), sans les montrer
-# les deux clés privées ne vivent sur le disque que le temps de cette fonction ; la clé publique de la bonne est installée pour hvssh
-new_keys() {
+# alias_block <alias> <fichier-de-clé> : un bloc Host vers le conteneur, identité de fichier seule, sans agent
+alias_block() {
+  cat <<EOF
+Host $1
+  HostName $SSH_HOST
+  User hvssh
+  IdentityFile $2
+  IdentitiesOnly yes
+  IdentityAgent none
+  StrictHostKeyChecking accept-new
+  UserKnownHostsFile $KEYDIR/known_hosts
+EOF
+}
+
+# new_alias : l'app lit l'identité dans la config OpenSSH du compte qui la lance (ssh -G, ni -F ni -i) : la lane crée un alias et une clé éphémères
+# deux clés ed25519 dans $KEYDIR (700), dont la publique de la bonne est installée pour hvssh ; $KEYDIR/config nomme $SSH_ALIAS et $SSH_ALIAS_REFUSED
+# ~/.ssh/config reçoit en tête `# hv-hd07 begin`, `Include $KEYDIR/config`, `# hv-hd07 end` ; drop_alias retire ce bloc et les clés
+# l'appelant qui crée l'alias le retire : un script lancé par lui voit HV_ALIAS_READY et ne crée ni ne retire rien
+new_alias() {
+  [ -z "${HV_ALIAS_READY:-}" ] || return 0
+  if grep -qs '^# hv-hd07 begin$' "$SSH_CONFIG"; then echo "bloc hv-hd07 déjà dans $SSH_CONFIG : une lane précédente s'est arrêtée sans drop_alias" >&2; return 1; fi
+  if [ -L "$SSH_CONFIG" ] && [ ! -e "$SSH_CONFIG" ]; then echo "$SSH_CONFIG est un lien symbolique sans cible : bloc hv-hd07 non écrit" >&2; return 1; fi
   mkdir -m 700 "$KEYDIR" || return 1
-  /usr/bin/ssh-keygen -q -t ed25519 -N '' -C hv-hd07 -f "$KEYDIR/good" && /usr/bin/ssh-keygen -q -t ed25519 -N '' -C hv-hd07-wrong -f "$KEYDIR/bad" || return 1
-  "$ENDPOINT" authorize < "$KEYDIR/good.pub"
-  HV_TEST_SSH_KEY=$(cat "$KEYDIR/good"); HV_TEST_SSH_WRONG_KEY=$(cat "$KEYDIR/bad")
-  export HV_TEST_SSH_KEY HV_TEST_SSH_WRONG_KEY
-  trash "$KEYDIR"
+  /usr/bin/ssh-keygen -q -t ed25519 -N '' -C hv-hd07 -f "$KEYDIR/good" && /usr/bin/ssh-keygen -q -t ed25519 -N '' -C hv-hd07-wrong -f "$KEYDIR/bad" \
+    && { alias_block "$SSH_ALIAS" "$KEYDIR/good"; alias_block "$SSH_ALIAS_REFUSED" "$KEYDIR/bad"; } > "$KEYDIR/config" \
+    && "$ENDPOINT" authorize < "$KEYDIR/good.pub" \
+    && { [ -d "$(dirname "$SSH_CONFIG")" ] || mkdir -m 700 "$(dirname "$SSH_CONFIG")"; } || { trash "$KEYDIR"; return 1; }
+  [ -e "$SSH_CONFIG" ] && : > "$KEYDIR/had-config"
+  # une config illisible arrête la fonction avant toute écriture : sinon le bloc remplacerait le contenu
+  { printf '# hv-hd07 begin\nInclude %s\n# hv-hd07 end\n' "$KEYDIR/config"; if [ -e "$SSH_CONFIG" ]; then cat "$SSH_CONFIG"; fi; } > "$KEYDIR/config.new" \
+    || { echo "$SSH_CONFIG est illisible : bloc hv-hd07 non écrit, config inchangée" >&2; trash "$KEYDIR"; return 1; }
+  cat "$KEYDIR/config.new" > "$SSH_CONFIG" || { trash "$KEYDIR"; return 1; }
+  export HV_ALIAS_READY=1 HV_ALIAS_OWNER=$$
+}
+
+# drop_alias : retire le bloc de ~/.ssh/config, puis les clés ; sans effet pour un script qui n'a pas créé l'alias
+# la config est réécrite à travers un éventuel lien symbolique (sed -i le remplacerait par un fichier ordinaire)
+# si le bloc ne part pas, la fonction échoue avec un message et garde les clés, que le bloc Include nomme encore
+drop_alias() {
+  [ "${HV_ALIAS_OWNER:-}" = "$$" ] || return 0
+  if [ -e "$SSH_CONFIG" ]; then
+    sed '/^# hv-hd07 begin$/,/^# hv-hd07 end$/d' "$SSH_CONFIG" > "$KEYDIR/config.rm" && cat "$KEYDIR/config.rm" > "$SSH_CONFIG" \
+      || { echo "drop_alias : le bloc hv-hd07 reste dans $SSH_CONFIG ; retire-le à la main, les clés restent dans $KEYDIR" >&2; return 1; }
+    [ -e "$KEYDIR/had-config" ] || [ -s "$SSH_CONFIG" ] || trash "$SSH_CONFIG" \
+      || { echo "drop_alias : $SSH_CONFIG vide n'a pas été mis à la corbeille" >&2; return 1; }
+  fi
+  trash "$KEYDIR" || { echo "drop_alias : $KEYDIR n'a pas été mis à la corbeille" >&2; return 1; }
+  unset HV_ALIAS_READY HV_ALIAS_OWNER
 }
 
 # start_app [LOG] : lance l'app en mode test avec le tunnel ; APP_PID reçoit son pid
-# HV_SSH_HOST / HV_SSH_USER viennent de l'appelant, avec des valeurs par défaut vers le conteneur
+# HV_SSH_HOST reçoit l'alias : HV_SSH_ALIAS de l'appelant, par défaut $SSH_ALIAS ; l'app ignore l'utilisateur et la clé de l'environnement
 start_app() {
-  HV_TEST_MODE=1 HV_SSH_HOST=${HV_SSH_HOST:-$SSH_HOST} HV_SSH_USER=${HV_SSH_USER:-hvssh} HV_TEST_SSH_KEY=${HV_TEST_SSH_KEY:-} \
+  HV_TEST_MODE=1 HV_SSH_HOST=${HV_SSH_ALIAS:-$SSH_ALIAS} \
     "$APPD" -AppleLanguages "(${LANG_APP:-fr})" > "${1:-/dev/null}" 2>&1 &
   APP_PID=$!
 }

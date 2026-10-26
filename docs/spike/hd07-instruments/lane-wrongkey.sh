@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
-# lane-wrongkey.sh <dossier-de-preuves> : lane 5, une clé refusée donne un message clair et une seule tentative
-# Compte les refus de clé publique dans le journal sshd du conteneur avant et après le test UI de la clé refusée
+# lane-wrongkey.sh <dossier-de-preuves> : lane 5, une identité refusée donne un message clair et une seule tentative
+# L'app lit l'identité dans la config OpenSSH : l'alias $SSH_ALIAS_REFUSED (créé par new_alias) pointe vers le conteneur avec une clé jamais installée
+# Le test UI ne tourne que si HV_SSH_REFUSED=1 : cette lane le pose pour le seul test de l'identité refusée
+# Compte les refus de clé publique dans le journal sshd du conteneur avant et après le test UI de l'identité refusée
 # Une boucle de relance ferait monter ce compte ; le test attend 6 s après l'apparition du message (le premier délai de relance est 1 s)
 set -uo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 EVD=${1:?usage: lane-wrongkey.sh <dossier-de-preuves>}
+export HV_SSH_ALIAS=$SSH_ALIAS_REFUSED
+export HV_SSH_REFUSED=1
 mkdir -p "$EVD"
 failed0=$(sshd_failures); accepted0=$(sshd_accepts)
 say "journal sshd avant : Failed publickey=$failed0, Accepted publickey=$accepted0"
-"$HERE/lane-processes.sh" "$EVD" testAWrongKeyShowsOneClearMessageAndStopsWithoutARetryLoop; rc=$?
+"$HERE/lane-processes.sh" "$EVD" testARefusedIdentityShowsOneClearMessageAndStopsWithoutARetryLoop; rc=$?
 failed1=$(sshd_failures); accepted1=$(sshd_accepts)
 say "journal sshd après : Failed publickey=$failed1, Accepted publickey=$accepted1"
 say "tentatives refusées pendant le test : $((failed1 - failed0)), acceptées : $((accepted1 - accepted0))"

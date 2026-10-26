@@ -72,7 +72,7 @@ Forme visée : celle de Grok Bot et d'OpenBot (agents nommés, conversation, sé
 - L'app ouvre un **tunnel SSH** vers perso-hermes. De l'autre côté, le **serveur API Hermes** écoute seulement sur `127.0.0.1:8642`. Rien sur le réseau local, rien depuis Internet.
 - Le serveur API n'est pas le TUI, mais c'est le même agent et le même profil.
 - Le serveur API est aujourd'hui désactivé (`API_SERVER_ENABLED=false`). D'après la doc, l'activer demande `API_SERVER_ENABLED=true` et une clé `API_SERVER_KEY`, obligatoire même en local. Activation : voir « Points ouverts traités », A.
-- Secrets (clé SSH, clé(s) `API_SERVER_KEY`) dans le **Trousseau macOS**, jamais en clair sur le disque, jamais dans le chat ni dans un fichier du dépôt.
+- Secrets (clé(s) `API_SERVER_KEY`) dans le **Trousseau macOS**, jamais en clair sur le disque, jamais dans le chat ni dans un fichier du dépôt. L'identité SSH vient de la config OpenSSH de l'utilisateur (alias, agent ou certificat).
 - Veille : le tour continue sur la VM. Au réveil, l'app rouvre le tunnel et relit le tour depuis l'identifiant conservé, sans renvoyer un message déjà reçu. Point d'entrée `unknown` (S2).
 
 ### Transports écartés
@@ -129,7 +129,7 @@ Forme visée : celle de Grok Bot et d'OpenBot (agents nommés, conversation, sé
 | S9 | Détection de Desktop dans les deux ordres ; le serveur API compte-t-il comme processus tenant le profil | Mécanisme |
 | S10 | Tokens par run : source du relevé, pour le garde-fou A2 | Source ou constat d'absence |
 | S11 | Calibrage des seuils de boucle sur l'instance de test | Valeurs proposées par Dev Lead, marquées non mesurées si pas de données |
-| S12 | Faisabilité du tunnel SSH depuis l'app (ssh système ou bibliothèque) avec la clé au Trousseau | Option retenue proposée |
+| S12 | Faisabilité du tunnel SSH depuis l'app (ssh système ou bibliothèque) | Option retenue proposée |
 
 - Si un point qui conditionne une des six actions, la reprise après veille, la concurrence ou le garde-fou se révèle impossible, la v1 n'est pas livrable telle qu'écrite : l'utilisateur décide de la suite. Le spike ne propose pas de remplacement de lui-même.
 

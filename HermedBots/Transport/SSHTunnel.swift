@@ -10,11 +10,14 @@ import os
 /// Seul `unreachable` donne lieu à une réouverture : une clé refusée ou un hôte changé ne se règle pas en réessayant
 enum SSHFailure: Error, Equatable, Sendable {
     case forbiddenHost
+    case relayRefused
     case invalidHost
-    case invalidUser
     case invalidPort
-    case keyMissing
-    case keyUnreadable
+    case unknownAlias
+    case matchBlockRefused
+    case unreadableConfig
+    case agentLockedOrEmpty
+    case certificateExpired
     case wrongKey
     case hostKeyChanged
     case unreachable(String)
@@ -25,9 +28,19 @@ enum SSHFailure: Error, Equatable, Sendable {
 
     /// Lit la sortie d'erreur de ssh ; les textes sont ceux d'OpenSSH 10 (docs/spike/S12-tunnel.md)
     static func classify(stderr: String) -> SSHFailure {
-        if stderr.contains("Permission denied") { return .wrongKey }
-        if stderr.contains("REMOTE HOST IDENTIFICATION HAS CHANGED") || stderr.contains("Host key verification failed") { return .hostKeyChanged }
-        let last = stderr.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        let text = stderr
+        if text.localizedCaseInsensitiveContains("agent refused operation")
+            || text.contains("Could not open a connection to your authentication agent") {
+            return .agentLockedOrEmpty
+        }
+        if text.localizedCaseInsensitiveContains("certificate invalid")
+            || text.localizedCaseInsensitiveContains("certificate expired")
+            || text.localizedCaseInsensitiveContains("certificate has expired") {
+            return .certificateExpired
+        }
+        if text.contains("Permission denied") { return .wrongKey }
+        if text.contains("REMOTE HOST IDENTIFICATION HAS CHANGED") || text.contains("Host key verification failed") { return .hostKeyChanged }
+        let last = text.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
         return .unreachable(last)
     }
 }
@@ -36,12 +49,15 @@ extension SSHFailure {
     var message: String {
         switch self {
         case .forbiddenHost: String(localized: "Cet hôte est refusé en mode test.")
-        case .invalidHost: String(localized: "L'hôte n'est pas valide.")
-        case .invalidUser: String(localized: "L'utilisateur n'est pas valide.")
+        case .relayRefused: String(localized: "Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte.")
+        case .invalidHost: String(localized: "L'alias SSH n'est pas valide.")
         case .invalidPort: String(localized: "Le port n'est pas valide.")
-        case .keyMissing: String(localized: "Aucune clé SSH dans le Trousseau. Ajoute-la, puis réessaie.")
-        case .keyUnreadable: String(localized: "La clé SSH du Trousseau est illisible.")
-        case .wrongKey: String(localized: "Le serveur refuse la clé SSH. Vérifie la clé du Trousseau, puis réessaie.")
+        case .unknownAlias: String(localized: "Cet alias SSH est inconnu.")
+        case .matchBlockRefused: String(localized: "Ta config SSH contient un bloc Match. Hermed Bots ne l'interprète pas et refuse l'alias : remplace le bloc Match par des blocs Host.")
+        case .unreadableConfig: String(localized: "Hermed Bots ne lit pas cette config SSH avec certitude : erreur de syntaxe, Include sans fichier ou journal trop long. L'alias est refusé.")
+        case .agentLockedOrEmpty: String(localized: "L'agent SSH est verrouillé ou vide.")
+        case .certificateExpired: String(localized: "Le certificat SSH a expiré.")
+        case .wrongKey: String(localized: "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.")
         case .hostKeyChanged: String(localized: "La clé de l'hôte a changé. Le tunnel reste fermé.")
         case .unreachable(let reason): reason.isEmpty ? String(localized: "Hôte injoignable.") : String(localized: "Hôte injoignable : \(reason)")
         }
@@ -54,62 +70,99 @@ struct RemoteCommandFailure: Error, Equatable, Sendable {
     let detail: String
 }
 
+/// Les trois lancements de `/usr/bin/ssh` par l'app
+/// Un bloc `Match sessiontype none` ou `Match command …` ne vaut que pour l'un d'eux : chacun est résolu avec ses arguments
+enum SSHInvocation: CaseIterable, Sendable {
+    case tunnel
+    case profileList
+    case profileLocks
+}
+
 /// Là où le tunnel se connecte et ce qu'il redirige : un port local vers `127.0.0.1:remotePort` de l'hôte
+/// `alias` est le seul argument d'hôte passé à ssh ; `hostname` et `user` viennent de `ssh -G`
 struct SSHTunnelConfig: Equatable, Sendable {
-    let host: String
+    let alias: String
+    let hostname: String
     let user: String
     let sshPort: Int
     let remotePort: Int
 
-    /// `refusePersoHermes` est vrai en mode test : aucune connexion de test ne doit viser perso-hermes
-    /// Le produit lui-même s'y connecte, donc le refus ne vaut pas hors mode test
-    init(host: String, user: String, sshPort: Int = 22, remotePort: Int = 8642, refusePersoHermes: Bool) throws {
-        if refusePersoHermes, host.lowercased().contains("perso-hermes") { throw SSHFailure.forbiddenHost }
-        // pas de tiret en tête : l'hôte ne doit jamais se lire comme une option de ssh
-        guard (1...253).contains(host.count), host.first != "-",
-              host.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "._:-".contains($0)) }) else { throw SSHFailure.invalidHost }
-        guard (1...32).contains(user.count), user.first != "-",
-              user.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) }) else { throw SSHFailure.invalidUser }
+    /// `refusePersoHermes` est vrai en mode test : aucune connexion de test ne doit viser perso-hermes comme alias ou hôte résolu
+    init(alias: String, hostname: String, user: String, sshPort: Int = 22, remotePort: Int = 8642, refusePersoHermes: Bool) throws {
+        if refusePersoHermes {
+            let route = [alias, hostname]
+            if route.contains(where: { $0.lowercased().contains("perso-hermes") }) {
+                throw SSHFailure.forbiddenHost
+            }
+        }
+        guard Self.isAlias(alias) else { throw SSHFailure.invalidHost }
+        guard Self.isHostname(hostname) else { throw SSHFailure.invalidHost }
         guard (1...65535).contains(sshPort), (1...65535).contains(remotePort) else { throw SSHFailure.invalidPort }
-        self.host = host
+        self.alias = alias
+        self.hostname = hostname
         self.user = user
         self.sshPort = sshPort
         self.remotePort = remotePort
     }
 
-    /// Les arguments de `ssh` : chemins et ports seulement, jamais la clé, qui reste dans l'agent privé
-    func arguments(localPort: Int, agentSocket: String, publicKeyPath: String, knownHostsPath: String) -> [String] {
-        common(["-N"], agentSocket: agentSocket, publicKeyPath: publicKeyPath, knownHostsPath: knownHostsPath)
-            + ["-L", "127.0.0.1:\(localPort):127.0.0.1:\(remotePort)", host]
+    /// Les arguments de `ssh` : l'alias, jamais `-F`, `-i`, `-l` ni `-p`
+    func arguments(localPort: Int) -> [String] {
+        Self.arguments(.tunnel, alias: alias, localPort: localPort, remotePort: remotePort)
     }
 
     /// Les arguments de la lecture de la liste des profils (décision S6)
-    /// La commande est écrite ici et non passée en paramètre : aucun appelant ne peut en lancer une autre
-    func profileListArguments(agentSocket: String, publicKeyPath: String, knownHostsPath: String) -> [String] {
-        common([], agentSocket: agentSocket, publicKeyPath: publicKeyPath, knownHostsPath: knownHostsPath) + [host, "hermes", "profile", "list"]
+    func profileListArguments() -> [String] {
+        Self.arguments(.profileList, alias: alias)
     }
 
-    private func common(_ mode: [String], agentSocket: String, publicKeyPath: String, knownHostsPath: String) -> [String] {
-        // ssh découpe la valeur d'un -o sur les espaces : un chemin à espaces se met entre guillemets
-        func quoted(_ path: String) -> String { path.contains(where: \.isWhitespace) ? "\"\(path)\"" : path }
-        var args = ["-F", "/dev/null"] + mode + ["-T"]
+    /// Les arguments de la détection de Hermes Desktop
+    func profileLocksArguments() -> [String] {
+        Self.arguments(.profileLocks, alias: alias)
+    }
+
+    /// Une seule définition par lancement : `ssh -G` reçoit les mêmes arguments pour évaluer les mêmes blocs `Match`
+    /// Les ports ne servent qu'au tunnel ; `ssh -G` ne lie rien
+    static func arguments(_ invocation: SSHInvocation, alias: String, localPort: Int = 1, remotePort: Int = 8642) -> [String] {
+        switch invocation {
+        case .tunnel: common(["-N"]) + ["-L", "127.0.0.1:\(localPort):127.0.0.1:\(remotePort)", alias]
+        case .profileList: common([]) + [alias, "hermes", "profile", "list"]
+        case .profileLocks: common([]) + [alias, ProfileLock.command]
+        }
+    }
+
+    private static func common(_ mode: [String]) -> [String] {
+        var args = mode + ["-T"]
         for option in [
-            "BatchMode=yes", "ExitOnForwardFailure=yes", "ForwardAgent=no", "PasswordAuthentication=no",
-            "KbdInteractiveAuthentication=no", "PreferredAuthentications=publickey", "IdentitiesOnly=yes", "AddKeysToAgent=no",
-            "IdentityAgent=\(quoted(agentSocket))", "LogLevel=ERROR", "ConnectTimeout=5", "ServerAliveInterval=5", "ServerAliveCountMax=2",
-            "StrictHostKeyChecking=accept-new", "UserKnownHostsFile=\(quoted(knownHostsPath))", "ControlMaster=no", "ControlPath=none",
+            "BatchMode=yes", "ExitOnForwardFailure=yes", "ForwardAgent=no",
+            "ControlMaster=no", "ControlPath=none",
+            "ForkAfterAuthentication=no", "LogLevel=ERROR",
+            "ConnectTimeout=5", "ServerAliveInterval=5", "ServerAliveCountMax=2",
         ] {
             args += ["-o", option]
         }
-        args += ["-i", publicKeyPath, "-p", "\(sshPort)", "-l", user]
         return args
+    }
+
+    static func isAlias(_ value: String) -> Bool {
+        (1...253).contains(value.count) && value.first != "-"
+            && value.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) }
+    }
+
+    private static func isHostname(_ value: String) -> Bool {
+        (1...253).contains(value.count) && value.first != "-"
+            && value.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "._:-".contains($0)) }
     }
 }
 
-/// L'environnement des processus ssh est construit à la main : celui de l'app peut contenir la clé de test
+/// L'environnement des processus ssh est construit à la main : l'app peut porter des variables de test
+/// `SSH_AUTH_SOCK` vient de la session ; `IdentityAgent` de la config ssh a priorité, ssh l'applique lui-même
 enum SSHChildEnvironment {
-    static func make(agentSocket: String) -> [String: String] {
-        ["PATH": "/usr/bin:/bin", "LC_ALL": "C", "SSH_AUTH_SOCK": agentSocket]
+    static func make(_ session: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        var environment = ["PATH": "/usr/bin:/bin", "LC_ALL": "C"]
+        for key in ["HOME", "USER", "LOGNAME", "SSH_AUTH_SOCK"] {
+            if let value = session[key], !value.isEmpty { environment[key] = value }
+        }
+        return environment
     }
 }
 
@@ -128,7 +181,7 @@ final class Child: Sendable {
     private let exited = OSAllocatedUnfairLock(initialState: false)
     private let heldStdin: OSAllocatedUnfairLock<Int32?>
 
-    fileprivate init(pid: pid_t, group: pid_t, ownsGroup: Bool, stdoutFD: Int32?, stderrFD: Int32, heldStdin: Int32?) {
+    fileprivate init(pid: pid_t, group: pid_t, ownsGroup: Bool, stdoutFD: Int32?, stderrFD: Int32, heldStdin: Int32?, stderrLimit: Int = Spawn.maxStderr) {
         self.pid = pid
         self.group = group
         self.ownsGroup = ownsGroup
@@ -145,7 +198,7 @@ final class Child: Sendable {
         }
         var readers = [Task<Void, Never>]()
         let errBuffer = stderrBuffer
-        readers.append(Task { await Spawn.blocking { Spawn.drain(stderrFD, into: errBuffer, limit: Spawn.maxStderr) } })
+        readers.append(Task { await Spawn.blocking { Spawn.drain(stderrFD, into: errBuffer, limit: stderrLimit) } })
         if let stdoutFD {
             let outBuffer = stdoutBuffer
             readers.append(Task { await Spawn.blocking { Spawn.drain(stdoutFD, into: outBuffer, limit: .max) } })
@@ -194,7 +247,7 @@ enum Spawn {
     /// Lance `path` dans un groupe de processus neuf, ou dans celui de `leader`
     /// Le processus n'hérite ni de l'environnement de l'app (il reçoit `environment` seulement) ni de ses descripteurs
     /// `holdingStdinOpen` : l'entrée standard du processus est un tube dont l'app garde l'écriture ouverte (voir `startWatchdog`)
-    static func start(_ path: String, _ arguments: [String], environment: [String: String], joining leader: pid_t? = nil, stdin: Data? = nil, captureStdout: Bool = false, holdingStdinOpen: Bool = false) throws -> Child {
+    static func start(_ path: String, _ arguments: [String], environment: [String: String], joining leader: pid_t? = nil, stdin: Data? = nil, captureStdout: Bool = false, holdingStdinOpen: Bool = false, stderrLimit: Int = maxStderr) throws -> Child {
         var fileActions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&fileActions)
         defer { posix_spawn_file_actions_destroy(&fileActions) }
@@ -255,7 +308,7 @@ enum Spawn {
             if !holdingStdinOpen { close(inPipe[1]) }
         }
         let held = holdingStdinOpen ? inPipe[1] : nil
-        return Child(pid: pid, group: leader ?? pid, ownsGroup: leader == nil, stdoutFD: captureStdout ? outPipe[0] : nil, stderrFD: errPipe[0], heldStdin: held)
+        return Child(pid: pid, group: leader ?? pid, ownsGroup: leader == nil, stdoutFD: captureStdout ? outPipe[0] : nil, stderrFD: errPipe[0], heldStdin: held, stderrLimit: stderrLimit)
     }
 
     /// Le chef du groupe d'un tunnel : un sh qui lit son entrée standard, puis supprime le dossier privé et tue le groupe entier quand elle se ferme
@@ -266,19 +319,32 @@ enum Spawn {
     }
 
     /// Lance, attend la fin et rend les sorties ; au bout de `timeout` le processus est tué et l'appel échoue
-    static func run(_ path: String, _ arguments: [String], environment: [String: String], joining leader: pid_t? = nil, stdin: Data? = nil, timeout: Duration) async throws -> Output {
-        let child = try start(path, arguments, environment: environment, joining: leader, stdin: stdin, captureStdout: true)
+    /// `killingGroup` : au délai, tue le groupe de `leader` entier, pas seulement le processus lancé
+    static func run(_ path: String, _ arguments: [String], environment: [String: String], joining leader: pid_t? = nil, killingGroup: Bool = false, stdin: Data? = nil, timeout: Duration, stderrLimit: Int = maxStderr) async throws -> Output {
+        let child = try start(path, arguments, environment: environment, joining: leader, stdin: stdin, captureStdout: true, stderrLimit: stderrLimit)
         let fired = OSAllocatedUnfairLock(initialState: false)
         let timer = Task {
             try await Task.sleep(for: timeout)
             fired.withLock { $0 = true }
-            // le groupe entier si le processus en est le chef, sinon lui seul
-            if child.ownsGroup { killpg(child.group, SIGKILL) } else { kill(child.pid, SIGKILL) }
+            // le groupe entier si le processus en est le chef ou si l'appelant le demande, sinon lui seul
+            if child.ownsGroup || killingGroup { killpg(child.group, SIGKILL) } else { kill(child.pid, SIGKILL) }
         }
         let output = await child.finished()
         timer.cancel()
         if fired.withLock({ $0 }) { throw SpawnError.timedOut }
         return output
+    }
+
+    /// Comme `run`, sous un gardien : le groupe est inscrit au registre d'arrêt, et le gardien le tue si l'app disparaît, même par SIGKILL
+    /// Le groupe entier est tué au délai et à la fin de l'appel : la commande qu'un `Match exec` a lancée ne survit pas à `ssh -G`
+    static func runGuarded(_ path: String, _ arguments: [String], environment: [String: String], timeout: Duration, stderrLimit: Int = maxStderr) async throws -> Output {
+        let watchdog = try startWatchdog()
+        ProcessGroups.register(watchdog.group)
+        defer {
+            ProcessGroups.unregister(watchdog.group)
+            watchdog.closeStdin()
+        }
+        return try await run(path, arguments, environment: environment, joining: watchdog.pid, killingGroup: true, timeout: timeout, stderrLimit: stderrLimit)
     }
 
     /// Un appel bloquant (waitpid, read) hors du pool coopératif de Swift
@@ -420,7 +486,7 @@ final class SSHTunnel {
         supervisor = Task { await run(config, backend, id) }
     }
 
-    /// Montre une erreur trouvée avant tout lancement de ssh (hôte refusé, clé absente)
+    /// Montre une erreur trouvée avant tout lancement de ssh (alias inconnu, hôte refusé)
     func refuse(_ failure: SSHFailure) {
         if let previous = detach() { Task { await previous.close() } }
         state = .failed(failure)
@@ -474,45 +540,30 @@ final class SSHTunnel {
 // MARK: - ssh système
 
 /// Ouvre le tunnel avec `/usr/bin/ssh` (chemin absolu : le `ssh` du PATH d'un shell peut être un alias)
-/// La clé privée va dans un `ssh-agent` privé par `ssh-add -` (entrée standard) : ni argument, ni fichier, ni variable d'environnement
-/// L'agent et les ssh sont dans un seul groupe de processus, tué d'un coup à la fermeture
+/// La config et l'agent de l'utilisateur s'appliquent : pas de `-F /dev/null`, pas de `-i`, pas d'agent privé
+/// Les ssh sont dans un seul groupe de processus, tué d'un coup à la fermeture
 actor SystemSSHBackend: SSHBackend {
-    private struct Agent {
-        let watchdog: Child
-        let child: Child
-        let directory: URL
-        let socket: String
-        let publicKeyPath: String
-    }
-
-    private var key: String?
-    private let knownHostsPath: String?
-    private let workDirectory: URL
-    private var agent: Agent?
-    /// l'agent en préparation, que `close()` arrête sans attendre la fin de la préparation
-    private var preparing: (watchdog: Child, directory: URL)?
+    private let environment: [String: String]
+    private var watchdog: Child?
+    /// le gardien en préparation, que `close()` arrête sans attendre la fin de l'ouverture
+    private var preparing: Child?
     private var closed = false
 
-    /// `knownHostsPath` nil : le fichier vit dans le dossier privé du tunnel et disparaît avec lui (mode test)
-    /// `workDirectory` : là où le dossier privé du tunnel est créé
-    init(key: String, knownHostsPath: String?, workDirectory: URL = FileManager.default.temporaryDirectory) {
-        self.key = key
-        self.knownHostsPath = knownHostsPath
-        self.workDirectory = workDirectory
+    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
+        self.environment = environment
     }
 
     func open(_ config: SSHTunnelConfig) async throws -> SSHSession {
         try ensureLive()
-        let agent = try await preparedAgent()
+        let watchdog = try preparedWatchdog()
         let localPort = try Self.freeLocalPort()
-        let knownHosts = knownHostsPath ?? agent.directory.appendingPathComponent("known_hosts").path
         let ssh: Child
         do {
             ssh = try Spawn.start(
                 "/usr/bin/ssh",
-                config.arguments(localPort: localPort, agentSocket: agent.socket, publicKeyPath: agent.publicKeyPath, knownHostsPath: knownHosts),
-                environment: SSHChildEnvironment.make(agentSocket: agent.socket),
-                joining: agent.watchdog.pid
+                config.arguments(localPort: localPort),
+                environment: SSHChildEnvironment.make(environment),
+                joining: watchdog.pid
             )
         } catch {
             throw SSHFailure.unreachable("ssh ne démarre pas")
@@ -535,19 +586,17 @@ actor SystemSSHBackend: SSHBackend {
         throw SSHFailure.unreachable("délai dépassé")
     }
 
-    /// Lit `hermes profile list` sur l'hôte par un second ssh qui prend l'agent du tunnel ouvert (décision S6) et rend sa sortie
-    /// À appeler tunnel ouvert : l'agent existe alors, aucune préparation ne se croise avec celle de `open`
+    /// Lit `hermes profile list` sur l'hôte par un second ssh (décision S6) et rend sa sortie
     func readProfileList(_ config: SSHTunnelConfig) async throws -> String {
         try ensureLive()
-        guard let agent else { throw SSHFailure.unreachable("tunnel fermé") }
-        let knownHosts = knownHostsPath ?? agent.directory.appendingPathComponent("known_hosts").path
+        guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
         let output: Spawn.Output
         do {
             output = try await Spawn.run(
                 "/usr/bin/ssh",
-                config.profileListArguments(agentSocket: agent.socket, publicKeyPath: agent.publicKeyPath, knownHostsPath: knownHosts),
-                environment: SSHChildEnvironment.make(agentSocket: agent.socket),
-                joining: agent.watchdog.pid,
+                config.profileListArguments(),
+                environment: SSHChildEnvironment.make(environment),
+                joining: watchdog.pid,
                 timeout: .seconds(15)
             )
         } catch SpawnError.timedOut {
@@ -555,7 +604,7 @@ actor SystemSSHBackend: SSHBackend {
         } catch {
             throw SSHFailure.unreachable("ssh ne démarre pas")
         }
-        // 255 : ssh lui-même a échoué (clé refusée, hôte injoignable) ; tout autre code vient de la commande distante
+        // 255 : ssh lui-même a échoué (identité refusée, hôte injoignable) ; tout autre code vient de la commande distante
         if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr) }
         guard output.status == 0 else {
             throw RemoteCommandFailure(status: output.status, detail: output.stderr.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? "")
@@ -565,13 +614,11 @@ actor SystemSSHBackend: SSHBackend {
 
     func readProfileLocks(_ config: SSHTunnelConfig) async throws -> Data {
         try ensureLive()
-        guard let agent else { throw SSHFailure.unreachable("tunnel fermé") }
-        let knownHosts = knownHostsPath ?? agent.directory.appendingPathComponent("known_hosts").path
-        let arguments = config.profileListArguments(agentSocket: agent.socket, publicKeyPath: agent.publicKeyPath, knownHostsPath: knownHosts)
+        guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
         let output = try await Spawn.run(
-            "/usr/bin/ssh", Array(arguments.dropLast(3)) + [ProfileLock.command],
-            environment: SSHChildEnvironment.make(agentSocket: agent.socket),
-            joining: agent.watchdog.pid, timeout: .seconds(3)
+            "/usr/bin/ssh", config.profileLocksArguments(),
+            environment: SSHChildEnvironment.make(environment),
+            joining: watchdog.pid, timeout: .seconds(3)
         )
         guard output.status == 0 else { throw SSHFailure.unreachable("détection Desktop indisponible") }
         return Data(output.stdout.utf8)
@@ -579,14 +626,13 @@ actor SystemSSHBackend: SSHBackend {
 
     func close() async {
         closed = true
-        key = nil
         if let preparing {
             self.preparing = nil
-            await release(preparing.watchdog, preparing.directory, grace: .seconds(1))
+            await release(preparing, grace: .seconds(1))
         }
-        guard let agent else { return }
-        self.agent = nil
-        await release(agent.watchdog, agent.directory, grace: .seconds(2))
+        guard let watchdog else { return }
+        self.watchdog = nil
+        await release(watchdog, grace: .seconds(2))
     }
 
     /// Un `close()` ou une annulation de la tâche survenus pendant une attente : l'ouverture s'arrête
@@ -594,65 +640,30 @@ actor SystemSSHBackend: SSHBackend {
         if closed || Task.isCancelled { throw CancellationError() }
     }
 
-    /// Arrête le groupe du gardien (agent et ssh) et supprime le dossier privé ; sans effet si c'est déjà fait
-    private func release(_ watchdog: Child, _ directory: URL, grace: Duration) async {
+    private func release(_ watchdog: Child, grace: Duration) async {
         await ProcessGroups.terminate(watchdog.group, grace: grace)
         watchdog.closeStdin()
-        try? FileManager.default.removeItem(at: directory)
     }
 
-    private func preparedAgent() async throws -> Agent {
-        if let agent { return agent }
-        guard let key else { throw SSHFailure.keyUnreadable }
-        let directory = workDirectory.appendingPathComponent("hb-" + UUID().uuidString.prefix(8).lowercased(), isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        let socket = directory.appendingPathComponent("a").path
-        let environment = SSHChildEnvironment.make(agentSocket: socket)
+    private func preparedWatchdog() throws -> Child {
+        if let watchdog { return watchdog }
         let watchdog: Child
-        let child: Child
         do {
-            watchdog = try Spawn.startWatchdog(cleaning: directory)
-            child = try Spawn.start("/usr/bin/ssh-agent", ["-D", "-a", socket], environment: environment, joining: watchdog.pid)
+            watchdog = try Spawn.startWatchdog()
         } catch {
-            try? FileManager.default.removeItem(at: directory)
-            throw SSHFailure.unreachable("ssh-agent ne démarre pas")
+            throw SSHFailure.unreachable("ssh ne démarre pas")
         }
-        ProcessGroups.register(watchdog.group, removing: directory)
-        preparing = (watchdog, directory)
-
-        func abandon(_ failure: any Error) async -> any Error {
-            if preparing?.watchdog === watchdog { preparing = nil }
-            await release(watchdog, directory, grace: .seconds(1))
-            return failure
+        ProcessGroups.register(watchdog.group)
+        preparing = watchdog
+        if closed || Task.isCancelled {
+            preparing = nil
+            watchdog.closeStdin()
+            killpg(watchdog.group, SIGKILL)
+            throw CancellationError()
         }
-        // chaque attente peut être interrompue par `close()` ou par l'annulation : l'agent en préparation est alors détruit, jamais gardé
-        func live() async throws {
-            if closed || Task.isCancelled { throw await abandon(CancellationError()) }
-        }
-        for _ in 0..<60 where !FileManager.default.fileExists(atPath: socket) {
-            try? await Task.sleep(for: .milliseconds(50))
-            try await live()
-        }
-        guard FileManager.default.fileExists(atPath: socket) else { throw await abandon(SSHFailure.unreachable("ssh-agent ne répond pas")) }
-
-        // la clé arrive par l'entrée standard de ssh-add, avec un saut de ligne final que OpenSSH exige
-        let material = Data((key.hasSuffix("\n") ? key : key + "\n").utf8)
-        let added = try? await Spawn.run("/usr/bin/ssh-add", ["-"], environment: environment, joining: watchdog.pid, stdin: material, timeout: .seconds(8))
-        try await live()
-        guard added?.status == 0 else { throw await abandon(SSHFailure.keyUnreadable) }
-        // la partie publique sert à dire à ssh quelle clé de l'agent signer ; elle n'a rien de secret
-        let listed = try? await Spawn.run("/usr/bin/ssh-add", ["-L"], environment: environment, joining: watchdog.pid, timeout: .seconds(8))
-        try await live()
-        guard let listed, listed.status == 0, listed.stdout.hasPrefix("ssh-") || listed.stdout.hasPrefix("ecdsa-") else { throw await abandon(SSHFailure.keyUnreadable) }
-        let publicKeyPath = directory.appendingPathComponent("key.pub").path
-        guard FileManager.default.createFile(atPath: publicKeyPath, contents: Data(listed.stdout.utf8), attributes: [.posixPermissions: 0o600]) else {
-            throw await abandon(SSHFailure.keyUnreadable)
-        }
-        self.key = nil
         preparing = nil
-        let ready = Agent(watchdog: watchdog, child: child, directory: directory, socket: socket, publicKeyPath: publicKeyPath)
-        agent = ready
-        return ready
+        self.watchdog = watchdog
+        return watchdog
     }
 
     private static func loopback(port: Int) -> sockaddr_in {
