@@ -31,9 +31,14 @@ final class SSHConfigTests: XCTestCase {
         proxycommand none
         """
 
-    private let unmatchedDebug = "debug1: Reading configuration data\ndebug1: Applying options for *\n"
+    /// Ligne verbatim de `ssh -G -vv` (OpenSSH 10.3) pour un bloc Host dont le motif couvre l'alias
+    private func applying(_ pattern: String, line: Int = 3) -> String {
+        "debug1: /tmp/config line \(line): Applying options for \(pattern)\n"
+    }
+
+    private var unmatchedDebug: String { "debug1: Reading configuration data /tmp/config\n" + applying("*") }
     private func matchedDebug(_ alias: String) -> String {
-        "debug1: Applying options for \(alias)\ndebug1: Applying options for *\n"
+        applying(alias) + applying("*", line: 9)
     }
 
     private func parse(_ dump: String, alias: String, debug: String = "", existing: Set<String> = [], authSock: String? = nil) -> SSHConnectionPreview {
@@ -185,69 +190,71 @@ final class SSHConfigTests: XCTestCase {
         }
     }
 
-    /// `ssh -G -vv` écrit `originally <alias>` puis `match found` quand un bloc Match couvre l'alias
-    func testAMatchBlockThatCoversTheAliasMakesItKnown() {
-        let debug = """
-            debug1: Reading configuration data /dev/null
-            debug2: checking match for 'host lab.invalid' host lab.invalid originally lab.invalid
-            debug2: match found
-            """
-        let preview = parse(defaultDump.replacingOccurrences(of: "user operator", with: "user otheroperator"), alias: "lab.invalid", debug: debug)
-        XCTAssertFalse(preview.isUnknownAlias)
-    }
-
-    /// Lignes verbatim de `ssh -G -vv` (OpenSSH 10.3) : les critères sont écrits tels qu'ils figurent dans la config
+    /// Ligne verbatim de `ssh -G -vv` (OpenSSH 10.3) : ssh l'écrit pour chaque ligne Match qu'il lit, qu'elle s'applique ou non
     private func matchDebug(_ criteria: String, alias: String = "lab", found: Bool = true) -> String {
         "debug2: checking match for '\(criteria)' host \(alias) originally \(alias)\ndebug2: match \(found ? "found" : "not found")\n"
     }
 
-    /// Un `Match` qui vaut pour tout nom ne nomme pas l'alias, même quand `ssh -G -vv` écrit `match found`
-    func testAMatchBlockThatAppliesToEveryNameDoesNotNameTheAlias() {
-        let global = [
-            "all", "user *", "host *", "originalhost *", "host **", "localuser *", "exec true",
-            "host real,*", "!originalhost real", "all # host lab", "exec \"echo host lab \"", "final all", "originalhost real",
+    /// Un bloc Match, quelle que soit sa forme, fait refuser la config : l'app n'interprète aucun critère
+    func testAnyMatchBlockRefusesTheConfigWhateverItsCriteria() {
+        let criteria = [
+            "all", "user *", "host *", "originalhost *", "localuser *", "exec true", "host lab", "originalhost lab",
+            #"exec "true \" host lab.invalid \"""#, "final all", "canonical host lab", "!host lab", "host la*,!lax", "all # host lab",
+            "host \"lab",
         ]
-        for criteria in global {
-            let preview = parse(defaultDump, alias: "lab", debug: matchDebug(criteria))
-            XCTAssertTrue(preview.isUnknownAlias, criteria)
-            XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true), criteria) {
-                XCTAssertEqual($0 as? SSHFailure, .unknownAlias, criteria)
+        for text in criteria {
+            for found in [true, false] {
+                let debug = matchedDebug("lab") + matchDebug(text, found: found)
+                let preview = parse(defaultDump, alias: "lab", debug: debug)
+                XCTAssertTrue(preview.hasMatchBlock, "\(text) found=\(found)")
+                XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true), text) {
+                    XCTAssertEqual($0 as? SSHFailure, .matchBlockRefused, text)
+                }
             }
         }
     }
 
-    /// Un `Match` dont un critère `host` ou `originalhost` couvre l'alias, sans le prendre à `*`, le nomme
-    func testAMatchBlockWithAHostCriterionOfItsOwnNamesTheAlias() {
-        let named = [
-            "host lab", "originalhost lab", "Host lab", "host \"lab\"", "originalhost=lab", "host la*", "host l?b",
-            "originalhost lab,real", "originalhost real,lab", "originalhost lab host *", "host\tlab  user   *",
-            "exec \"echo x\" host lab", "originalhost lab # host *", "final host lab", "canonical host lab", "host la*,!lax",
+    func testAConfigWithoutMatchBlockIsNotRefusedForOne() {
+        let preview = parse(defaultDump, alias: "lab", debug: matchedDebug("lab"))
+        XCTAssertFalse(preview.hasMatchBlock)
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true))
+    }
+
+    /// Seul un bloc Host qui écrit l'alias tel quel le rend connu
+    func testAHostBlockThatNamesTheAliasLiterallyMakesItKnown() {
+        for (pattern, alias) in [("monalias", "monalias"), ("lab.invalid", "lab.invalid")] {
+            let preview = parse(defaultDump, alias: alias, debug: applying(pattern) + applying("*", line: 9))
+            XCTAssertFalse(preview.isUnknownAlias, pattern)
+            XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true), pattern)
+        }
+    }
+
+    /// Un motif avec joker, nié ou d'une autre casse ne nomme jamais l'alias, même s'il le couvre
+    func testAHostPatternWithAWildcardNeverNamesTheAlias() {
+        for pattern in ["*", "**", "mon*", "m?nalias", "*alias", "monali?s", "!monalias", "monalias,other", "MonAlias"] {
+            let preview = parse(defaultDump, alias: "monalias", debug: applying(pattern))
+            XCTAssertTrue(preview.isUnknownAlias, pattern)
+            XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true), pattern) {
+                XCTAssertEqual($0 as? SSHFailure, .unknownAlias, pattern)
+            }
+        }
+    }
+
+    /// Une ligne que l'app ne lit pas avec certitude ne nomme pas l'alias : elle est refusée
+    func testALogLineTheParserCannotReadWithCertaintyDoesNotNameTheAlias() {
+        let lines = [
+            "debug1: Applying options for monalias",
+            "debug1: /tmp/config line 3: Applying options for monalias extra",
+            "debug1: /tmp/config line 3: Applying options for  monalias",
+            "debug1: /tmp/config line x: Applying options for monalias",
+            "debug2: /tmp/config line 3: Applying options for monalias",
+            "debug1: /tmp/config line 3: Applying options for \"monalias\"",
+            "/tmp/config line 3: Applying options for monalias",
         ]
-        for criteria in named {
-            let preview = parse(defaultDump, alias: "lab", debug: matchDebug(criteria))
-            XCTAssertFalse(preview.isUnknownAlias, criteria)
+        for line in lines {
+            let preview = parse(defaultDump, alias: "monalias", debug: line + "\n")
+            XCTAssertTrue(preview.isUnknownAlias, line)
         }
-    }
-
-    func testAMatchBlockThatDoesNotMatchDoesNotNameTheAlias() {
-        let preview = parse(defaultDump, alias: "lab", debug: matchDebug("host lab", found: false))
-        XCTAssertTrue(preview.isUnknownAlias)
-    }
-
-    /// `final` : une première passe sans correspondance, puis une seconde avec
-    func testAFinalMatchPassIsJudgedOnItsOwnCriteria() {
-        let passes = { (criteria: String) in
-            self.matchDebug(criteria, found: false) + "debug1: configuration requests final Match pass\n" + self.matchDebug(criteria)
-        }
-        XCTAssertFalse(parse(defaultDump, alias: "lab", debug: passes("final host lab")).isUnknownAlias)
-        XCTAssertTrue(parse(defaultDump, alias: "lab", debug: passes("final all")).isUnknownAlias)
-    }
-
-    /// Un bloc `Match` global ne rend pas connu un nom que seul un autre `Match` global ou `Host **` couvre
-    func testAGlobalHostPatternDoesNotNameTheAlias() {
-        let debug = "debug1: /tmp/config line 1: Applying options for **\n" + matchDebug("all")
-        XCTAssertTrue(parse(defaultDump, alias: "lab", debug: debug).isUnknownAlias)
-        XCTAssertFalse(parse(defaultDump, alias: "lab", debug: debug + matchDebug("originalhost lab")).isUnknownAlias)
     }
 
     /// `IdentityAgent none` désactive l'agent : la socket de la session ne compte plus, quelle que soit la casse
@@ -332,7 +339,7 @@ final class SSHConnectorTests: XCTestCase {
             identityfile /tmp/fake-id.invalid
             proxyjump none
             """,
-            stderr: "debug1: Applying options for \(alias)\n"
+            stderr: "debug1: /tmp/config line 3: Applying options for \(alias)\n"
         )
     }
 
@@ -396,7 +403,7 @@ final class SSHConnectorTests: XCTestCase {
     private func dump(_ extra: String = "") -> SSHConfigDump {
         SSHConfigDump(
             stdout: "user operator\nhostname gateway.invalid\nport 22\nidentityfile /tmp/fake-id.invalid\n\(extra)",
-            stderr: "debug1: Applying options for lab.invalid\n"
+            stderr: "debug1: /tmp/config line 3: Applying options for lab.invalid\n"
         )
     }
 
@@ -496,28 +503,91 @@ private actor ScriptedSSHResolver: SSHConfigResolving {
 }
 
 /// Le vrai `/usr/bin/ssh -G -vv -F <config>` : le format des lignes de débogage vient d'OpenSSH, pas d'un échantillon écrit à la main
-final class RealSshMatchTests: XCTestCase {
-    private func isUnknown(_ config: String, alias: String = "lab.invalid") async throws -> Bool {
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("hb-test-\(UUID().uuidString.prefix(8))")
-        try config.write(to: file, atomically: true, encoding: .utf8)
-        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
-        let dump = try await SystemSSHConfigResolver(configFile: file.path).dump(alias: alias, invocation: .tunnel)
-        return SSHConfig.parse(dump, alias: alias, localUser: "operator").isUnknownAlias
+final class RealSshConfigTests: XCTestCase {
+    /// L'échec que l'app montrerait pour `config`, ou nil quand l'alias est accepté ; `$DIR` vaut le dossier des fichiers de la config
+    private func failure(_ config: String, alias: String = "lab.invalid", files: [String: String] = [:]) async throws -> SSHFailure? {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hb-test-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        for (name, text) in files.merging(["config": config], uniquingKeysWith: { $1 }) {
+            try text.replacingOccurrences(of: "$DIR", with: directory.path).write(to: directory.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        do {
+            let dump = try await SystemSSHConfigResolver(configFile: directory.appendingPathComponent("config").path).dump(alias: alias, invocation: .tunnel)
+            let preview = SSHConfig.parse(dump, alias: alias, localUser: "operator")
+            _ = try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)
+            return nil
+        } catch let failure as SSHFailure {
+            return failure
+        }
     }
 
-    func testAMatchBlockThatAppliesToEveryNameLeavesTheAliasUnknown() async throws {
-        for criteria in ["all", "user *", "host *", "originalhost *", "localuser *", "exec true", "exec \"echo host lab.invalid \""] {
-            let unknown = try await isUnknown("Match \(criteria)\nUser operator\n")
-            XCTAssertTrue(unknown, criteria)
+    func testEveryFormOfMatchRefusesTheConfig() async throws {
+        let forms = [
+            "Match all", "match all", "Match\tall", "Match=all", "Match user *", "Match host *", "Match originalhost *", "Match localuser *",
+            "Match exec true", #"Match exec "true \" host lab.invalid \"""#, "Match host lab.invalid", "Match originalhost lab.invalid",
+            "Match final all", "Match canonical all", "Match all # host lab.invalid",
+        ]
+        for form in forms {
+            for config in ["\(form)\nUser operator\n", "Host lab.invalid\n  User operator\n\(form)\n", "\(form)\nHost lab.invalid\n"] {
+                let result = try await failure(config)
+                XCTAssertEqual(result, .matchBlockRefused, config)
+            }
         }
-        let unknown = try await isUnknown("Host *\nUser operator\n")
-        XCTAssertTrue(unknown, "Host *")
     }
 
-    func testABlockThatNamesTheAliasMakesItKnown() async throws {
-        for block in ["Host lab.invalid", "Match host lab.invalid", "Match originalhost lab.invalid", "Match originalhost la*", "Match all\nMatch originalhost lab.invalid"] {
-            let unknown = try await isUnknown("\(block)\nUser operator\n")
-            XCTAssertFalse(unknown, block)
+    /// ssh lit la ligne Match d'un bloc Host qui ne s'applique pas, et d'un fichier inclus : la config est refusée aussi
+    func testAMatchBlockThatDoesNotApplyToTheAliasStillRefusesTheConfig() async throws {
+        let afterOtherHost = try await failure("Host lab.invalid\n  User operator\nHost other\n  User x\nMatch host other\n  User y\n")
+        XCTAssertEqual(afterOtherHost, .matchBlockRefused)
+        let included = try await failure("Host lab.invalid\nHost other\n  Include $DIR/inc.conf\n", files: ["inc.conf": "Match all\n"])
+        XCTAssertEqual(included, .matchBlockRefused)
+        let notMatching = try await failure("Host lab.invalid\nMatch originalhost other\n")
+        XCTAssertEqual(notMatching, .matchBlockRefused)
+    }
+
+    func testAHostBlockNamesTheAliasOnlyByItsLiteralName() async throws {
+        let named = ["Host lab.invalid", "Host other lab.invalid", #"Host "lab.invalid""#, "Host *\nHost lab.invalid\n  User operator", "Host lab.invalid\n  User operator"]
+        for config in named {
+            let result = try await failure(config + "\n")
+            XCTAssertNil(result, config)
         }
+        let monalias = try await failure("Host monalias\n", alias: "monalias")
+        XCTAssertNil(monalias)
+        let unnamed = [
+            "Host *\n  User operator", "Host **", "Host lab.*\n  User operator", "Host lab.inval?d", "Host *.invalid",
+            "Host * lab.invalid", "Host Lab.invalid", "Host lab.invalid !lab.invalid", "Host !other *\n  User operator",
+        ]
+        for config in unnamed {
+            let result = try await failure(config + "\n")
+            XCTAssertEqual(result, .unknownAlias, config)
+        }
+        let byPattern = try await failure("Host mon*\n  User operator\n", alias: "monalias")
+        XCTAssertEqual(byPattern, .unknownAlias)
+        let noBlock = try await failure("User operator\n")
+        XCTAssertEqual(noBlock, .unknownAlias)
+    }
+
+    /// Guillemet non fermé, option inconnue, argument manquant : ssh sort en erreur, la config est refusée
+    func testAConfigThatSshCannotParseIsRefused() async throws {
+        for config in ["Host \"lab\n", "Match\n", "Match exec\n", "Match bogus x\n", "Bogus yes\n", "Host lab.invalid\n  ProxyJump\n", "Host lab.invalid\n  Port\n"] {
+            let result = try await failure(config)
+            XCTAssertEqual(result, .unreadableConfig, config)
+        }
+    }
+
+    /// Un `Include` qui ne désigne aucun fichier est un doute : refus
+    func testAnIncludeThatMatchesNoFileRefusesTheConfig() async throws {
+        let missing = try await failure("Host lab.invalid\nInclude $DIR/missing/*\n")
+        XCTAssertEqual(missing, .unreadableConfig)
+        let present = try await failure("Host lab.invalid\nInclude $DIR/inc.conf\n", files: ["inc.conf": "User operator\n"])
+        XCTAssertNil(present)
+    }
+
+    /// Le journal est coupé à 64 Ko : un Match au-delà de la coupure ne doit pas faire accepter la config
+    func testALogCutAtTheLimitRefusesTheConfig() async throws {
+        let config = "Host lab.invalid\n" + String(repeating: "Include $DIR/empty.conf\n", count: 1500) + "Match all\n"
+        let result = try await failure(config, files: ["empty.conf": "\n"])
+        XCTAssertEqual(result, .unreadableConfig)
     }
 }

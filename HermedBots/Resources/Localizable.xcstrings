@@ -86,6 +86,16 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "This SSH alias is unknown." } }
       }
     },
+    "Ta config SSH contient un bloc Match. Hermed Bots ne l'interprète pas et refuse l'alias : remplace le bloc Match par des blocs Host." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your SSH config contains a Match block. Hermed Bots does not interpret it and refuses the alias: replace the Match block with Host blocks." } }
+      }
+    },
+    "Hermed Bots ne lit pas cette config SSH avec certitude : erreur de syntaxe, Include sans fichier ou journal trop long. L'alias est refusé." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hermed Bots cannot read this SSH config with certainty: syntax error, Include without a file or log too long. The alias is refused." } }
+      }
+    },
     "Cet hôte est refusé en mode test." : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "This host is refused in test mode." } }

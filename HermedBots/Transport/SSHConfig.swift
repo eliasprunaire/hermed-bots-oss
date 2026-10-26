@@ -24,6 +24,8 @@ struct SSHConnectionPreview: Equatable, Sendable {
     let identity: SSHIdentityKind
     let identityPresent: Bool
     let isUnknownAlias: Bool
+    let hasMatchBlock: Bool
+    let isUnreadable: Bool
 
     var identityPresentLabel: String {
         if identity == .certificate {
@@ -69,14 +71,15 @@ struct SystemSSHConfigResolver: SSHConfigResolving {
                 Self.arguments(alias: alias, invocation: invocation, configFile: configFile),
                 environment: SSHChildEnvironment.make(environment),
                 timeout: .seconds(8),
-                stderrLimit: 65_536
+                stderrLimit: SSHConfig.logLimit
             )
         } catch SpawnError.timedOut {
             throw SSHFailure.unreachable("délai dépassé")
         } catch {
             throw SSHFailure.unreachable("ssh ne démarre pas")
         }
-        guard output.status == 0 else { throw SSHFailure.unknownAlias }
+        // ssh sort en erreur sur une config qu'il ne lit pas (guillemet non fermé, option inconnue, argument manquant)
+        guard output.status == 0 else { throw SSHFailure.unreadableConfig }
         return SSHConfigDump(stdout: output.stdout, stderr: output.stderr)
     }
 }
@@ -130,7 +133,6 @@ enum SSHConfig {
             authSock: authSock,
             filesExist: filesExist
         )
-        let unknown = isUnknownAlias(alias: alias, debug: debug)
         return SSHConnectionPreview(
             alias: alias,
             hostname: hostname,
@@ -139,112 +141,26 @@ enum SSHConfig {
             hasRelay: hasRelay,
             identity: identity,
             identityPresent: present,
-            isUnknownAlias: unknown
+            isUnknownAlias: !namesAlias(alias, debug: debug),
+            hasMatchBlock: debug.contains("checking match for"),
+            isUnreadable: debug.utf8.count >= logLimit || debug.contains("matched no files")
         )
     }
 
-    /// Un alias est inconnu s'il n'a pas de bloc Host ou Match qui le nomme (stderr de `ssh -G -vv`)
+    /// Taille maximale gardée du journal `ssh -G -vv` : au-delà, une ligne Match peut manquer
+    static let logLimit = 65_536
+
+    /// Un alias est connu si un bloc `Host` l'écrit tel quel : `debug1: <fichier> line <n>: Applying options for <motif>`
     /// Les valeurs de `ssh -G` ne comptent pas : un `Host *` qui fixe un User, un Port ou une identité les donne à n'importe quel nom
-    /// Un bloc Host ou Match qui ne change aucune valeur reste un alias valide
-    /// Un bloc qui vaut pour tout nom (`Host *`, `Match all`, `Match user *`, `Match host *`) ne nomme pas l'alias
-    static func isUnknownAlias(alias: String, debug: String) -> Bool {
-        !(hostBlock(matches: alias, debug: debug) || matchBlock(matches: alias, debug: debug))
-    }
-
-    /// `debug2: checking match for '<critères>' host … originally …` puis `match found` (`-vv`)
-    /// Seul un critère `host` ou `originalhost` propre à l'alias compte : les autres critères ne nomment aucun hôte
-    static func matchBlock(matches alias: String, debug: String) -> Bool {
-        var names = false
-        for line in debug.split(whereSeparator: \.isNewline) {
-            let text = String(line)
-            if text.contains("checking match for") {
-                names = false
-                if let start = text.range(of: "checking match for '"), let end = text.range(of: "' host ", options: .backwards), start.upperBound <= end.lowerBound {
-                    names = criteria(String(text[start.upperBound..<end.lowerBound]), name: alias)
-                }
-            } else if names, text.localizedCaseInsensitiveContains("match found") {
-                return true
-            }
+    /// ssh n'écrit que le premier motif de la ligne Host qui couvre l'alias : `Host * alias` n'est pas lu comme un nom
+    /// Une ligne qui n'a pas exactement cette forme ne nomme rien : l'alias est refusé
+    static func namesAlias(_ alias: String, debug: String) -> Bool {
+        debug.split(whereSeparator: \.isNewline).contains { line in
+            guard let match = line.wholeMatch(of: #/debug1: .* line [0-9]+: Applying options for (\S+)/#) else { return false }
+            let pattern = match.1
+            // `*`, `?` et `!` sont les seuls caractères spéciaux d'un motif Host ; ssh compare sans ignorer la casse
+            return !pattern.contains { "*?!".contains($0) } && String(pattern) == alias
         }
-        return false
-    }
-
-    /// `debug1: … Applying options for <pattern>` : un motif propre qui couvre l'alias
-    static func hostBlock(matches alias: String, debug: String) -> Bool {
-        for line in debug.split(whereSeparator: \.isNewline) {
-            let text = String(line)
-            guard let range = text.range(of: "Applying options for ") else { continue }
-            if ownPattern(String(text[range.upperBound...]).trimmingCharacters(in: .whitespaces), matches: alias) { return true }
-        }
-        return false
-    }
-
-    /// Un critère `host` ou `originalhost` non nié dont la liste contient un motif propre qui couvre l'alias
-    private static func criteria(_ text: String, name alias: String) -> Bool {
-        let tokens = words(in: text)
-        var index = 0
-        while index < tokens.count {
-            var keyword = tokens[index].lowercased()
-            index += 1
-            let negated = keyword.hasPrefix("!")
-            if negated { keyword.removeFirst() }
-            if ["all", "canonical", "final"].contains(keyword) { continue }
-            guard index < tokens.count else { break }
-            let argument = tokens[index]
-            index += 1
-            if !negated, keyword == "host" || keyword == "originalhost",
-               argument.split(separator: ",").contains(where: { ownPattern(String($0), matches: alias) }) { return true }
-        }
-        return false
-    }
-
-    /// Un motif non nié, qui n'est pas `*` seul, et qui couvre l'alias
-    private static func ownPattern(_ pattern: String, matches alias: String) -> Bool {
-        !pattern.hasPrefix("!") && pattern.contains { $0 != "*" } && glob(pattern, matches: alias)
-    }
-
-    /// Découpe comme OpenSSH : espaces, tabulations et `=` séparent, les guillemets groupent, un `#` hors guillemets ouvre un commentaire
-    /// shortcut: les échappements `\"` ne sont pas lus, un exec qui en contient dérègle le découpage de ses mots, à revoir si un cas réel apparaît
-    private static func words(in text: String) -> [String] {
-        var words: [String] = []
-        var word = ""
-        var quote: Character?
-        var open = false
-        for character in text {
-            if let current = quote {
-                if character == current { quote = nil } else { word.append(character) }
-            } else if character == "\"" || character == "'" {
-                quote = character
-                open = true
-            } else if character == " " || character == "\t" || character == "=" {
-                if open { words.append(word) }
-                word = ""
-                open = false
-            } else if character == "#", !open {
-                return words
-            } else {
-                word.append(character)
-                open = true
-            }
-        }
-        if open { words.append(word) }
-        return words
-    }
-
-    private static func glob(_ pattern: String, matches value: String) -> Bool {
-        var regex = "^"
-        for character in pattern {
-            switch character {
-            case "*": regex += ".*"
-            case "?": regex += "."
-            case ".", "[", "]", "{", "}", "(", ")", "+", "^", "$", "|", "\\":
-                regex += "\\\(character)"
-            default:
-                regex += String(character)
-            }
-        }
-        regex += "$"
-        return value.range(of: regex, options: [.regularExpression, .caseInsensitive]) != nil
     }
 
     private static func kind(certificates: [String], agent: String?, identityFiles: [String], authSock: String?) -> SSHIdentityKind {
@@ -309,6 +225,9 @@ enum SSHConfig {
 
 enum SSHConnectionPlanner {
     static func config(from preview: SSHConnectionPreview, refusePersoHermes: Bool, remotePort: Int = 8642) throws -> SSHTunnelConfig {
+        // l'app n'interprète aucun critère Match et refuse ce qu'elle ne lit pas avec certitude : en cas de doute, refus
+        if preview.isUnreadable { throw SSHFailure.unreadableConfig }
+        if preview.hasMatchBlock { throw SSHFailure.matchBlockRefused }
         // un relais mène à un hôte que l'app ne sait pas valider : tout alias qui en contient un est refusé, en mode test comme hors mode test
         if preview.hasRelay { throw SSHFailure.relayRefused }
         let config = try SSHTunnelConfig(

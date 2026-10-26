@@ -78,7 +78,7 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(SSHFailure.classify(stderr: ""), .unreachable(""))
         let retried = [SSHFailure.unreachable("x")].filter(\.retries)
         XCTAssertEqual(retried.count, 1)
-        for terminal in [SSHFailure.wrongKey, .hostKeyChanged, .unknownAlias, .agentLockedOrEmpty, .certificateExpired, .forbiddenHost, .relayRefused, .invalidHost, .invalidPort] {
+        for terminal in [SSHFailure.wrongKey, .hostKeyChanged, .unknownAlias, .matchBlockRefused, .unreadableConfig, .agentLockedOrEmpty, .certificateExpired, .forbiddenHost, .relayRefused, .invalidHost, .invalidPort] {
             XCTAssertFalse(terminal.retries, "\(terminal)")
         }
     }
@@ -88,6 +88,17 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(text, "Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte.")
         XCTAssertFalse(text.contains("mode test"))
         XCTAssertFalse(text.contains("docs/"))
+    }
+
+    func testTheConfigRefusalBannersNameTheCauseAndTheWayOut() {
+        XCTAssertEqual(
+            SSHFailure.matchBlockRefused.message,
+            "Ta config SSH contient un bloc Match. Hermed Bots ne l'interprète pas et refuse l'alias : remplace le bloc Match par des blocs Host."
+        )
+        XCTAssertEqual(
+            SSHFailure.unreadableConfig.message,
+            "Hermed Bots ne lit pas cette config SSH avec certitude : erreur de syntaxe, Include sans fichier ou journal trop long. L'alias est refusé."
+        )
     }
 
     func testTheForbiddenHostBannerNamesNoMachine() {

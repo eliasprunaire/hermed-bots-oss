@@ -14,6 +14,8 @@ enum SSHFailure: Error, Equatable, Sendable {
     case invalidHost
     case invalidPort
     case unknownAlias
+    case matchBlockRefused
+    case unreadableConfig
     case agentLockedOrEmpty
     case certificateExpired
     case wrongKey
@@ -51,6 +53,8 @@ extension SSHFailure {
         case .invalidHost: String(localized: "L'alias SSH n'est pas valide.")
         case .invalidPort: String(localized: "Le port n'est pas valide.")
         case .unknownAlias: String(localized: "Cet alias SSH est inconnu.")
+        case .matchBlockRefused: String(localized: "Ta config SSH contient un bloc Match. Hermed Bots ne l'interprète pas et refuse l'alias : remplace le bloc Match par des blocs Host.")
+        case .unreadableConfig: String(localized: "Hermed Bots ne lit pas cette config SSH avec certitude : erreur de syntaxe, Include sans fichier ou journal trop long. L'alias est refusé.")
         case .agentLockedOrEmpty: String(localized: "L'agent SSH est verrouillé ou vide.")
         case .certificateExpired: String(localized: "Le certificat SSH a expiré.")
         case .wrongKey: String(localized: "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.")

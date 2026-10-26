@@ -39,7 +39,7 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 
 ## Transport
 
-- Résolution : `/usr/bin/ssh -G -vv` suivi des arguments de chaque lancement de `ssh` (tunnel, liste des profils, détection de Hermes Desktop). Un bloc `Match sessiontype none` ne vaut que pour le tunnel, un bloc `Match command` que pour une commande distante : chaque lancement est résolu et validé avec ses propres arguments. Le tunnel fournit l'aperçu affiché. Chaque `ssh -G` tourne sous un gardien : l'arrêt de l'app le tue, avec la commande d'un `Match exec`, et le délai de 8 s tue le groupe entier.
+- Résolution : `/usr/bin/ssh -G -vv` suivi des arguments de chaque lancement de `ssh` (tunnel, liste des profils, détection de Hermes Desktop). Chaque lancement est résolu et validé avec ses propres arguments. Le tunnel fournit l'aperçu affiché. Chaque `ssh -G` tourne sous un gardien : l'arrêt de l'app le tue, avec la commande d'un `Match exec`, et le délai de 8 s tue le groupe entier.
 - Tunnel : `/usr/bin/ssh` + alias, `-N -T`, `-L 127.0.0.1:<port libre>:127.0.0.1:<remotePort>`, `BatchMode=yes`, `ExitOnForwardFailure=yes`, `ForwardAgent=no`, `ControlMaster=no`, `ControlPath=none`, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, `ConnectTimeout`, `ServerAliveInterval`, `ServerAliveCountMax`.
 - `SSH_AUTH_SOCK` vient de la session. `IdentityAgent` de la config ssh a priorité. `IdentityAgent none` désactive l'agent, socket de la session comprise : l'identité affichée est un fichier.
 - Liste des profils : second `/usr/bin/ssh` avec l'alias, commande `hermes profile list`.
@@ -49,7 +49,9 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 
 | Cas | Message |
 | --- | --- |
-| Alias inconnu (`ssh -G -vv` n'applique aucun bloc Host ou Match qui nomme l'alias ; `Host *` ne suffit pas, quelles que soient ses valeurs ; `Match all`, `Match user *`, `Match host *`, `Match originalhost *` ou `Match exec` seul ne suffisent pas non plus : un `Match` nomme l'alias par un critère `host` ou `originalhost` qui lui est propre ; un bloc nommé aux valeurs standard reste valide) | Cet alias SSH est inconnu. |
+| Alias inconnu (aucun bloc `Host` n'écrit l'alias tel quel dans `ssh -G -vv` ; `Host *`, `Host mon*` et tout motif avec joker ne suffisent pas, quelles que soient leurs valeurs ; un bloc nommé aux valeurs standard reste valide) | Cet alias SSH est inconnu. |
+| Config qui contient un bloc `Match`, quelle que soit sa forme (`Match all`, `Match user *`, `Match host *`, `Match originalhost *`, `Match exec …`, même nommé sur l'alias) ; le refus vaut aussi pour un `Match` dans un fichier inclus ou après un autre `Host` | Ta config SSH contient un bloc Match. Hermed Bots ne l'interprète pas et refuse l'alias : remplace le bloc Match par des blocs Host. |
+| Config que l'app ne lit pas avec certitude : `ssh -G` sort en erreur (guillemet non fermé, option inconnue, argument manquant), `Include` sans fichier, journal `-vv` de 64 Ko ou plus | Hermed Bots ne lit pas cette config SSH avec certitude : erreur de syntaxe, Include sans fichier ou journal trop long. L'alias est refusé. |
 | Agent verrouillé ou vide | L'agent SSH est verrouillé ou vide. |
 | Certificat expiré | Le certificat SSH a expiré. |
 | Serveur refuse l'identité | Le serveur refuse l'identité SSH. |
@@ -61,6 +63,7 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 ## Vérification unitaire
 
 - Parser `ssh -G` simulé : cas `Include` (alias `lab` → `gateway.invalid`) et cas alias inconnu (`unknown-alias.invalid`, port 22).
+- `RealSshConfigTests` lance le vrai `/usr/bin/ssh -G -vv -F` : toutes les formes de `Match`, un `Match` hors de portée de l'alias, un journal coupé à 64 Ko, un `Include` sans fichier, une config illisible, les alias nommés ou couverts par un motif.
 - Arguments exacts de la résolution : `-G -vv` plus ceux du lancement réel, pour les trois lancements.
 - Relais (`ProxyJump` ou `ProxyCommand`, valeurs de toute forme) : refusé en mode test et hors mode test, y compris quand un seul lancement (tunnel, liste des profils, détection) le voit. `none` n'est pas un relais.
 - Arguments exacts du tunnel : alias, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, pas de `-F`, `-i`, `-l`, `-p`, agent privé ni `known_hosts` temporaire.
