@@ -11,6 +11,5 @@ struct UpdatesSettingsView: View {
                 .accessibilityID(.updatesCheck)
         }
         .formStyle(.grouped)
-        .frame(width: 480)
     }
 }

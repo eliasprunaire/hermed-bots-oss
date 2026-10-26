@@ -63,6 +63,19 @@ final class ProfileKeys: HD12Harness {
         XCTAssertTrue(element(AccessibilityID.connectionAPIProfile.rawValue).waitForExistence(timeout: 10))
         XCTAssertTrue(app.secureTextFields[AccessibilityID.connectionAPIKey.rawValue].exists)
         XCTAssertFalse(element(AccessibilityID.connectionAPISave.rawValue).isEnabled)
-        HVShot.capture("hd17-key-settings", app)
+        let settings = app.windows.containing(.any, identifier: AccessibilityID.connectionConnect.rawValue).firstMatch
+        XCTAssertTrue(settings.waitForExistence(timeout: 10))
+        XCTAssertEqual(settings.frame.width, 1024, accuracy: 1)
+        XCTAssertEqual(settings.frame.height, 680, accuracy: 1)
+        for id in [
+            AccessibilityID.connectionCheck.rawValue,
+            AccessibilityID.connectionClose.rawValue,
+            AccessibilityID.connectionConnect.rawValue,
+        ] {
+            let button = element(id)
+            XCTAssertTrue(button.isHittable, "élément inaccessible : \(id)")
+            XCTAssertTrue(settings.frame.contains(button.frame), "\(id) hors de la fenêtre")
+        }
+        HVShot.capture("hd17-key-settings", settings)
     }
 }

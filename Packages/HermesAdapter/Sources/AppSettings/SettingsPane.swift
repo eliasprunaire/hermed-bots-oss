@@ -30,6 +30,11 @@ public enum SettingsCopy {
     public static let checkForUpdates = "Rechercher les mises à jour…"
 }
 
+public enum SettingsLayout {
+    public static let defaultWidth = 1024.0
+    public static let defaultHeight = 680.0
+}
+
 public enum UpdatesSettingsAction {
     public static func perform(_ updates: UpdateCheck) {
         updates.checkForUpdates()

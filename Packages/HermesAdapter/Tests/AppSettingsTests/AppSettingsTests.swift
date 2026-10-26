@@ -27,6 +27,11 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(SettingsCopy.checkForUpdates, "Rechercher les mises à jour…")
     }
 
+    func testTheSettingsLayoutDefaultSizeIs1024By680Points() {
+        XCTAssertEqual(SettingsLayout.defaultWidth, 1024)
+        XCTAssertEqual(SettingsLayout.defaultHeight, 680)
+    }
+
     func testSavingThenReadingGivesTheSameEndpoint() {
         let defaults = isolatedDefaults()
         XCTAssertNil(SSHEndpoint.stored(in: defaults))
