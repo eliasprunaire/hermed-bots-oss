@@ -119,6 +119,15 @@ final class ProbeTests: XCTestCase {
         XCTAssertTrue(outcome.output.contains("\ncontinue\n"), outcome.output)
     }
 
+    func testANonLocalUrlExitsWithTheForbiddenTargetCode() throws {
+        let outcome = try probe(["list-profiles", "--url", "http://example-host.invalid:18642"])
+        XCTAssertEqual(outcome.reason, .exit)
+        XCTAssertEqual(outcome.status, 22)
+        XCTAssertTrue(outcome.errors.contains("cible refusée"), outcome.errors)
+        XCTAssertTrue(outcome.errors.contains("example-host.invalid"), outcome.errors)
+        XCTAssertFalse(outcome.errors.contains("127.0.0.1"), outcome.errors)
+    }
+
     func testAHistoryWithHugeCountsIsRejectedWithAMessage() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hd-probe-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

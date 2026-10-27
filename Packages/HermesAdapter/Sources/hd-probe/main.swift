@@ -188,7 +188,7 @@ if command == "loop-guard" { loopGuard() }
 guard let urlText = values["url"], let baseURL = URL(string: urlText), let host = baseURL.host?.lowercased() else {
     usageError("--url est obligatoire (http://127.0.0.1:18642)")
 }
-// seules les cibles locales sont permises : conteneur OrbStack ou faux serveur, jamais perso-hermes
+// seules les cibles locales sont permises : conteneur OrbStack ou faux serveur, jamais example-host
 guard ["127.0.0.1", "localhost", "::1"].contains(host) else {
     fail("cible refusée : \(host) n'est pas une adresse locale", code: 22)
 }
