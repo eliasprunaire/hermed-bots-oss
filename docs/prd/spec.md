@@ -4,11 +4,11 @@
 
 ## 1. PRD digest
 - **Résultats** : liste des bots (9 profils actifs), conversation, `/model`, approbation oui/non, outil en cours, `/new`, fils passés ; reprise après veille ; l'app ne s'arrête jamais quand Hermes évolue (mode dégradé). Acceptation : six actions sur les 9 profils (instance OrbStack), aucune connexion hors tunnel SSH, trois tests de robustesse passés, test quotidien stable, validation finale de l'utilisateur.
-- **Dans le périmètre** : les 8 points du PRD (dont garde-fou de boucle et mode dégradé). **Hors** : iOS, fichiers, voix, cron, éditeurs, notifications générales, création de profil, Internet, profils décommissionnés, tout autre transport, toute action d'un bot sur perso-hermes.
-- **Sources de vérité** : `hermes profile list` (14/10), doc Hermes (3 pages), code Hermes testé (lecture seule), sessions sur perso-hermes, fixtures par version.
-- **Actions irréversibles** : approbation d'outil (utilisateur) ; activation du serveur API sur perso-hermes (utilisateur lui-même) ; commandes sur le Mac (approuvées une à une) ; dépense (accord écrit) ; merge (règle poteto) ; kill switch (Ayo).
+- **Dans le périmètre** : les 8 points du PRD (dont garde-fou de boucle et mode dégradé). **Hors** : iOS, fichiers, voix, cron, éditeurs, notifications générales, création de profil, Internet, profils décommissionnés, tout autre transport, toute action d'un bot sur example-host.
+- **Sources de vérité** : `hermes profile list` (14/10), doc Hermes (3 pages), code Hermes testé (lecture seule), sessions sur example-host, fixtures par version.
+- **Actions irréversibles** : approbation d'outil (utilisateur) ; activation du serveur API sur example-host (utilisateur lui-même) ; commandes sur le Mac (approuvées une à une) ; dépense (accord écrit) ; merge (règle poteto) ; kill switch (Ayo).
 - **Cadence** : app à la demande ; test quotidien de compatibilité à 13 h 00 Europe/Paris ; rapports Markdown datés dans `/workspace/dev-roster/` (chemin exact par Dev Lead).
-- **Contraintes** : macOS natif ; tunnel SSH vers `127.0.0.1:8642` ; rien dans `~/.hermes/hermes-agent` ni `~/.local/bin/hermes` ; jamais perso-hermes ; Trousseau ; couche d'adaptation unique ; aucune route affirmée avant le spike.
+- **Contraintes** : macOS natif ; tunnel SSH vers `127.0.0.1:8642` ; rien dans `~/.hermes/hermes-agent` ni `~/.local/bin/hermes` ; jamais example-host ; Trousseau ; couche d'adaptation unique ; aucune route affirmée avant le spike.
 - **Fin / arrêt** : §14. **Budget** : `unknown`, aucune dépense nouvelle sans accord écrit (§15). **Vérification** : Engineer exécute, Dev Lead vérifie, utilisateur valide (§16).
 
 ## 2. Assumptions and unknowns
@@ -31,15 +31,15 @@ Un projet de développement unique, déjà couvert par le Roster Dev (Dev Lead c
 
 ## 4. Human authority
 - **Ayo** : kill switch (moyen recommandé K1 + K3, §14) ; les deux questions de la liste et du libellé.
-- **Utilisateur** : validation finale ; approbation de chaque commande sur le Mac ; toute dépense ; activation du serveur API sur perso-hermes, faite par lui-même ; décision si le spike constate une impossibilité ; réponses aux questions de validation finale du PRD.
-- Aucun bot ne devient le décideur responsable. Aucun bot n'agit sur perso-hermes.
+- **Utilisateur** : validation finale ; approbation de chaque commande sur le Mac ; toute dépense ; activation du serveur API sur example-host, faite par lui-même ; décision si le spike constate une impossibilité ; réponses aux questions de validation finale du PRD.
+- Aucun bot ne devient le décideur responsable. Aucun bot n'agit sur example-host.
 
 ## 5. Roster
 | Siège | Statut | Rôle sur ce projet | Lit | Écrit | Interdit |
 |---|---|---|---|---|---|
 | SkeinBot | existant | PRD et spec ; mises à jour après décisions | `/workspace/skein/` | `/workspace/skein/app-macos-bots-hermes-v1/` | Code, déploiement, création de bot |
 | Dev Lead | existant (chef) | Plan poteto, briefs, propositions de seuils, lancement du vérificateur indépendant, verdict des rapports d'Engineer | PRD, spec, rapports | `/workspace/dev-roster/hermes-v1/` (plan, briefs, verdicts) | Exécuter sur le Mac, merger sans verdict |
-| Engineer | existant + exception Mac | Instance OrbStack, spike pratique, CI, recette, test quotidien 13 h 00, contrôle des chemins protégés | Dépôt (lecture), fixtures | Rapports datés ; dossier de travail dédié sur le Mac ; conteneur dédié | `~/.hermes/hermes-agent`, `~/.local/bin/hermes`, perso-hermes, push sur main, toute autre action sur le Mac |
+| Engineer | existant + exception Mac | Instance OrbStack, spike pratique, CI, recette, test quotidien 13 h 00, contrôle des chemins protégés | Dépôt (lecture), fixtures | Rapports datés ; dossier de travail dédié sur le Mac ; conteneur dédié | `~/.hermes/hermes-agent`, `~/.local/bin/hermes`, example-host, push sur main, toute autre action sur le Mac |
 | Designer | existant (Atelier UI) | Maquettes des écrans (liste, conversation, approbation, mode dégradé, pause de boucle), identifiants d'accessibilité proposés | PRD, spec | Maquettes | Coder, merger, vérifier les PR |
 | Claude Code, Codex | outils, pas des bots | Écriture du code sur le Mac, conduits par l'utilisateur (sous réserve de Q1) | — | Branches et PR | Se vérifier eux-mêmes ; push sur main |
 | Manager | existant | Mise à jour de la CHARTE si Q1 = (a) ; vérification avant toute modification de fiche | CHARTE | CHARTE | Entrer dans le salon de métier |
@@ -75,8 +75,8 @@ La routine n'est créée qu'après validation du PRD, par le circuit Manager →
 | Action | Engineer | Dev Lead | Producteur de code | Utilisateur | Ayo |
 |---|---|---|---|---|---|
 | Commande sur le Mac | propose | — | — | **approuve chaque commande** | — |
-| Toucher perso-hermes | jamais | jamais | jamais | lui-même seulement | — |
-| Activer le serveur API sur perso-hermes | jamais | jamais | jamais | **fait lui-même** | — |
+| Toucher example-host | jamais | jamais | jamais | lui-même seulement | — |
+| Activer le serveur API sur example-host | jamais | jamais | jamais | **fait lui-même** | — |
 | Merge | jamais sur main | verdict | propriétaire de PR après verdict | — | — |
 | Ajouter une version aux fixtures | propose | verdict | PR | informé | — |
 | Dépense payante (API, runner, Apple) | demande | demande | — | **accord écrit** | — |
@@ -109,7 +109,7 @@ Sans objet : tous les sièges existent. Aucun siège à recruter.
 |---|---|---|---|---|
 | Route absente pour une action, la reprise ou l'annulation | unknown | Élevé | Spike d'abord ; décision utilisateur | Dev Lead |
 | Écriture dans `~/.hermes/hermes-agent` ou `~/.local/bin/hermes` (updater Desktop bloqué) | unknown | Élevé | Conteneur sans montage ; contrôle avant/après ; arrêt immédiat | Engineer |
-| Contact avec perso-hermes pendant les tests | unknown | Élevé | Cible unique OrbStack ; aucun secret de prod côté test | Engineer |
+| Contact avec example-host pendant les tests | unknown | Élevé | Cible unique OrbStack ; aucun secret de prod côté test | Engineer |
 | Test quotidien bloqué (utilisateur absent à 13 h 00) | unknown | Moyen | Rapport « non exécuté » | Engineer |
 | Code produit sur le Mac hors CHARTE | unknown | Moyen | Q1 + mise à jour CHARTE avant tout code | Utilisateur / Manager |
 | Producteur de code qui se vérifie seul | unknown | Moyen | Verdict indépendant poteto + rapport d'Engineer | Dev Lead |
@@ -151,4 +151,4 @@ Coûts de vérification suivis dans `couts.md` (règle poteto).
 | Test quotidien | Rapport : date/heure Paris, version Hermes, PASS/FAIL par contrat, écarts, durée, chemins protégés | Engineer → Dev Lead | chaque jour 13 h 00 | `rapports/` |
 | Kill switch | Le travail s'arrête côté VM de test | Ayo + Engineer | avant livraison | `rapports/` |
 | v1 | Tests à la main (visuel, veille réelle, Trousseau) | Utilisateur | une fois | `rapports/validation-finale.md` |
-Échec d'un contrôle : correction par PR puis nouvelle passe ; chemin protégé modifié ou contact perso-hermes → arrêt et alerte immédiate à l'utilisateur ; impossibilité → décision utilisateur.
+Échec d'un contrôle : correction par PR puis nouvelle passe ; chemin protégé modifié ou contact example-host → arrêt et alerte immédiate à l'utilisateur ; impossibilité → décision utilisateur.
