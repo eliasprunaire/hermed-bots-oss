@@ -1,10 +1,4 @@
 #!/bin/bash
-# Proves brew install --cask of HermedBots from the project tap on a fresh macOS test machine.
-# No production secret is read. Nothing is published.
-#   bash scripts/homebrew-install-proof.sh dry-run   checks brew and the published cask; installs nothing
-#   bash scripts/homebrew-install-proof.sh           also installs, checks version, codesign, and Gatekeeper, launches, quits, uninstalls
-# Optional environment: HOMEBREW_PROOF_VERSION (expected short version; default is the version the tap publishes),
-# HOMEBREW_PROOF_APPDIR (applications folder that brew used; default /Applications)
 set -euo pipefail
 set +x
 
@@ -52,19 +46,26 @@ app_pids() {
 }
 
 stop_app() {
-  local pids
-  pids=$(app_pids)
-  [ -n "$pids" ] || return 0
+  local pid
+  local -a pids
+  pids=()
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    pids+=("$pid")
+  done < <(app_pids)
+  [ "${#pids[@]}" -gt 0 ] || return 0
   # PATH kill, not the bash builtin
-  # shellcheck disable=SC2086
-  env kill -TERM $pids 2>/dev/null || true
+  env kill -TERM "${pids[@]}" 2>/dev/null || true
   for _ in $(seq 1 30); do
     [ -z "$(app_pids)" ] && return 0
     sleep 0.5
   done
-  pids=$(app_pids)
-  # shellcheck disable=SC2086
-  [ -z "$pids" ] || env kill -KILL $pids 2>/dev/null || true
+  pids=()
+  while IFS= read -r pid; do
+    [ -n "$pid" ] || continue
+    pids+=("$pid")
+  done < <(app_pids)
+  [ "${#pids[@]}" -eq 0 ] || env kill -KILL "${pids[@]}" 2>/dev/null || true
 }
 
 cask_listed() {
