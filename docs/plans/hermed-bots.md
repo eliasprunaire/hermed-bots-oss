@@ -492,7 +492,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 - [ ] Lane 5. Use a wrong test key. Save `hd07-wrong-key.png`. Pass when a clear message shows and the logs show one attempt, not a loop.
 - [ ] Lane 6. Run `scripts/hv-netwatch.sh` during a session. Save `hd07-netwatch.png`. Pass when the only outbound connection is the tunnel.
 - [ ] Lane 7. Read `ps -o args` for the `ssh` child and search the evidence folder for the key. Save `hd07-no-secret.png`. Pass when the key value appears nowhere.
-- [ ] Lane 8. Run `testAHostThatNamesPersoHermesIsRefusedBeforeAnyConnection` and `testAPersoHermesHostInTheEnvironmentNeverStartsSsh`. Save `hd07-refuse-prod.png`. Pass when both tests pass and no ssh starts. Do not type `example-host` into the app. That string is a docs placeholder. The compiled guard still uses the existing fixtures.
+- [ ] Lane 8. Run the two TunnelTests rows in `docs/spike/issue57/skipped-tests.md` that cover the HD07 dedicated forbidden-host refusal and the reactivated refusal before SSH. Save `hd07-refuse-prod.png`. Pass when both tests pass and no ssh starts. Do not type `example-host` into the app. That string is a docs placeholder. The spike runner still passes the compiled selectors. Those names stay out of this plan.
 - [ ] Lane 9. Run `docker network disconnect bridge hv-hermes-test`, wait 30 s, and reconnect. Save `hd07-network-cut.png`. Pass when the tunnel reopens without user action.
 - [ ] Lane 10. Run `scripts/hv-guard.sh snapshot` and `check` around lanes 1 to 9. Save `hd07-guard.png`. Pass when the check exits 0.
 
