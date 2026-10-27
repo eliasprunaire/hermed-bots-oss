@@ -18,10 +18,7 @@ export PATH="$PATH:/usr/sbin"
 say() { printf '[%s Paris] %s\n' "$(TZ=Europe/Paris date +%H:%M:%S)" "$*"; }
 
 require_forbidden_target() {
-  if [ -z "${HV_FORBIDDEN_HOST:-}" ]; then
-    say "HV_FORBIDDEN_HOST unset, skip forbidden-target probe"
-    return 0
-  fi
+  : "${HV_FORBIDDEN_HOST:=forbidden.invalid}"
   "$SK/hv-guard.sh" target "$HV_FORBIDDEN_HOST"
   g=$?
   echo "hv-guard.sh target HV_FORBIDDEN_HOST : code $g (22 attendu)"
