@@ -174,18 +174,35 @@ Un succès de préflight ne prouve aucune signature ni installation.
 
 ## Installer avec Homebrew
 
-Après la première release, la commande est la suivante.
+Après la première release, installer l'app avec cette commande.
 
 ```bash
 brew install --cask eliasprunaire/tap/hermed-bots
 ```
 
 Le cask installe `HermedBots.app` dans Applications.
-Il utilise `auto_updates true`, car Sparkle gère les versions suivantes.
+Il utilise `auto_updates true`, car Sparkle gère les versions suivantes depuis l'app.
 Il exige macOS 27, nommé `golden_gate` par Homebrew.
+
+Mettre à jour le cask depuis Homebrew.
+
+```bash
+brew upgrade --cask eliasprunaire/tap/hermed-bots
+```
+
+Homebrew ignore un cask marqué `auto_updates true` pendant `brew upgrade`, sauf avec `--greedy`.
+La recherche dans le menu de l'app installe la version suivante.
+
+Désinstaller l'app.
+
+```bash
+brew uninstall --cask eliasprunaire/tap/hermed-bots
+```
+
 Aucun cask avec une empreinte inventée n'est livré dans le dépôt source.
 Le script le génère à partir du ZIP réellement notarisé.
 Consulter [le format des casks](https://docs.brew.sh/Cask-Cookbook).
+Les preuves d'installation et de mise à jour sont dans la section « Preuves ».
 
 ## Brancher l'app sur Hermes de production
 
@@ -358,18 +375,60 @@ Cette preuve est locale. Elle ne prouve pas la mise à jour depuis le flux publi
 1. Les builds sont signés ad hoc, avec leur propre identifiant de bundle.
 2. Le flux est servi sur la boucle locale, en HTTP. L'archive 0.1.2 vient du même serveur local.
 3. La paire Ed25519 est jetable. Le script la supprime à la fin de la passe.
-4. La release `v0.1.2` n'existe pas. La dernière release publiée est `v0.1.1`.
+4. Cette passe ne lit pas le flux publié.
 
-## Mise à jour depuis le flux publié : preuve en attente
+## Preuves
 
-La mise à jour d'une version publiée vers la version publiée suivante n'est pas prouvée.
-Cette preuve exige l'archive et `appcast.xml` d'une release 0.1.2 publiée par la chaîne automatique.
-La publication de 0.1.2 démarre quand le changement de `VERSION` à `0.1.2` arrive sur `main`.
-**Freeze version** crée alors le tag, puis **Release macOS** publie la release sans clic.
+Les sorties ci-dessous sont caviardées.
+Elles ne portent aucun chemin local, nom de machine, hôte ni adresse IP.
 
-L'app lit le flux à une adresse GitHub en HTTPS.
-Le flux public de la release courante répond HTTP 200 sans authentification, contrôlé depuis le poste de développement.
-La VM bloque cette adresse. Le miroir local sert seulement la disposition de Homebrew, en HTTP.
-La preuve de mise à jour exige donc un transport de recette approuvé vers le flux HTTPS et vers l'archive de la version publiée.
+### Installation Homebrew
 
-L'issue #19 reste ouverte jusqu'à cette preuve.
+La passe `scripts/homebrew-install-proof.sh` a réussi le 27/10/2026 dans une VM macOS de test jetable, sur `main` au commit `87cf3516`.
+
+```text
+HOMEBREW-INSTALL-PROOF version=0.1.3 expected=0.1.3 install=pass version-check=pass codesign=pass spctl=pass launch=pass uninstall=pass
+```
+
+### Mise à jour Sparkle de N vers N+1
+
+La passe `scripts/sparkle-update-proof.sh` depuis le flux publié a réussi le 25/10/2026.
+Elle a mis à jour 0.1.1 vers 0.1.2.
+Le résultat est install pass, version 0.1.2 après relance, codesign pass et spctl pass.
+Le script était au commit `6bdc827f`.
+Le code de sortie est 0.
+
+Cette passe précède `prove_single_copy`.
+Sa ligne de résultat n'a pas de champ `single-copy`.
+Elle ne prouve donc pas qu'une seule copie de l'app reste après la mise à jour.
+Une passe publiée actuelle doit imprimer `SPARKLE-PROOF-PUBLISHED` avec `single-copy pass`.
+Cette ligne n'est pas encore enregistrée.
+
+La preuve locale du 24/10/2026 reste dans la section précédente.
+Elle ne remplace pas cette passe publiée.
+
+### Rejouer les preuves
+
+Les deux scripts refusent une machine qui n'est pas macOS.
+Ils ont besoin d'une session graphique.
+
+Rejouer l'installation Homebrew.
+
+```bash
+bash scripts/homebrew-install-proof.sh
+```
+
+`dry-run` lit le cask et n'installe rien.
+
+```bash
+bash scripts/homebrew-install-proof.sh dry-run
+```
+
+Rejouer la mise à jour depuis le flux publié.
+
+```bash
+bash scripts/sparkle-update-proof.sh published
+```
+
+La dernière ligne commence par `SPARKLE-PROOF-PUBLISHED`.
+Le code de sortie 0 exige `single-copy pass`.
