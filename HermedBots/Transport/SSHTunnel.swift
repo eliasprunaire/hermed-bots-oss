@@ -26,7 +26,6 @@ enum SSHFailure: Error, Equatable, Sendable {
         if case .unreachable = self { true } else { false }
     }
 
-    /// Lit la sortie d'erreur de ssh ; les textes sont ceux d'OpenSSH 10 (docs/spike/S12-tunnel.md)
     static func classify(stderr: String) -> SSHFailure {
         let text = stderr
         let last = lastLine(text)
@@ -73,7 +72,6 @@ extension SSHFailure {
     }
 }
 
-/// La commande distante a répondu une erreur : son code de sortie et la dernière ligne de sa sortie d'erreur
 struct RemoteCommandFailure: Error, Equatable, Sendable {
     let status: Int32
     let detail: String

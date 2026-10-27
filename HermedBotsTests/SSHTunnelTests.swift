@@ -436,7 +436,6 @@ final class SSHTunnelSupervisorTests: XCTestCase {
         let tunnel = SSHTunnel(delays: [.milliseconds(10)])
         tunnel.start(config, backend: backend)
         await eventually("failed(wrongKey)") { tunnel.state == .failed(.wrongKey("")) }
-        // si une relance existait, le délai de 10 ms l'aurait déjà lancée
         try? await Task.sleep(for: .milliseconds(300))
         let opens = await backend.opens
         XCTAssertEqual(opens, 1)
@@ -590,7 +589,6 @@ final class SystemSSHBackendTests: XCTestCase {
     }
 }
 
-/// Un faux ssh : joue une liste d'issues dans l'ordre, une par `open`
 private actor FakeBackend: SSHBackend {
     enum Step {
         case fail(SSHFailure)

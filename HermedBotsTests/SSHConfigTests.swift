@@ -702,8 +702,6 @@ final class AppModelConnectTests: XCTestCase {
         await model.tunnel.stop()
     }
 
-    // MARK: lecture de la clé API après un refus
-
     private func keyModel(keys: [String: String] = [:], profiles: [String], reads: KeyReads, serve: @escaping @Sendable (URLRequest) -> Int) -> AppModel {
         let table = (["Profile  Model  Gateway  Alias  Distribution"] + profiles.map { "  \($0)   hv-fake-1   running   —   —" }).joined(separator: "\n")
         let environment = AppEnvironment.resolve(
