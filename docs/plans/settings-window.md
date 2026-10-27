@@ -1,6 +1,6 @@
 # Tabbed Settings window plan
 
-The macOS app still keeps connection fields, API keys, and the on-demand update action on the main window and in the connection sheet. This program moves those controls into the system Settings window, with one tab per group. The stored SSH endpoint survives a quit. The user never sees loopback ports, feed URLs, or other plumbing. macOS 27 and Swift 6 only.
+The macOS app still keeps connection fields and the on-demand update action on the main window and in the connection sheet. This program moves those controls into the system Settings window, with one tab per group. The stored SSH endpoint survives a quit. The user never sees loopback ports, feed URLs, or other plumbing. macOS 27 and Swift 6 only.
 The program enforces one rule. Settings live in `Settings`, not in the main split view.
 ST-01 is the only PR.
 
