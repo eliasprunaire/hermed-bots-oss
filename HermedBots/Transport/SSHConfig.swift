@@ -23,9 +23,6 @@ struct SSHConnectionPreview: Equatable, Sendable {
     let hasRelay: Bool
     let identity: SSHIdentityKind
     let identityPresent: Bool
-    let isUnknownAlias: Bool
-    let hasMatchBlock: Bool
-    let isUnreadable: Bool
 
     var identityPresentLabel: String {
         if identity == .certificate {
@@ -41,17 +38,15 @@ struct SSHConnectionPreview: Equatable, Sendable {
 
 struct SSHConfigDump: Equatable, Sendable {
     var stdout: String
-    var stderr: String = ""
 }
 
 protocol SSHConfigResolving: Sendable {
     func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump
+    func dumpAPIKey(alias: String, profile: String) async throws -> SSHConfigDump
 }
 
-/// `/usr/bin/ssh -G -vv <arguments du lancement>` : stdout = config aplatie ; stderr nomme Host et Match (`match found` n'apparaît qu'à `-vv`)
 struct SystemSSHConfigResolver: SSHConfigResolving {
     let environment: [String: String]
-    /// `-F` : un test seulement ; l'app résout toujours avec la config de l'utilisateur
     let configFile: String?
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment, configFile: String? = nil) {
@@ -60,7 +55,11 @@ struct SystemSSHConfigResolver: SSHConfigResolving {
     }
 
     static func arguments(alias: String, invocation: SSHInvocation, configFile: String? = nil) -> [String] {
-        ["-G", "-vv"] + (configFile.map { ["-F", $0] } ?? []) + SSHTunnelConfig.arguments(invocation, alias: alias)
+        ["-G"] + (configFile.map { ["-F", $0] } ?? []) + SSHTunnelConfig.arguments(invocation, alias: alias)
+    }
+
+    static func apiKeyArguments(alias: String, profile: String, configFile: String? = nil) throws -> [String] {
+        ["-G"] + (configFile.map { ["-F", $0] } ?? []) + (try SSHTunnelConfig.apiKeyLaunchArguments(alias: alias, profile: profile))
     }
 
     func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
@@ -70,17 +69,37 @@ struct SystemSSHConfigResolver: SSHConfigResolving {
                 "/usr/bin/ssh",
                 Self.arguments(alias: alias, invocation: invocation, configFile: configFile),
                 environment: SSHChildEnvironment.make(environment),
-                timeout: .seconds(8),
-                stderrLimit: SSHConfig.logLimit
+                timeout: .seconds(8)
             )
         } catch SpawnError.timedOut {
             throw SSHFailure.unreachable("délai dépassé")
         } catch {
             throw SSHFailure.unreachable("ssh ne démarre pas")
         }
-        // ssh sort en erreur sur une config qu'il ne lit pas (guillemet non fermé, option inconnue, argument manquant)
         guard output.status == 0 else { throw SSHFailure.unreadableConfig }
-        return SSHConfigDump(stdout: output.stdout, stderr: output.stderr)
+        return SSHConfigDump(stdout: output.stdout)
+    }
+
+    func dumpAPIKey(alias: String, profile: String) async throws -> SSHConfigDump {
+        let output: Spawn.Output
+        do {
+            output = try await Spawn.runGuarded(
+                "/usr/bin/ssh",
+                try Self.apiKeyArguments(alias: alias, profile: profile, configFile: configFile),
+                environment: SSHChildEnvironment.make(environment),
+                timeout: .seconds(8)
+            )
+        } catch SpawnError.timedOut {
+            throw SSHFailure.unreachable("délai dépassé")
+        } catch let failure as SSHFailure {
+            throw failure
+        } catch is HermesProfileName {
+            throw SSHFailure.invalidHost
+        } catch {
+            throw SSHFailure.unreachable("ssh ne démarre pas")
+        }
+        guard output.status == 0 else { throw SSHFailure.unreadableConfig }
+        return SSHConfigDump(stdout: output.stdout)
     }
 }
 
@@ -99,7 +118,6 @@ enum SSHConfig {
     ) -> SSHConnectionPreview {
         parse(
             dump.stdout,
-            debug: dump.stderr,
             alias: alias,
             localUser: localUser,
             filesExist: filesExist,
@@ -109,7 +127,6 @@ enum SSHConfig {
 
     static func parse(
         _ dump: String,
-        debug: String = "",
         alias: String,
         localUser: String,
         filesExist: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) },
@@ -119,7 +136,6 @@ enum SSHConfig {
         let hostname = first(values["hostname"]) ?? alias
         let user = first(values["user"]) ?? localUser
         let port = Int(first(values["port"]) ?? "") ?? 22
-        // `none` entier supprime un relais hérité ; `none,none` est une liste de sauts et reste un relais
         let hasRelay = ["proxyjump", "proxycommand"].contains { first(values[$0]).map { !isNone($0) } ?? false }
         let certificates = (values["certificatefile"] ?? []).filter { !isNone($0) }
         let identityFiles = values["identityfile"] ?? []
@@ -140,32 +156,12 @@ enum SSHConfig {
             port: port,
             hasRelay: hasRelay,
             identity: identity,
-            identityPresent: present,
-            isUnknownAlias: !namesAlias(alias, debug: debug),
-            hasMatchBlock: debug.contains("checking match for"),
-            isUnreadable: debug.utf8.count >= logLimit || debug.contains("matched no files")
+            identityPresent: present
         )
-    }
-
-    /// Taille maximale gardée du journal `ssh -G -vv` : au-delà, une ligne Match peut manquer
-    static let logLimit = 65_536
-
-    /// Un alias est connu si un bloc `Host` l'écrit tel quel : `debug1: <fichier> line <n>: Applying options for <motif>`
-    /// Les valeurs de `ssh -G` ne comptent pas : un `Host *` qui fixe un User, un Port ou une identité les donne à n'importe quel nom
-    /// ssh n'écrit que le premier motif de la ligne Host qui couvre l'alias : `Host * alias` n'est pas lu comme un nom
-    /// Une ligne qui n'a pas exactement cette forme ne nomme rien : l'alias est refusé
-    static func namesAlias(_ alias: String, debug: String) -> Bool {
-        debug.split(whereSeparator: \.isNewline).contains { line in
-            guard let match = line.wholeMatch(of: #/debug1: .* line [0-9]+: Applying options for (\S+)/#) else { return false }
-            let pattern = match.1
-            // `*`, `?` et `!` sont les seuls caractères spéciaux d'un motif Host ; ssh compare sans ignorer la casse
-            return !pattern.contains { "*?!".contains($0) } && String(pattern) == alias
-        }
     }
 
     private static func kind(certificates: [String], agent: String?, identityFiles: [String], authSock: String?) -> SSHIdentityKind {
         if !certificates.isEmpty { return .certificate }
-        // `IdentityAgent none` désactive l'agent, la socket de la session comprise
         if let agent, isNone(agent) { return .file }
         let customFiles = identityFiles.contains { !defaultIdentityNames.contains(URL(fileURLWithPath: $0).lastPathComponent) }
         if let agent, agent != "SSH_AUTH_SOCK" { return .agent }
@@ -224,26 +220,28 @@ enum SSHConfig {
 }
 
 enum SSHConnectionPlanner {
-    static func config(from preview: SSHConnectionPreview, refusePersoHermes: Bool, remotePort: Int = 8642) throws -> SSHTunnelConfig {
-        // l'app n'interprète aucun critère Match et refuse ce qu'elle ne lit pas avec certitude : en cas de doute, refus
-        if preview.isUnreadable { throw SSHFailure.unreadableConfig }
-        if preview.hasMatchBlock { throw SSHFailure.matchBlockRefused }
-        // un relais mène à un hôte que l'app ne sait pas valider : tout alias qui en contient un est refusé, en mode test comme hors mode test
+    static func config(from preview: SSHConnectionPreview, refuseTestHost: Bool, remotePort: Int = 8642, matching tunnel: SSHTunnelConfig? = nil) throws -> SSHTunnelConfig {
         if preview.hasRelay { throw SSHFailure.relayRefused }
-        let config = try SSHTunnelConfig(
+        let next = try SSHTunnelConfig(
             alias: preview.alias,
             hostname: preview.hostname,
             user: preview.user,
             sshPort: preview.port,
             remotePort: remotePort,
-            refusePersoHermes: refusePersoHermes
+            refuseTestHost: refuseTestHost
         )
-        if preview.isUnknownAlias { throw SSHFailure.unknownAlias }
-        return config
+        if let tunnel, !sameRoute(next, tunnel) { throw SSHFailure.routeMismatch }
+        return next
+    }
+
+    static func sameRoute(_ left: SSHTunnelConfig, _ right: SSHTunnelConfig) -> Bool {
+        left.hostname.caseInsensitiveCompare(right.hostname) == .orderedSame
+            && left.user == right.user
+            && left.sshPort == right.sshPort
     }
 }
 
-/// Une seule connexion en cours : `begin` invalide toute résolution en vol, y compris un refus local (vide, invalide, perso-hermes)
+/// Une seule connexion en cours : `begin` invalide toute résolution en vol, y compris un refus local (vide, invalide, example-host)
 @MainActor
 final class SSHConnector {
     private var generation = 0
@@ -264,7 +262,7 @@ final class SSHConnector {
 
     func begin(
         alias: String,
-        refusePersoHermes: Bool,
+        refuseTestHost: Bool,
         opened: @escaping @MainActor (SSHTunnelConfig, SSHConnectionPreview) -> Void,
         refused: @escaping @MainActor (SSHFailure, SSHConnectionPreview?) -> Void
     ) {
@@ -277,7 +275,7 @@ final class SSHConnector {
             refused(.invalidHost, nil)
             return
         }
-        if refusePersoHermes, trimmed.lowercased().contains("perso-hermes") {
+        if refuseTestHost, SSHTunnelConfig.isForbiddenTestHost(trimmed) {
             refused(.forbiddenHost, nil)
             return
         }
@@ -285,26 +283,25 @@ final class SSHConnector {
             refused(.invalidHost, nil)
             return
         }
-        task = Task { await resolve(alias: trimmed, id: id, refusePersoHermes: refusePersoHermes, opened: opened, refused: refused) }
+        task = Task { await resolve(alias: trimmed, id: id, refuseTestHost: refuseTestHost, opened: opened, refused: refused) }
     }
 
     private func resolve(
         alias: String,
         id: Int,
-        refusePersoHermes: Bool,
+        refuseTestHost: Bool,
         opened: @MainActor (SSHTunnelConfig, SSHConnectionPreview) -> Void,
         refused: @MainActor (SSHFailure, SSHConnectionPreview?) -> Void
     ) async {
         var preview: SSHConnectionPreview?
         do {
             var tunnel: (config: SSHTunnelConfig, preview: SSHConnectionPreview)?
-            // chaque lancement de ssh est validé avec ses propres arguments ; le tunnel (le premier) fournit l'aperçu
             for invocation in SSHInvocation.allCases {
                 let dump = try await resolver.dump(alias: alias, invocation: invocation)
                 guard id == generation, !Task.isCancelled else { return }
                 let next = SSHConfig.parse(dump, alias: alias, localUser: localUser, authSock: authSock)
-                preview = next
-                let config = try SSHConnectionPlanner.config(from: next, refusePersoHermes: refusePersoHermes)
+                preview = preview ?? next
+                let config = try SSHConnectionPlanner.config(from: next, refuseTestHost: refuseTestHost)
                 tunnel = tunnel ?? (config, next)
             }
             guard id == generation, !Task.isCancelled, let tunnel else { return }

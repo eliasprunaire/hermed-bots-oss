@@ -13,8 +13,8 @@ struct AppEnvironment {
     var testResumeScope: String?
     var testProfileTable: String?
 
-    /// Le mode test refuse toute cible qui nomme perso-hermes ; le produit s'y connecte, donc hors mode test rien n'est refusé
-    var refusePersoHermes: Bool { isTestMode }
+    /// Le mode test refuse l'hôte factice `example-host`. Hors mode test, aucun hôte n'est refusé.
+    var refuseTestHost: Bool { isTestMode }
 
     /// Le mode test n'existe que dans un build Debug : une Release ignore `HV_TEST_MODE`, `HV_TEST_API_KEY`, `HV_TEST_API_KEYS`, `HV_TEST_SSH_KEY`, `HV_API_URL`, `HV_HANG_MS` et `HV_SSH_*`
     /// `keychain` est une fabrique pour qu'un test prouve que le Trousseau n'est pas même construit en mode test

@@ -11,10 +11,10 @@ import os
 enum SSHFailure: Error, Equatable, Sendable {
     case forbiddenHost
     case relayRefused
+    case routeMismatch
     case invalidHost
     case invalidPort
     case unknownAlias
-    case matchBlockRefused
     case unreadableConfig
     case agentLockedOrEmpty(String)
     case certificateExpired(String)
@@ -53,11 +53,11 @@ extension SSHFailure {
         switch self {
         case .forbiddenHost: String(localized: "Cet hôte est refusé en mode test.")
         case .relayRefused: String(localized: "Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte.")
+        case .routeMismatch: String(localized: "La lecture de la clé ne vise pas le même hôte que le tunnel. La clé n'est pas lue.")
         case .invalidHost: String(localized: "L'alias SSH n'est pas valide.")
         case .invalidPort: String(localized: "Le port n'est pas valide.")
         case .unknownAlias: String(localized: "Cet alias SSH est inconnu.")
-        case .matchBlockRefused: String(localized: "Ta config SSH contient un bloc Match. Hermed Bots ne l'interprète pas et refuse l'alias : remplace le bloc Match par des blocs Host.")
-        case .unreadableConfig: String(localized: "Hermed Bots ne lit pas cette config SSH avec certitude : erreur de syntaxe, Include sans fichier ou journal trop long. L'alias est refusé.")
+        case .unreadableConfig: String(localized: "ssh ne lit pas cette config SSH. L'alias est refusé.")
         case .agentLockedOrEmpty(let detail): sshLine(detail) ?? String(localized: "L'agent SSH est verrouillé ou vide.")
         case .certificateExpired(let detail): sshLine(detail) ?? String(localized: "Le certificat SSH a expiré.")
         case .wrongKey(let detail): sshLine(detail) ?? String(localized: "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.")
@@ -77,8 +77,6 @@ struct RemoteCommandFailure: Error, Equatable, Sendable {
     let detail: String
 }
 
-/// Les quatre lancements de `/usr/bin/ssh` par l'app (les trois cas ci-dessous, plus `apiKeyArguments`)
-/// Un bloc `Match sessiontype none` ou `Match command …` ne vaut que pour l'un des trois cas : chacun est résolu avec ses arguments
 enum SSHInvocation: CaseIterable, Sendable {
     case tunnel
     case profileList
@@ -94,11 +92,11 @@ struct SSHTunnelConfig: Equatable, Sendable {
     let sshPort: Int
     let remotePort: Int
 
-    /// `refusePersoHermes` est vrai en mode test : aucune connexion de test ne doit viser perso-hermes comme alias ou hôte résolu
-    init(alias: String, hostname: String, user: String, sshPort: Int = 22, remotePort: Int = 8642, refusePersoHermes: Bool) throws {
-        if refusePersoHermes {
+    /// `refuseTestHost` est vrai en mode test : aucune connexion de test ne doit viser `example-host` comme alias ou hôte résolu
+    init(alias: String, hostname: String, user: String, sshPort: Int = 22, remotePort: Int = 8642, refuseTestHost: Bool) throws {
+        if refuseTestHost {
             let route = [alias, hostname]
-            if route.contains(where: { $0.lowercased().contains("perso-hermes") }) {
+            if route.contains(where: { Self.isForbiddenTestHost($0) }) {
                 throw SSHFailure.forbiddenHost
             }
         }
@@ -130,11 +128,13 @@ struct SSHTunnelConfig: Equatable, Sendable {
     /// Les arguments de la lecture de `API_SERVER_KEY` d'un profil
     /// La commande est écrite ici et non passée en paramètre : aucun appelant ne peut en lancer une autre
     func apiKeyArguments(profile: String) throws -> [String] {
-        Self.common([]) + [alias] + HermesAPIKey.remoteCommand(profile: try HermesAPIKey.validate(profile))
+        try Self.apiKeyLaunchArguments(alias: alias, profile: profile)
     }
 
-    /// Une seule définition par lancement : `ssh -G` reçoit les mêmes arguments pour évaluer les mêmes blocs `Match`
-    /// Les ports ne servent qu'au tunnel ; `ssh -G` ne lie rien
+    static func apiKeyLaunchArguments(alias: String, profile: String) throws -> [String] {
+        common([]) + [alias] + HermesAPIKey.remoteCommand(profile: try HermesAPIKey.validate(profile))
+    }
+
     static func arguments(_ invocation: SSHInvocation, alias: String, localPort: Int = 1, remotePort: Int = 8642) -> [String] {
         switch invocation {
         case .tunnel: common(["-N"]) + ["-L", "127.0.0.1:\(localPort):127.0.0.1:\(remotePort)", alias]
@@ -154,6 +154,12 @@ struct SSHTunnelConfig: Equatable, Sendable {
             args += ["-o", option]
         }
         return args
+    }
+
+    static let testHostToken = "example-host"
+
+    static func isForbiddenTestHost(_ value: String) -> Bool {
+        value.lowercased().contains(testHostToken)
     }
 
     static func isAlias(_ value: String) -> Bool {
@@ -619,13 +625,24 @@ final class SSHTunnel {
 /// Les ssh sont dans un seul groupe de processus, tué d'un coup à la fermeture
 actor SystemSSHBackend: SSHBackend {
     private let environment: [String: String]
+    private let resolver: any SSHConfigResolving
+    private let refuseTestHost: Bool
+    private let localUser: String
     private var watchdog: Child?
     /// le gardien en préparation, que `close()` arrête sans attendre la fin de l'ouverture
     private var preparing: Child?
     private var closed = false
 
-    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
+    init(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        resolver: any SSHConfigResolving = SystemSSHConfigResolver(),
+        refuseTestHost: Bool = false,
+        localUser: String = NSUserName()
+    ) {
         self.environment = environment
+        self.resolver = resolver
+        self.refuseTestHost = refuseTestHost
+        self.localUser = localUser
     }
 
     func open(_ config: SSHTunnelConfig) async throws -> SSHSession {
@@ -691,6 +708,9 @@ actor SystemSSHBackend: SSHBackend {
     func readAPIKey(_ config: SSHTunnelConfig, profile: String) async throws -> String? {
         try ensureLive()
         guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
+        let dump = try await resolver.dumpAPIKey(alias: config.alias, profile: profile)
+        let preview = SSHConfig.parse(dump, alias: config.alias, localUser: localUser)
+        _ = try SSHConnectionPlanner.config(from: preview, refuseTestHost: refuseTestHost, matching: config)
         let output: Spawn.Output
         do {
             output = try await Spawn.run(

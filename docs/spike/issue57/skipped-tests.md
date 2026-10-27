@@ -60,8 +60,8 @@ Les proxies spécialisés ne partagent pas le même serveur HTTP que la suite or
 | `SixActions/testSendingToTheOrbInstanceGetsTheModelReplyOnceInTheServerSession` | Maintenu | Cette lane exige les profils et les réponses de `hv-hermes-test`, via le tunnel VM. |
 | `SixActions/testTheSeededProfilesOfTheOrbInstanceShowAndTheParkedOneDoesNot` | Maintenu | Cette lane exige les profils et les réponses de `hv-hermes-test`, via le tunnel VM. |
 | `SixActions/testWithoutNamesTheRowsShowTheProfileIdAndTheThreadsShowTheirId` | Réactivé | Le test configure sa fixture, puis rétablit la configuration après son exécution. |
-| `TunnelTests/testAHostThatNamesPersoHermesIsRefusedBeforeAnyConnection` | Maintenu | Ces tests exigent un sshd, des clés SSH éphémères et un échantillonneur de processus. Lane HD07 dédiée. |
-| `TunnelTests/testAPersoHermesHostInTheEnvironmentNeverStartsSsh` | Réactivé | Le refus intervient avant SSH. Aucun sshd n’est nécessaire. |
+| `TunnelTests/testAHostThatNamesExampleHostIsRefusedBeforeAnyConnection` | Maintenu | Ces tests exigent un sshd, des clés SSH éphémères et un échantillonneur de processus. Lane HD07 dédiée. |
+| `TunnelTests/testAnExampleHostInTheEnvironmentNeverStartsSsh` | Réactivé | Le refus intervient avant SSH. Aucun sshd n’est nécessaire. |
 | `TunnelTests/testARefusedIdentityShowsOneClearMessageAndStopsWithoutARetryLoop` | Maintenu | Ce test exige un sshd, un alias dont l’identité est refusée (`HV_SSH_REFUSED=1`) et un échantillonneur de processus. Lane HD07 dédiée. |
 | `TunnelTests/testQuittingWithCommandQClosesTheAppAndItsTunnel` | Maintenu | Ces tests exigent un sshd, des clés SSH éphémères et un échantillonneur de processus. Lane HD07 dédiée. |
 | `TunnelTests/testTerminateClosesTheAppAndItsTunnel` | Maintenu | Ces tests exigent un sshd, des clés SSH éphémères et un échantillonneur de processus. Lane HD07 dédiée. |

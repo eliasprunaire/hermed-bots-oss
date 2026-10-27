@@ -81,13 +81,13 @@ final class AppEnvironmentTests: XCTestCase {
         XCTAssertNil(environment.baseURL)
     }
 
-    func testTestModeReadsTheSSHAliasFromTheEnvironmentAndRefusesPersoHermes() throws {
+    func testTestModeReadsTheSSHAliasFromTheEnvironmentAndRefusesExampleHost() throws {
         let environment = AppEnvironment.resolve(
             ["HV_TEST_MODE": "1", "HV_SSH_HOST": "lab.invalid", "HV_SSH_USER": "ignored", "HV_SSH_PORT": "2222", "HV_TEST_SSH_KEY": "cle-ssh-de-test"],
             defaults: isolatedDefaults(), keychain: spy
         )
         XCTAssertEqual(environment.ssh, SSHEndpoint(host: "lab.invalid"))
-        XCTAssertTrue(environment.refusePersoHermes)
+        XCTAssertTrue(environment.refuseTestHost)
         XCTAssertTrue(environment.secrets is InMemorySecretStore)
     }
 
@@ -146,7 +146,7 @@ final class AppEnvironmentTests: XCTestCase {
         XCTAssertNil(environment.baseURL)
         XCTAssertNil(environment.ssh, "la Release ignore HV_SSH_HOST")
         XCTAssertNil(environment.testProfileTable)
-        XCTAssertFalse(environment.refusePersoHermes)
+        XCTAssertFalse(environment.refuseTestHost)
     }
     #endif
 
@@ -169,7 +169,7 @@ final class AppEnvironmentTests: XCTestCase {
             defaults: defaults, keychain: { SpyKeychain() }
         )
         XCTAssertEqual(environment.ssh, SSHEndpoint(host: "lab.invalid"))
-        XCTAssertFalse(environment.refusePersoHermes, "perso-hermes est la cible réelle du produit")
+        XCTAssertFalse(environment.refuseTestHost, "hors mode test, aucun hôte n'est refusé")
         XCTAssertFalse(environment.secrets is InMemorySecretStore)
     }
 
