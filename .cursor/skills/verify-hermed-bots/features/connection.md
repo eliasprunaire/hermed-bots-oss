@@ -34,7 +34,8 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché. 
 - Un HTTP 401 ou 403 déclenche une lecture SSH, même alias et même config que le tunnel.
 - Commande distante figée : `hermes -p <profil> config get API_SERVER_KEY --raw`. Le profil passe une liste blanche.
 - Uniquement la clé du profil demandé (`hermes -p <profil> …`). Pas de repli sur `default`. Cache Trousseau `WhenUnlockedThisDeviceOnly`. Jamais affichée ni journalisée.
-- Échec : bandeau `Clé API introuvable sur l'hôte pour le profil <id>`. Un profil nommé sans clé n'envoie jamais la clé de `default`.
+- Échec sans clé détenue : bandeau `Clé API introuvable sur l'hôte pour le profil <id>`. Un profil nommé sans clé n'envoie jamais la clé de `default`.
+- Clé détenue mais refusée par Hermes : bandeau `La clé API est refusée pour le profil <id>`.
 - Le profil relu est celui de la requête refusée, pas celui du bot à l'écran : un 401 d'un bot en arrière-plan relit la clé de ce bot.
 - Une lecture par profil et par refus. « Réessayer » relit la clé du profil refusé, pas celle du bot à l'écran, et le bandeau reste tant que cette lecture échoue. La connexion et une réponse authentifiée (les sondes de capacités, pas `/health` qui est public) rouvrent aussi la lecture.
 
@@ -66,6 +67,7 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 | `perso-hermes` en mode test, sur l'alias ou sur l'hôte résolu d'un lancement ; l'alias tapé est refusé avant `ssh -G` | Cet hôte est refusé en mode test. |
 | `ProxyJump` ou `ProxyCommand`, quelle que soit la valeur (hors `none` entier ; `none,none` est une liste de sauts), vu par l'un des trois lancements ; tous les modes | Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte. |
 | Clé API absente sur l'hôte | Clé API introuvable sur l'hôte pour le profil … |
+| Clé API détenue et refusée par Hermes | La clé API est refusée pour le profil … |
 
 ## Vérification unitaire
 
