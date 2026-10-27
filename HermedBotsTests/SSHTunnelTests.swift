@@ -183,17 +183,17 @@ final class SSHTunnelConfigTests: XCTestCase {
     }
 
     func testOnlyAnUnreachableHostIsRetried() {
-        XCTAssertEqual(SSHFailure.classify(stderr: "operator@gateway.invalid: Permission denied (publickey)."), .wrongKey)
-        XCTAssertEqual(SSHFailure.classify(stderr: "sign_and_send_pubkey: signing failed for ed25519 from agent: agent refused operation"), .agentLockedOrEmpty)
-        XCTAssertEqual(SSHFailure.classify(stderr: "Could not open a connection to your authentication agent"), .agentLockedOrEmpty)
-        XCTAssertEqual(SSHFailure.classify(stderr: "Certificate invalid: expired"), .certificateExpired)
-        XCTAssertEqual(SSHFailure.classify(stderr: "Host key verification failed."), .hostKeyChanged)
-        XCTAssertEqual(SSHFailure.classify(stderr: "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@"), .hostKeyChanged)
+        XCTAssertEqual(SSHFailure.classify(stderr: "operator@gateway.invalid: Permission denied (publickey)."), .wrongKey("operator@gateway.invalid: Permission denied (publickey)."))
+        XCTAssertEqual(SSHFailure.classify(stderr: "sign_and_send_pubkey: signing failed for ed25519 from agent: agent refused operation"), .agentLockedOrEmpty("sign_and_send_pubkey: signing failed for ed25519 from agent: agent refused operation"))
+        XCTAssertEqual(SSHFailure.classify(stderr: "Could not open a connection to your authentication agent"), .agentLockedOrEmpty("Could not open a connection to your authentication agent"))
+        XCTAssertEqual(SSHFailure.classify(stderr: "Certificate invalid: expired"), .certificateExpired("Certificate invalid: expired"))
+        XCTAssertEqual(SSHFailure.classify(stderr: "Host key verification failed."), .hostKeyChanged("Host key verification failed."))
+        XCTAssertEqual(SSHFailure.classify(stderr: "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@"), .hostKeyChanged("@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@"))
         XCTAssertEqual(SSHFailure.classify(stderr: "ssh: connect to host gateway.invalid port 22: Connection refused\n"), .unreachable("ssh: connect to host gateway.invalid port 22: Connection refused"))
         XCTAssertEqual(SSHFailure.classify(stderr: ""), .unreachable(""))
         let retried = [SSHFailure.unreachable("x")].filter(\.retries)
         XCTAssertEqual(retried.count, 1)
-        for terminal in [SSHFailure.wrongKey, .hostKeyChanged, .unknownAlias, .matchBlockRefused, .unreadableConfig, .agentLockedOrEmpty, .certificateExpired, .forbiddenHost, .relayRefused, .invalidHost, .invalidPort] {
+        for terminal in [SSHFailure.wrongKey(""), .hostKeyChanged(""), .unknownAlias, .matchBlockRefused, .unreadableConfig, .agentLockedOrEmpty(""), .certificateExpired(""), .forbiddenHost, .relayRefused, .invalidHost, .invalidPort] {
             XCTAssertFalse(terminal.retries, "\(terminal)")
         }
     }
@@ -221,10 +221,13 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(text, "Cet hôte est refusé en mode test.")
         XCTAssertFalse(text.contains("docs/"))
         XCTAssertEqual(SSHFailure.unknownAlias.message, "Cet alias SSH est inconnu.")
-        XCTAssertEqual(SSHFailure.agentLockedOrEmpty.message, "L'agent SSH est verrouillé ou vide.")
-        XCTAssertEqual(SSHFailure.certificateExpired.message, "Le certificat SSH a expiré.")
-        XCTAssertTrue(SSHFailure.wrongKey.message.contains("refuse l'identité"))
-        XCTAssertFalse(SSHFailure.wrongKey.message.contains("Trousseau"))
+        XCTAssertEqual(SSHFailure.agentLockedOrEmpty("").message, "L'agent SSH est verrouillé ou vide.")
+        XCTAssertEqual(SSHFailure.certificateExpired("").message, "Le certificat SSH a expiré.")
+        XCTAssertTrue(SSHFailure.wrongKey("").message.contains("refuse l'identité"))
+        XCTAssertFalse(SSHFailure.wrongKey("").message.contains("Trousseau"))
+        let denied = SSHFailure.classify(stderr: "operator@gateway.invalid: Permission denied (publickey).")
+        XCTAssertEqual(denied.message, "operator@gateway.invalid: Permission denied (publickey).")
+        XCTAssertFalse(denied.message.contains("Trousseau"))
     }
 
     func testTheChildEnvironmentTakesTheSessionAgentAndNeverInheritsATestKey() async throws {
@@ -429,22 +432,22 @@ final class SSHTunnelSupervisorTests: XCTestCase {
     }
 
     func testAWrongKeyStopsAfterOneAttempt() async {
-        let backend = FakeBackend([.fail(.wrongKey)])
+        let backend = FakeBackend([.fail(.wrongKey(""))])
         let tunnel = SSHTunnel(delays: [.milliseconds(10)])
         tunnel.start(config, backend: backend)
-        await eventually("failed(wrongKey)") { tunnel.state == .failed(.wrongKey) }
+        await eventually("failed(wrongKey)") { tunnel.state == .failed(.wrongKey("")) }
         // si une relance existait, le délai de 10 ms l'aurait déjà lancée
         try? await Task.sleep(for: .milliseconds(300))
         let opens = await backend.opens
         XCTAssertEqual(opens, 1)
-        XCTAssertEqual(tunnel.state, .failed(.wrongKey))
+        XCTAssertEqual(tunnel.state, .failed(.wrongKey("")))
     }
 
     func testAChangedHostKeyIsNotRetried() async {
-        let backend = FakeBackend([.fail(.hostKeyChanged)])
+        let backend = FakeBackend([.fail(.hostKeyChanged(""))])
         let tunnel = SSHTunnel(delays: [.milliseconds(10)])
         tunnel.start(config, backend: backend)
-        await eventually("failed(hostKeyChanged)") { tunnel.state == .failed(.hostKeyChanged) }
+        await eventually("failed(hostKeyChanged)") { tunnel.state == .failed(.hostKeyChanged("")) }
         try? await Task.sleep(for: .milliseconds(200))
         let opens = await backend.opens
         XCTAssertEqual(opens, 1)
@@ -485,7 +488,7 @@ final class SSHTunnelSupervisorTests: XCTestCase {
         tunnel.start(config, backend: backend)
         await eventually("open") { tunnel.state == .open(localPort: 40005) }
         await backend.drop(stderr: "hvssh@h: Permission denied (publickey).")
-        await eventually("failed(wrongKey)") { tunnel.state == .failed(.wrongKey) }
+        await eventually("failed(wrongKey)") { tunnel.state == .failed(.wrongKey("hvssh@h: Permission denied (publickey).")) }
     }
 
     func testStopClosesTheBackendAndNothingReopens() async {
@@ -558,6 +561,32 @@ final class SystemSSHBackendTests: XCTestCase {
         } catch {
             XCTAssertTrue(error is CancellationError, "\(error)")
         }
+    }
+
+    func testOpenOnAnInvalidAliasLaunchesSystemSshAndSurfacesItsStderr() async throws {
+        let config = try SSHTunnelConfig(alias: "lab.invalid", hostname: "lab.invalid", user: "operator", refusePersoHermes: true)
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("hb-ssh-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: home) }
+        let backend = SystemSSHBackend(environment: [
+            "PATH": "/usr/bin:/bin",
+            "HOME": home.path,
+            "USER": "operator",
+            "LOGNAME": "operator",
+        ])
+        do {
+            _ = try await backend.open(config)
+            XCTFail("open() a réussi vers lab.invalid")
+        } catch let failure as SSHFailure {
+            XCTAssertFalse(failure.message.contains("Trousseau"), failure.message)
+            XCTAssertFalse(failure.message.isEmpty)
+            let args = config.arguments(localPort: 1)
+            XCTAssertEqual(args.last, "lab.invalid")
+            XCTAssertNil(args.firstIndex(of: "-i"))
+            XCTAssertNil(args.firstIndex(of: "-F"))
+            XCTAssertNil(args.firstIndex(of: "-l"))
+        }
+        await backend.close()
     }
 }
 

@@ -27,7 +27,7 @@ See `features/sparkle-update.md`.
 
 Lire `features/connection.md`.
 
-L'utilisateur saisit un alias SSH. L'app résout tout le reste avec `/usr/bin/ssh -G <alias>` (config par défaut, `Include` compris). Le tunnel, `hermes profile list` et la lecture de `API_SERVER_KEY` passent par `/usr/bin/ssh` et le même alias. Pas de `-F /dev/null`, pas de `-i`, pas d'agent privé, pas de lecture de clé SSH dans le Trousseau.
+L'utilisateur saisit un alias SSH. L'app résout tout le reste avec `/usr/bin/ssh -G <alias>` (config par défaut, `Include` compris). Le tunnel, `hermes profile list` et la lecture de `API_SERVER_KEY` passent par `/usr/bin/ssh` et le même alias. Pas de `-F /dev/null`, pas de `-i`, pas d'agent privé. Connect ne lit pas le Trousseau. Un échec de ssh affiche la dernière ligne de stderr.
 
 Aucune saisie de clé API. Récupération figée : `hermes -p <profil> config get API_SERVER_KEY --raw`. Un profil n'utilise que sa propre clé, jamais celle de `default`. Échec sans clé : « Clé API introuvable sur l'hôte pour le profil … ». Clé détenue mais refusée : « La clé API est refusée pour le profil … ». Jamais la valeur.
 

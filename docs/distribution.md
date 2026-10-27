@@ -91,7 +91,7 @@ Les contrôles et les téléchargements automatiques sont désactivés dans le b
 L'utilisateur lance une recherche depuis le menu de l'app ou depuis le bouton équivalent dans Connexion.
 La première installation reste manuelle.
 Aucune compilation locale n'est nécessaire ensuite.
-Le réglage de connexion et les secrets du Trousseau restent hors du bundle remplacé.
+Le réglage de connexion reste hors du bundle remplacé.
 
 ## Figer une version
 
@@ -218,9 +218,9 @@ Aucune commande de cette PR ne se connecte à la production.
 4. Cliquer sur **Connecter**.
 5. Contrôler la liste des bots et la version Hermes affichée. L'app lit `API_SERVER_KEY` toute seule par SSH ; il n'y a aucune saisie de clé API.
 
-L'app ne lit plus de clé privée SSH dans le Trousseau.
-Elle lance `/usr/bin/ssh` avec l'alias et la config de l'utilisateur, sans `-F /dev/null` et sans agent privé.
-Les clés API restent dans le Trousseau, service `com.hermedbots.HermedBots`, compte `hermes-api-key:<profil>`.
+L'app lance `/usr/bin/ssh` avec l'alias et la config de l'utilisateur, sans `-F /dev/null`, sans `-i` et sans agent privé.
+ssh choisit les clés (agent, `IdentityFile`, config). Connect ne lit pas le Trousseau.
+Si ssh échoue, l'app affiche la dernière ligne de sa sortie d'erreur.
 Seul l'alias SSH persiste dans les réglages.
 Le tunnel expose l'API distante uniquement sur la boucle locale.
 Une mise à jour ne modifie pas ces réglages.
@@ -241,7 +241,7 @@ Le script ne publie rien et ne lit aucune clé de production.
 8. Il supprime la paire de clés, les builds et les caches de la passe.
 
 Les builds de la preuve ont leur propre identifiant de bundle, `com.hermedbots.HermedBots.updateproof`.
-Ils ne touchent ni les réglages ni le Trousseau d'une app installée.
+Ils ne touchent ni les réglages ni les secrets d'une app installée.
 Le script démarre les apps et exige une session graphique macOS.
 Sur le Mac de développement, la passe tourne dans la VM jetable :
 

@@ -26,11 +26,6 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "absent" } }
       }
     },
-    "absente du Trousseau" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "missing from the Keychain" } }
-      }
-    },
     "Afficher la nouvelle liste" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Show the new list" } }
@@ -191,11 +186,6 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Host unreachable." } }
       }
     },
-    "illisible" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "unreadable" } }
-      }
-    },
     "inconnu" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "unknown" } }
@@ -346,11 +336,6 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Parameters" } }
       }
     },
-    "pas encore lue" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "not read yet" } }
-      }
-    },
     "présent" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "present" } }
@@ -359,11 +344,6 @@
     "présente" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "present" } }
-      }
-    },
-    "présente dans le Trousseau" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "present in the Keychain" } }
       }
     },
     "Refuser" : {
