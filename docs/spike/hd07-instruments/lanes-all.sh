@@ -20,10 +20,10 @@ say "lane 10, début : snapshot des chemins protégés"
 # 20 et 21 : arrêt avant toute opération de test
 [ "$g" = 0 ] || { echo "RESULT FAIL : hv-guard.sh snapshot code $g, aucune lane lancée"; exit "$g"; }
 results+=("guard-snapshot=0")
-# les codes de target sont imposés : tout écart arrête la passe avant la première lane
-"$SK/hv-guard.sh" target example-host.invalid; g=$?
-echo "hv-guard.sh target example-host.invalid : code $g (22 attendu)"
-[ "$g" = 22 ] || { echo "RESULT FAIL : hv-guard.sh target example-host.invalid code $g, 22 attendu, aucune lane lancée"; exit 1; }
+forbidden=${HV_FORBIDDEN_HOST:?}
+"$SK/hv-guard.sh" target "$forbidden"; g=$?
+echo "hv-guard.sh target $forbidden : code $g (22 attendu)"
+[ "$g" = 22 ] || { echo "RESULT FAIL : hv-guard.sh target $forbidden code $g, 22 attendu, aucune lane lancée"; exit 1; }
 "$SK/hv-guard.sh" target host.example; g=$?
 echo "hv-guard.sh target host.example : code $g (0 attendu)"
 [ "$g" = 0 ] || { echo "RESULT FAIL : hv-guard.sh target host.example code $g, 0 attendu, aucune lane lancée"; exit 1; }

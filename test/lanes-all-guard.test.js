@@ -82,6 +82,7 @@ function runPass(codes) {
           GUARD_SNAPSHOT: String(codes.snapshot),
           GUARD_REFUSED: String(codes.refused),
           GUARD_ALLOWED: String(codes.allowed),
+          HV_FORBIDDEN_HOST: "example-host.invalid",
         },
       },
     );
