@@ -4,7 +4,7 @@ import XCTest
 // compilé dans le paquet de tests lui-même, sans l'app comme hôte : aucun test ici n'ouvre de connexion réseau
 final class SSHTunnelConfigTests: XCTestCase {
     private func config(alias: String = "lab.invalid", hostname: String = "gateway.invalid", refuse: Bool = true) throws -> SSHTunnelConfig {
-        try SSHTunnelConfig(alias: alias, hostname: hostname, user: "operator", refusePersoHermes: refuse)
+        try SSHTunnelConfig(alias: alias, hostname: hostname, user: "operator", refuseTestHost: refuse)
     }
 
     func testArgumentsOpenAForwardWithTheAliasAndTheUserConfig() throws {
@@ -148,23 +148,23 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertNil(try api.authorization(for: "sport"))
     }
 
-    func testPersoHermesStaysRefusedWhenBuildingAPIKeyArgumentsInTestMode() {
-        XCTAssertThrowsError(try SSHTunnelConfig(alias: "perso-hermes.invalid", hostname: "gateway.invalid", user: "operator", refusePersoHermes: true).apiKeyArguments(profile: "cyber")) {
+    func testExampleHostStaysRefusedWhenBuildingAPIKeyArgumentsInTestMode() {
+        XCTAssertThrowsError(try SSHTunnelConfig(alias: "example-host.invalid", hostname: "gateway.invalid", user: "operator", refuseTestHost: true).apiKeyArguments(profile: "cyber")) {
             XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
         }
     }
 
-    func testPersoHermesIsRefusedInTestModeOnTheAliasAndOnTheResolvedHost() {
-        for alias in ["perso-hermes.invalid", "PERSO-HERMES.INVALID", "perso-hermes-alias.invalid"] {
+    func testExampleHostIsRefusedInTestModeOnTheAliasAndOnTheResolvedHost() {
+        for alias in ["example-host.invalid", "EXAMPLE-HOST.INVALID", "example-host-alias.invalid"] {
             XCTAssertThrowsError(try config(alias: alias, hostname: "gateway.invalid"), alias) { XCTAssertEqual($0 as? SSHFailure, .forbiddenHost, alias) }
         }
-        XCTAssertThrowsError(try config(alias: "lab.invalid", hostname: "ssh.perso-hermes.invalid")) {
+        XCTAssertThrowsError(try config(alias: "lab.invalid", hostname: "ssh.example-host.invalid")) {
             XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
         }
     }
 
-    func testPersoHermesIsAllowedOutsideTestMode() throws {
-        XCTAssertEqual(try config(alias: "perso-hermes.invalid", hostname: "perso-hermes.invalid", refuse: false).alias, "perso-hermes.invalid")
+    func testExampleHostIsAllowedOutsideTestMode() throws {
+        XCTAssertEqual(try config(alias: "example-host.invalid", hostname: "example-host.invalid", refuse: false).alias, "example-host.invalid")
     }
 
     func testAliasAndPortAreValidatedBeforeAnyArgumentIsBuilt() {
@@ -172,7 +172,7 @@ final class SSHTunnelConfigTests: XCTestCase {
             XCTAssertThrowsError(try config(alias: alias), alias) { XCTAssertEqual($0 as? SSHFailure, .invalidHost, alias) }
         }
         for port in [0, -1, 65536] {
-            XCTAssertThrowsError(try SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "u", sshPort: port, refusePersoHermes: true), "\(port)") {
+            XCTAssertThrowsError(try SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "u", sshPort: port, refuseTestHost: true), "\(port)") {
                 XCTAssertEqual($0 as? SSHFailure, .invalidPort)
             }
         }
@@ -417,7 +417,7 @@ final class GuardedSpawnTests: XCTestCase {
 
 @MainActor
 final class SSHTunnelSupervisorTests: XCTestCase {
-    private let config = try! SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refusePersoHermes: true)
+    private let config = try! SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refuseTestHost: true)
 
     private func eventually(_ what: String, timeout: TimeInterval = 3, _ condition: () async -> Bool) async {
         let deadline = Date().addingTimeInterval(timeout)
@@ -546,7 +546,7 @@ final class SSHTunnelSupervisorTests: XCTestCase {
 }
 
 final class SystemSSHBackendTests: XCTestCase {
-    private let config = try! SSHTunnelConfig(alias: "lab.invalid", hostname: "127.0.0.1", user: "operator", sshPort: 1, refusePersoHermes: true)
+    private let config = try! SSHTunnelConfig(alias: "lab.invalid", hostname: "127.0.0.1", user: "operator", sshPort: 1, refuseTestHost: true)
 
     func testOpeningAfterCloseStartsNothing() async throws {
         let backend = SystemSSHBackend(environment: ["PATH": "/usr/bin:/bin"])
@@ -560,7 +560,7 @@ final class SystemSSHBackendTests: XCTestCase {
     }
 
     func testOpenOnAnInvalidAliasLaunchesSystemSshAndSurfacesItsStderr() async throws {
-        let config = try SSHTunnelConfig(alias: "lab.invalid", hostname: "lab.invalid", user: "operator", refusePersoHermes: true)
+        let config = try SSHTunnelConfig(alias: "lab.invalid", hostname: "lab.invalid", user: "operator", refuseTestHost: true)
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("hb-ssh-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: home) }

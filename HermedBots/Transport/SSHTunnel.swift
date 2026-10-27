@@ -90,11 +90,11 @@ struct SSHTunnelConfig: Equatable, Sendable {
     let sshPort: Int
     let remotePort: Int
 
-    /// `refusePersoHermes` est vrai en mode test : aucune connexion de test ne doit viser perso-hermes comme alias ou hôte résolu
-    init(alias: String, hostname: String, user: String, sshPort: Int = 22, remotePort: Int = 8642, refusePersoHermes: Bool) throws {
-        if refusePersoHermes {
+    /// `refuseTestHost` est vrai en mode test : aucune connexion de test ne doit viser `example-host` comme alias ou hôte résolu
+    init(alias: String, hostname: String, user: String, sshPort: Int = 22, remotePort: Int = 8642, refuseTestHost: Bool) throws {
+        if refuseTestHost {
             let route = [alias, hostname]
-            if route.contains(where: { $0.lowercased().contains("perso-hermes") }) {
+            if route.contains(where: { Self.isForbiddenTestHost($0) }) {
                 throw SSHFailure.forbiddenHost
             }
         }
@@ -152,6 +152,12 @@ struct SSHTunnelConfig: Equatable, Sendable {
             args += ["-o", option]
         }
         return args
+    }
+
+    static let testHostToken = "example-host"
+
+    static func isForbiddenTestHost(_ value: String) -> Bool {
+        value.lowercased().contains(testHostToken)
     }
 
     static func isAlias(_ value: String) -> Bool {
@@ -618,7 +624,7 @@ final class SSHTunnel {
 actor SystemSSHBackend: SSHBackend {
     private let environment: [String: String]
     private let resolver: any SSHConfigResolving
-    private let refusePersoHermes: Bool
+    private let refuseTestHost: Bool
     private let localUser: String
     private var watchdog: Child?
     /// le gardien en préparation, que `close()` arrête sans attendre la fin de l'ouverture
@@ -628,12 +634,12 @@ actor SystemSSHBackend: SSHBackend {
     init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         resolver: any SSHConfigResolving = SystemSSHConfigResolver(),
-        refusePersoHermes: Bool = false,
+        refuseTestHost: Bool = false,
         localUser: String = NSUserName()
     ) {
         self.environment = environment
         self.resolver = resolver
-        self.refusePersoHermes = refusePersoHermes
+        self.refuseTestHost = refuseTestHost
         self.localUser = localUser
     }
 
@@ -702,7 +708,7 @@ actor SystemSSHBackend: SSHBackend {
         guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
         let dump = try await resolver.dumpAPIKey(alias: config.alias, profile: profile)
         let preview = SSHConfig.parse(dump, alias: config.alias, localUser: localUser)
-        _ = try SSHConnectionPlanner.config(from: preview, refusePersoHermes: refusePersoHermes)
+        _ = try SSHConnectionPlanner.config(from: preview, refuseTestHost: refuseTestHost)
         let output: Spawn.Output
         do {
             output = try await Spawn.run(

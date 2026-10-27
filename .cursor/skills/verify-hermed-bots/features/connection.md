@@ -50,7 +50,7 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 - `SSH_AUTH_SOCK` vient de la session. `IdentityAgent` de la config ssh a priorité. `IdentityAgent none` désactive l'agent, socket de la session comprise : l'identité affichée est un fichier.
 - Liste des profils : second `/usr/bin/ssh` avec l'alias, commande `hermes profile list`.
 - Une nouvelle demande de connexion, y compris un refus local (alias vide ou invalide), invalide la génération en cours.
-- Clé API : `ssh -G` plus les arguments exacts de `hermes -p <profil> config get API_SERVER_KEY --raw`, puis le planificateur (relais et perso-hermes), puis le même `/usr/bin/ssh` avec cette commande. Une clé publique absente sur disque n'arrête pas la lecture.
+- Clé API : `ssh -G` plus les arguments exacts de `hermes -p <profil> config get API_SERVER_KEY --raw`, puis le planificateur (relais et hôte factice `example-host` en mode test), puis le même `/usr/bin/ssh` avec cette commande. Une clé publique absente sur disque n'arrête pas la lecture.
 
 ## Échecs
 
@@ -63,7 +63,7 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 | Serveur refuse l'identité | Dernière ligne stderr de ssh, ou le bandeau français si cette ligne est vide. |
 | Clé d'hôte changée | Dernière ligne stderr de ssh, ou « La clé de l'hôte a changé. Le tunnel reste fermé. » si cette ligne est vide. |
 | Hôte injoignable | Dernière ligne stderr de ssh, précédée de « Hôte injoignable : » quand elle n'est pas vide. |
-| `perso-hermes` en mode test, sur l'alias ou sur l'hôte résolu d'un lancement (tunnel, liste, détection, lecture de clé) ; l'alias tapé est refusé avant `ssh -G` | Cet hôte est refusé en mode test. |
+| `example-host` en mode test, sur l'alias ou sur l'hôte résolu d'un lancement (tunnel, liste, détection, lecture de clé) ; l'alias tapé est refusé avant `ssh -G` | Cet hôte est refusé en mode test. |
 | `ProxyJump` ou `ProxyCommand`, quelle que soit la valeur (hors `none` entier ; `none,none` est une liste de sauts), vu par l'un des trois lancements ou par la lecture de clé ; tous les modes | Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte. |
 | Clé API absente sur l'hôte | Clé API introuvable sur l'hôte pour le profil … |
 | Clé API détenue et refusée par Hermes | La clé API est refusée pour le profil … |
@@ -71,7 +71,7 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 ## Vérification unitaire
 
 - Parser `ssh -G` simulé : cas `Include` (alias `lab` → `gateway.invalid`) et sortie par défaut (`unknown-alias.invalid`, port 22) acceptée. Une clé publique absente sur disque n'empêche pas le planificateur.
-- `RealSshConfigTests` lance le vrai `/usr/bin/ssh -G -F` : un `Match` avec `Include` résout et accepte `lab.invalid`, les formes `Match` que ssh lit sont acceptées, une config que ssh refuse reste refusée. `dumpAPIKey` du même ssh refuse un relais ou `perso-hermes` vu seulement par `Match command` (saut si ssh ne connaît pas cet attribut).
+- `RealSshConfigTests` lance le vrai `/usr/bin/ssh -G -F` : un `Match` avec `Include` résout et accepte `lab.invalid`, les formes `Match` que ssh lit sont acceptées, une config que ssh refuse reste refusée. `dumpAPIKey` du même ssh refuse un relais ou `example-host` vu seulement par `Match command` (saut si ssh ne connaît pas cet attribut).
 - `test/ssh-g-resolution.test.js` rejoue le fixture `Match` plus `Include` et échoue si le Swift de l'app lit `~/.ssh/config` ou nomme encore `matchBlockRefused`.
 - Arguments exacts de la résolution : `-G` plus ceux du lancement réel, pour les trois lancements. Jamais `-vv`. `-F` seulement dans un test.
 - Relais (`ProxyJump` ou `ProxyCommand`, valeurs de toute forme, y compris URI, `user@hop`, `none,none`, `NONE,NONE`) : refusé en mode test et hors mode test, y compris quand un seul lancement le voit. Seul `none` comme valeur entière n'est pas un relais.

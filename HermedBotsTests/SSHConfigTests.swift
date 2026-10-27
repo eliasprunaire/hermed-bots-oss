@@ -56,7 +56,7 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertFalse(preview.hostname.contains("BEGIN"))
         XCTAssertFalse(preview.identityPresentLabel.contains("/tmp"))
         XCTAssertFalse(preview.identity.label.contains("/tmp"))
-        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true))
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refuseTestHost: true))
     }
 
     func testSshGStdoutIsAcceptedEvenWhenOnlyDefaultIdentitiesAppear() {
@@ -66,7 +66,7 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertFalse(preview.hasRelay)
         XCTAssertEqual(preview.identity, .file)
         XCTAssertFalse(preview.identityPresent)
-        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true))
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refuseTestHost: true))
     }
 
     func testAMissingPublicKeyOnDiskDoesNotRefuseTheAlias() {
@@ -83,7 +83,7 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertFalse(preview.identityPresent)
         XCTAssertEqual(preview.identityPresentTitle, "Clé publique")
         XCTAssertEqual(preview.identityPresentLabel, "absente")
-        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true))
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refuseTestHost: true))
     }
 
     func testAPresentPublicKeyIsOnlyALabel() {
@@ -99,7 +99,7 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertEqual(preview.identity, .file)
         XCTAssertTrue(preview.identityPresent)
         XCTAssertEqual(preview.identityPresentLabel, "présente")
-        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true))
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refuseTestHost: true))
     }
 
     func testAnAgentIdentityUsesTheSessionSocketWithoutReadingTheKeychain() {
@@ -127,24 +127,24 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertEqual(preview.user, "operator")
     }
 
-    func testTheResolvedPersoHermesHostIsRefusedInTestMode() {
+    func testTheResolvedExampleHostHostIsRefusedInTestMode() {
         let dump = """
             user operator
-            hostname perso-hermes.invalid
+            hostname example-host.invalid
             port 22
             identityfile /tmp/fake-id.invalid
             """
         let preview = parse(dump, alias: "lab.invalid")
-        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
+        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refuseTestHost: true)) {
             XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
         }
-        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: false))
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refuseTestHost: false))
     }
 
-    func testPersoHermesAliasIsRefusedInTestMode() {
-        let dump = defaultDump.replacingOccurrences(of: "unknown-alias.invalid", with: "perso-hermes.invalid")
-        let preview = parse(dump, alias: "perso-hermes.invalid")
-        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
+    func testExampleHostAliasIsRefusedInTestMode() {
+        let dump = defaultDump.replacingOccurrences(of: "unknown-alias.invalid", with: "example-host.invalid")
+        let preview = parse(dump, alias: "example-host.invalid")
+        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refuseTestHost: true)) {
             XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
         }
     }
@@ -168,7 +168,7 @@ final class SSHConfigTests: XCTestCase {
             )
             XCTAssertEqual(custom.identity, .file, value)
             XCTAssertFalse(custom.identityPresent, "\(value) : seule la socket existe, et l'agent est désactivé")
-            XCTAssertNoThrow(try SSHConnectionPlanner.config(from: custom, refusePersoHermes: true), value)
+            XCTAssertNoThrow(try SSHConnectionPlanner.config(from: custom, refuseTestHost: true), value)
         }
     }
 
@@ -176,7 +176,7 @@ final class SSHConfigTests: XCTestCase {
         let relays = [
             "proxyjump bastion.invalid",
             "proxyjump operator@bastion.invalid:2222,second.invalid",
-            "proxyjump perso-hermes.invalid",
+            "proxyjump example-host.invalid",
             "proxyjump -",
             "proxyjump ssh://jump-alias.invalid,second.invalid",
             "proxyjump blocked@jump-alias.invalid",
@@ -184,7 +184,7 @@ final class SSHConfigTests: XCTestCase {
             "proxyjump NONE,NONE",
             "proxyjump none,bastion.invalid",
             "proxycommand /usr/bin/nc bastion.invalid 22",
-            "proxycommand /usr/bin/ssh -W %h:%p perso-hermes.invalid",
+            "proxycommand /usr/bin/ssh -W %h:%p example-host.invalid",
             "proxycommand true",
         ]
         for relay in relays {
@@ -198,7 +198,7 @@ final class SSHConfigTests: XCTestCase {
             let preview = parse(dump, alias: "lab.invalid")
             XCTAssertTrue(preview.hasRelay, relay)
             for refuse in [true, false] {
-                XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: refuse), relay) {
+                XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refuseTestHost: refuse), relay) {
                     XCTAssertEqual($0 as? SSHFailure, .relayRefused, relay)
                 }
             }
@@ -208,11 +208,11 @@ final class SSHConfigTests: XCTestCase {
     func testNoneIsNotARelay() {
         let preview = parse(includedDump, alias: "lab", existing: ["/tmp/fake-id.invalid-cert.pub"])
         XCTAssertFalse(preview.hasRelay)
-        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: false))
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refuseTestHost: false))
     }
 
     func testResolutionArgumentsAreDashGPlusTheLaunchAndNeverDashVv() throws {
-        let config = try SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refusePersoHermes: true)
+        let config = try SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refuseTestHost: true)
         let launched: [SSHInvocation: [String]] = [
             .tunnel: config.arguments(localPort: 1),
             .profileList: config.profileListArguments(),
@@ -244,20 +244,20 @@ final class SSHConfigTests: XCTestCase {
             "user operator\nhostname gateway.invalid\nport 22\nidentityfile /tmp/fake-id.invalid\nproxyjump bastion.invalid\n",
             alias: "lab.invalid"
         )
-        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
+        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refuseTestHost: true)) {
             XCTAssertEqual($0 as? SSHFailure, .relayRefused)
         }
-        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: false)) {
+        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refuseTestHost: false)) {
             XCTAssertEqual($0 as? SSHFailure, .relayRefused)
         }
     }
 
-    func testAnAPIKeyDumpThatResolvesPersoHermesIsRefusedInTestMode() {
+    func testAnAPIKeyDumpThatResolvesExampleHostIsRefusedInTestMode() {
         let preview = parse(
-            "user operator\nhostname perso-hermes.invalid\nport 22\nidentityfile /tmp/fake-id.invalid\nproxyjump none\n",
+            "user operator\nhostname example-host.invalid\nport 22\nidentityfile /tmp/fake-id.invalid\nproxyjump none\n",
             alias: "lab.invalid"
         )
-        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
+        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refuseTestHost: true)) {
             XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
         }
     }
@@ -285,9 +285,9 @@ final class SSHConnectorTests: XCTestCase {
         let connector = SSHConnector(resolver: resolver, localUser: "operator")
         var opened: [String] = []
         var refused: [SSHFailure] = []
-        connector.begin(alias: "a.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        connector.begin(alias: "a.invalid", refuseTestHost: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         await eventually { await resolver.started == ["a.invalid"] }
-        connector.begin(alias: "b.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        connector.begin(alias: "b.invalid", refuseTestHost: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         await eventually { await resolver.started == ["a.invalid", "b.invalid"] }
         await resolver.release("b.invalid")
         await eventually { opened == ["b.invalid"] }
@@ -304,9 +304,9 @@ final class SSHConnectorTests: XCTestCase {
         let connector = SSHConnector(resolver: resolver, localUser: "operator")
         var opened: [String] = []
         var refused: [SSHFailure] = []
-        connector.begin(alias: "a.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        connector.begin(alias: "a.invalid", refuseTestHost: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         await eventually { await resolver.started == ["a.invalid"] }
-        connector.begin(alias: "   ", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        connector.begin(alias: "   ", refuseTestHost: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         XCTAssertEqual(refused, [.invalidHost])
         let startedAfterEmpty = await resolver.started
         XCTAssertEqual(startedAfterEmpty, ["a.invalid"])
@@ -323,9 +323,9 @@ final class SSHConnectorTests: XCTestCase {
         let connector = SSHConnector(resolver: resolver, localUser: "operator")
         var opened: [String] = []
         var refused: [SSHFailure] = []
-        connector.begin(alias: "a.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        connector.begin(alias: "a.invalid", refuseTestHost: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         await eventually { await resolver.started == ["a.invalid"] }
-        connector.begin(alias: "bad alias", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        connector.begin(alias: "bad alias", refuseTestHost: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         XCTAssertEqual(refused, [.invalidHost])
         await resolver.release("a.invalid")
         try? await Task.sleep(for: .milliseconds(80))
@@ -340,7 +340,7 @@ final class SSHConnectorTests: XCTestCase {
         let connector = SSHConnector(resolver: resolver, localUser: "operator")
         var opened: [String] = []
         var refused: [SSHFailure] = []
-        connector.begin(alias: "lab.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        connector.begin(alias: "lab.invalid", refuseTestHost: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         await eventually { opened == ["lab.invalid"] }
         let asked = await resolver.asked
         XCTAssertEqual(asked, [.tunnel, .profileList, .profileLocks])
@@ -364,7 +364,7 @@ final class SSHConnectorTests: XCTestCase {
                 let connector = SSHConnector(resolver: ScriptedSSHResolver(dumps: dumps), localUser: "operator")
                 var opened: [String] = []
                 var refused: [SSHFailure] = []
-                connector.begin(alias: "lab.invalid", refusePersoHermes: refuse, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+                connector.begin(alias: "lab.invalid", refuseTestHost: refuse, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
                 await eventually { !refused.isEmpty || !opened.isEmpty }
                 XCTAssertEqual(refused, [.relayRefused], "\(invocation) refuse=\(refuse)")
                 XCTAssertEqual(opened, [], "\(invocation) refuse=\(refuse)")
@@ -372,12 +372,12 @@ final class SSHConnectorTests: XCTestCase {
         }
     }
 
-    func testPersoHermesIsRefusedWithoutDumpingTheConfig() async {
+    func testExampleHostIsRefusedWithoutDumpingTheConfig() async {
         let resolver = GatedSSHResolver(dumps: [:])
         let connector = SSHConnector(resolver: resolver, localUser: "operator")
         var opened: [String] = []
         var refused: [SSHFailure] = []
-        connector.begin(alias: "perso-hermes.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+        connector.begin(alias: "example-host.invalid", refuseTestHost: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         XCTAssertEqual(refused, [.forbiddenHost])
         XCTAssertEqual(opened, [])
         let started = await resolver.started
@@ -454,7 +454,7 @@ final class RealSshConfigTests: XCTestCase {
     private func failure(_ config: String, alias: String = "lab.invalid", files: [String: String] = [:]) async throws -> SSHFailure? {
         do {
             let next = try await preview(config, alias: alias, files: files)
-            _ = try SSHConnectionPlanner.config(from: next, refusePersoHermes: true)
+            _ = try SSHConnectionPlanner.config(from: next, refuseTestHost: true)
             return nil
         } catch let failure as SSHFailure {
             return failure
@@ -491,7 +491,7 @@ final class RealSshConfigTests: XCTestCase {
         XCTAssertEqual(next.user, "operator")
         XCTAssertEqual(next.port, 2222)
         XCTAssertFalse(next.identityPresent)
-        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: next, refusePersoHermes: true))
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: next, refuseTestHost: true))
     }
 
     func testMatchFormsThatSshAcceptsDoNotRefuseTheAlias() async throws {
@@ -567,11 +567,11 @@ final class RealSshConfigTests: XCTestCase {
         XCTAssertEqual(try await apiKeyFailure(config), .relayRefused)
     }
 
-    func testAnAPIKeyMatchCommandThatResolvesPersoHermesIsRefused() async throws {
+    func testAnAPIKeyMatchCommandThatResolvesExampleHostIsRefused() async throws {
         try await skipUnlessMatchCommand()
         let config = """
             Match command hermes*
-              Hostname perso-hermes.invalid
+              Hostname example-host.invalid
             Host lab.invalid
               User operator
               Hostname gateway.example.invalid
@@ -595,7 +595,7 @@ final class RealSshConfigTests: XCTestCase {
     private func apiKeyFailure(_ config: String, alias: String = "lab.invalid", profile: String = "hv-bot-a", files: [String: String] = [:]) async throws -> SSHFailure? {
         do {
             let next = try await apiKeyPreview(config, alias: alias, profile: profile, files: files)
-            _ = try SSHConnectionPlanner.config(from: next, refusePersoHermes: true)
+            _ = try SSHConnectionPlanner.config(from: next, refuseTestHost: true)
             return nil
         } catch let failure as SSHFailure {
             return failure
@@ -677,12 +677,12 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertEqual(started, ["a.invalid"])
     }
 
-    func testPersoHermesOnAppModelNeverDumpsOrOpens() async {
+    func testExampleHostOnAppModelNeverDumpsOrOpens() async {
         let resolver = GatedSSHResolver(dumps: [
-            "perso-hermes.invalid": knownDump(hostname: "perso-hermes.invalid"),
+            "example-host.invalid": knownDump(hostname: "example-host.invalid"),
         ])
         let environment = AppEnvironment.resolve(
-            ["HV_TEST_MODE": "1", "HV_SSH_HOST": "perso-hermes.invalid"],
+            ["HV_TEST_MODE": "1", "HV_SSH_HOST": "example-host.invalid"],
             defaults: isolatedDefaults(),
             keychain: { InMemorySecretStore(apiKey: nil) }
         )
@@ -713,7 +713,7 @@ final class AppModelConnectTests: XCTestCase {
             case .idle: false
             }
         }
-        let args = try! SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refusePersoHermes: false).arguments(localPort: 1)
+        let args = try! SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refuseTestHost: false).arguments(localPort: 1)
         XCTAssertEqual(args.last, "lab.invalid")
         XCTAssertNil(args.firstIndex(of: "-i"))
         await model.tunnel.stop()

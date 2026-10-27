@@ -220,7 +220,7 @@ enum SSHConfig {
 }
 
 enum SSHConnectionPlanner {
-    static func config(from preview: SSHConnectionPreview, refusePersoHermes: Bool, remotePort: Int = 8642) throws -> SSHTunnelConfig {
+    static func config(from preview: SSHConnectionPreview, refuseTestHost: Bool, remotePort: Int = 8642) throws -> SSHTunnelConfig {
         if preview.hasRelay { throw SSHFailure.relayRefused }
         return try SSHTunnelConfig(
             alias: preview.alias,
@@ -228,12 +228,12 @@ enum SSHConnectionPlanner {
             user: preview.user,
             sshPort: preview.port,
             remotePort: remotePort,
-            refusePersoHermes: refusePersoHermes
+            refuseTestHost: refuseTestHost
         )
     }
 }
 
-/// Une seule connexion en cours : `begin` invalide toute résolution en vol, y compris un refus local (vide, invalide, perso-hermes)
+/// Une seule connexion en cours : `begin` invalide toute résolution en vol, y compris un refus local (vide, invalide, example-host)
 @MainActor
 final class SSHConnector {
     private var generation = 0
@@ -254,7 +254,7 @@ final class SSHConnector {
 
     func begin(
         alias: String,
-        refusePersoHermes: Bool,
+        refuseTestHost: Bool,
         opened: @escaping @MainActor (SSHTunnelConfig, SSHConnectionPreview) -> Void,
         refused: @escaping @MainActor (SSHFailure, SSHConnectionPreview?) -> Void
     ) {
@@ -267,7 +267,7 @@ final class SSHConnector {
             refused(.invalidHost, nil)
             return
         }
-        if refusePersoHermes, trimmed.lowercased().contains("perso-hermes") {
+        if refuseTestHost, SSHTunnelConfig.isForbiddenTestHost(trimmed) {
             refused(.forbiddenHost, nil)
             return
         }
@@ -275,13 +275,13 @@ final class SSHConnector {
             refused(.invalidHost, nil)
             return
         }
-        task = Task { await resolve(alias: trimmed, id: id, refusePersoHermes: refusePersoHermes, opened: opened, refused: refused) }
+        task = Task { await resolve(alias: trimmed, id: id, refuseTestHost: refuseTestHost, opened: opened, refused: refused) }
     }
 
     private func resolve(
         alias: String,
         id: Int,
-        refusePersoHermes: Bool,
+        refuseTestHost: Bool,
         opened: @MainActor (SSHTunnelConfig, SSHConnectionPreview) -> Void,
         refused: @MainActor (SSHFailure, SSHConnectionPreview?) -> Void
     ) async {
@@ -293,7 +293,7 @@ final class SSHConnector {
                 guard id == generation, !Task.isCancelled else { return }
                 let next = SSHConfig.parse(dump, alias: alias, localUser: localUser, authSock: authSock)
                 preview = preview ?? next
-                let config = try SSHConnectionPlanner.config(from: next, refusePersoHermes: refusePersoHermes)
+                let config = try SSHConnectionPlanner.config(from: next, refuseTestHost: refuseTestHost)
                 tunnel = tunnel ?? (config, next)
             }
             guard id == generation, !Task.isCancelled, let tunnel else { return }
