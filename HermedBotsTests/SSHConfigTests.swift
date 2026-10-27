@@ -230,6 +230,37 @@ final class SSHConfigTests: XCTestCase {
             ["-G", "-F", "/tmp/fake-ssh.invalid"]
         )
     }
+
+    func testAPIKeyResolutionArgumentsAreTheExactProfileCommand() throws {
+        let args = try SystemSSHConfigResolver.apiKeyArguments(alias: "lab.invalid", profile: "hv-bot-a")
+        XCTAssertEqual(args.first, "-G")
+        XCTAssertFalse(args.contains("-vv"))
+        XCTAssertEqual(Array(args.suffix(7)), ["hermes", "-p", "hv-bot-a", "config", "get", "API_SERVER_KEY", "--raw"])
+        XCTAssertEqual(try SystemSSHConfigResolver.apiKeyArguments(alias: "lab.invalid", profile: "hv-bot-b").suffix(7).contains("hv-bot-a"), false)
+    }
+
+    func testAnAPIKeyDumpThatAddsARelayIsRefused() {
+        let preview = parse(
+            "user operator\nhostname gateway.invalid\nport 22\nidentityfile /tmp/fake-id.invalid\nproxyjump bastion.invalid\n",
+            alias: "lab.invalid"
+        )
+        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
+            XCTAssertEqual($0 as? SSHFailure, .relayRefused)
+        }
+        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: false)) {
+            XCTAssertEqual($0 as? SSHFailure, .relayRefused)
+        }
+    }
+
+    func testAnAPIKeyDumpThatResolvesPersoHermesIsRefusedInTestMode() {
+        let preview = parse(
+            "user operator\nhostname perso-hermes.invalid\nport 22\nidentityfile /tmp/fake-id.invalid\nproxyjump none\n",
+            alias: "lab.invalid"
+        )
+        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
+            XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
+        }
+    }
 }
 
 @MainActor
@@ -380,6 +411,10 @@ private actor GatedSSHResolver: SSHConfigResolving {
         return dumps[alias] ?? SSHConfigDump(stdout: "")
     }
 
+    func dumpAPIKey(alias: String, profile: String) async throws -> SSHConfigDump {
+        dumps[alias] ?? SSHConfigDump(stdout: "")
+    }
+
     func release(_ alias: String) {
         gates[alias]?.resume()
         gates[alias] = nil
@@ -397,6 +432,10 @@ private actor ScriptedSSHResolver: SSHConfigResolving {
     func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
         asked.append(invocation)
         return dumps[invocation] ?? SSHConfigDump(stdout: "")
+    }
+
+    func dumpAPIKey(alias: String, profile: String) async throws -> SSHConfigDump {
+        dumps[.profileList] ?? dumps[.tunnel] ?? SSHConfigDump(stdout: "")
     }
 }
 
@@ -487,6 +526,94 @@ final class RealSshConfigTests: XCTestCase {
             let result = try await failure(config)
             XCTAssertEqual(result, .unreadableConfig, config)
         }
+    }
+
+    func testAnAPIKeyDumpOfANamedHostIsAccepted() async throws {
+        let result = try await apiKeyFailure(
+            """
+            Host lab.invalid
+              User operator
+              Hostname gateway.example.invalid
+              IdentityFile /tmp/fake-id.invalid
+            """
+        )
+        XCTAssertNil(result)
+    }
+
+    func testAnAPIKeyDumpThatAddsARelayIsRefused() async throws {
+        let result = try await apiKeyFailure(
+            """
+            Host lab.invalid
+              User operator
+              Hostname gateway.example.invalid
+              IdentityFile /tmp/fake-id.invalid
+              ProxyJump bastion.invalid
+            """
+        )
+        XCTAssertEqual(result, .relayRefused)
+    }
+
+    func testAnAPIKeyMatchCommandThatAddsARelayIsRefused() async throws {
+        try await skipUnlessMatchCommand()
+        let config = """
+            Match command hermes*
+              ProxyJump bastion.invalid
+            Host lab.invalid
+              User operator
+              Hostname gateway.example.invalid
+              IdentityFile /tmp/fake-id.invalid
+            """
+        XCTAssertNil(try await failure(config))
+        XCTAssertEqual(try await apiKeyFailure(config), .relayRefused)
+    }
+
+    func testAnAPIKeyMatchCommandThatResolvesPersoHermesIsRefused() async throws {
+        try await skipUnlessMatchCommand()
+        let config = """
+            Match command hermes*
+              Hostname perso-hermes.invalid
+            Host lab.invalid
+              User operator
+              Hostname gateway.example.invalid
+              IdentityFile /tmp/fake-id.invalid
+            """
+        XCTAssertNil(try await failure(config))
+        XCTAssertEqual(try await apiKeyFailure(config), .forbiddenHost)
+    }
+
+    private func apiKeyPreview(_ config: String, alias: String = "lab.invalid", profile: String = "hv-bot-a", files: [String: String] = [:]) async throws -> SSHConnectionPreview {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hb-test-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        for (name, text) in files.merging(["config": config], uniquingKeysWith: { $1 }) {
+            try text.replacingOccurrences(of: "$DIR", with: directory.path).write(to: directory.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        let dump = try await SystemSSHConfigResolver(configFile: directory.appendingPathComponent("config").path).dumpAPIKey(alias: alias, profile: profile)
+        return SSHConfig.parse(dump, alias: alias, localUser: "operator")
+    }
+
+    private func apiKeyFailure(_ config: String, alias: String = "lab.invalid", profile: String = "hv-bot-a", files: [String: String] = [:]) async throws -> SSHFailure? {
+        do {
+            let next = try await apiKeyPreview(config, alias: alias, profile: profile, files: files)
+            _ = try SSHConnectionPlanner.config(from: next, refusePersoHermes: true)
+            return nil
+        } catch let failure as SSHFailure {
+            return failure
+        }
+    }
+
+    private func skipUnlessMatchCommand() async throws {
+        let probe = try await apiKeyFailure(
+            """
+            Match command hermes*
+              User operator
+              Hostname gateway.example.invalid
+            """
+        )
+        if probe == .unreadableConfig {
+            throw XCTSkip("ssh does not support Match command")
+        }
+        XCTAssertNil(probe)
     }
 }
 

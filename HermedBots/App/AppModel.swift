@@ -278,7 +278,7 @@ final class AppModel {
     }
 
     private func openTunnel(_ config: SSHTunnelConfig) {
-        let backend = SystemSSHBackend()
+        let backend = SystemSSHBackend(resolver: sshResolver, refusePersoHermes: environment.refusePersoHermes)
         sshBackend = backend
         sshConfig = config
         tunnel.start(config, backend: backend)

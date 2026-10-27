@@ -42,6 +42,7 @@ struct SSHConfigDump: Equatable, Sendable {
 
 protocol SSHConfigResolving: Sendable {
     func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump
+    func dumpAPIKey(alias: String, profile: String) async throws -> SSHConfigDump
 }
 
 struct SystemSSHConfigResolver: SSHConfigResolving {
@@ -57,6 +58,10 @@ struct SystemSSHConfigResolver: SSHConfigResolving {
         ["-G"] + (configFile.map { ["-F", $0] } ?? []) + SSHTunnelConfig.arguments(invocation, alias: alias)
     }
 
+    static func apiKeyArguments(alias: String, profile: String, configFile: String? = nil) throws -> [String] {
+        ["-G"] + (configFile.map { ["-F", $0] } ?? []) + (try SSHTunnelConfig.apiKeyLaunchArguments(alias: alias, profile: profile))
+    }
+
     func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
         let output: Spawn.Output
         do {
@@ -68,6 +73,28 @@ struct SystemSSHConfigResolver: SSHConfigResolving {
             )
         } catch SpawnError.timedOut {
             throw SSHFailure.unreachable("délai dépassé")
+        } catch {
+            throw SSHFailure.unreachable("ssh ne démarre pas")
+        }
+        guard output.status == 0 else { throw SSHFailure.unreadableConfig }
+        return SSHConfigDump(stdout: output.stdout)
+    }
+
+    func dumpAPIKey(alias: String, profile: String) async throws -> SSHConfigDump {
+        let output: Spawn.Output
+        do {
+            output = try await Spawn.runGuarded(
+                "/usr/bin/ssh",
+                try Self.apiKeyArguments(alias: alias, profile: profile, configFile: configFile),
+                environment: SSHChildEnvironment.make(environment),
+                timeout: .seconds(8)
+            )
+        } catch SpawnError.timedOut {
+            throw SSHFailure.unreachable("délai dépassé")
+        } catch let failure as SSHFailure {
+            throw failure
+        } catch is HermesProfileName {
+            throw SSHFailure.invalidHost
         } catch {
             throw SSHFailure.unreachable("ssh ne démarre pas")
         }

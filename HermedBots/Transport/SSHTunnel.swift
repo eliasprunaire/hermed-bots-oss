@@ -126,7 +126,11 @@ struct SSHTunnelConfig: Equatable, Sendable {
     /// Les arguments de la lecture de `API_SERVER_KEY` d'un profil
     /// La commande est écrite ici et non passée en paramètre : aucun appelant ne peut en lancer une autre
     func apiKeyArguments(profile: String) throws -> [String] {
-        Self.common([]) + [alias] + HermesAPIKey.remoteCommand(profile: try HermesAPIKey.validate(profile))
+        try Self.apiKeyLaunchArguments(alias: alias, profile: profile)
+    }
+
+    static func apiKeyLaunchArguments(alias: String, profile: String) throws -> [String] {
+        common([]) + [alias] + HermesAPIKey.remoteCommand(profile: try HermesAPIKey.validate(profile))
     }
 
     static func arguments(_ invocation: SSHInvocation, alias: String, localPort: Int = 1, remotePort: Int = 8642) -> [String] {
@@ -613,13 +617,24 @@ final class SSHTunnel {
 /// Les ssh sont dans un seul groupe de processus, tué d'un coup à la fermeture
 actor SystemSSHBackend: SSHBackend {
     private let environment: [String: String]
+    private let resolver: any SSHConfigResolving
+    private let refusePersoHermes: Bool
+    private let localUser: String
     private var watchdog: Child?
     /// le gardien en préparation, que `close()` arrête sans attendre la fin de l'ouverture
     private var preparing: Child?
     private var closed = false
 
-    init(environment: [String: String] = ProcessInfo.processInfo.environment) {
+    init(
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        resolver: any SSHConfigResolving = SystemSSHConfigResolver(),
+        refusePersoHermes: Bool = false,
+        localUser: String = NSUserName()
+    ) {
         self.environment = environment
+        self.resolver = resolver
+        self.refusePersoHermes = refusePersoHermes
+        self.localUser = localUser
     }
 
     func open(_ config: SSHTunnelConfig) async throws -> SSHSession {
@@ -685,6 +700,9 @@ actor SystemSSHBackend: SSHBackend {
     func readAPIKey(_ config: SSHTunnelConfig, profile: String) async throws -> String? {
         try ensureLive()
         guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
+        let dump = try await resolver.dumpAPIKey(alias: config.alias, profile: profile)
+        let preview = SSHConfig.parse(dump, alias: config.alias, localUser: localUser)
+        _ = try SSHConnectionPlanner.config(from: preview, refusePersoHermes: refusePersoHermes)
         let output: Spawn.Output
         do {
             output = try await Spawn.run(
