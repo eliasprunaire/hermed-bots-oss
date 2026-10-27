@@ -418,7 +418,11 @@ final class AppModel {
         }
         var secrets = environment.secrets
         let key = await apiKeyFetches.fetch(profile: profile, into: &secrets, read: read)
-        if key != nil { environment.secrets = secrets }
+        if key != nil {
+            environment.secrets = secrets
+            // un dépli parti avant la clé a gardé son 401 : on relit les fils de ce profil s'il est déplié
+            bots.reload(profile)
+        }
         return key
     }
 
