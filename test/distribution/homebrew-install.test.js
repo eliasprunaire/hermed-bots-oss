@@ -29,7 +29,18 @@ function writeTool(dir, name, body) {
   fs.writeFileSync(path.join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
 }
 
-function run({ args = ["run"], brew = {}, codesign = 0, spctl = 0, leftover = false, version = "0.1.2", env = {}, pgrep = "file" } = {}) {
+function run({
+  args = ["run"],
+  brew = {},
+  codesign = 0,
+  spctl = 0,
+  leftover = false,
+  staleProcess = false,
+  openOk = true,
+  version = "0.1.2",
+  env = {},
+  pgrep = "file",
+} = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-brew-proof-"));
   const calls = path.join(dir, "calls");
   const listed = path.join(dir, "listed");
@@ -42,6 +53,7 @@ function run({ args = ["run"], brew = {}, codesign = 0, spctl = 0, leftover = fa
     fs.writeFileSync(path.join(app, "Contents", "Info.plist"), plist(version));
     fs.writeFileSync(listed, "1");
   }
+  if (staleProcess) fs.writeFileSync(running, "1");
   writeTool(dir, "uname", 'echo Darwin');
   writeTool(
     dir,
@@ -62,6 +74,7 @@ function run({ args = ["run"], brew = {}, codesign = 0, spctl = 0, leftover = fa
       `  printf '%s\\n' '#!/bin/sh' > '${app}/Contents/MacOS/HermedBots'`,
       `  chmod 755 '${app}/Contents/MacOS/HermedBots'`,
       `  echo 1 > ${listed}`,
+      `  echo 1 > ${dir}/installed`,
       `  exit ${brew.install ?? 0}`,
       `fi`,
       `if [ "$1" = uninstall ]; then`,
@@ -74,17 +87,27 @@ function run({ args = ["run"], brew = {}, codesign = 0, spctl = 0, leftover = fa
   );
   writeTool(dir, "codesign", `printf '%s\\n' "codesign $*" >> ${calls}; exit ${codesign}`);
   writeTool(dir, "spctl", `printf '%s\\n' "spctl $*" >> ${calls}; exit ${spctl}`);
-  writeTool(dir, "open", `printf '%s\\n' "open $*" >> ${calls}; echo 1 > ${running}; exit 0`);
+  if (openOk) {
+    writeTool(dir, "open", `printf '%s\\n' "open $*" >> ${calls}; echo 1 > ${running}; exit 0`);
+  } else {
+    writeTool(dir, "open", `printf '%s\\n' "open $*" >> ${calls}; exit 1`);
+  }
+  writeTool(dir, "nohup", `printf '%s\\n' "nohup $*" >> ${calls}; exit 0`);
   if (pgrep === "once") {
     writeTool(
       dir,
       "pgrep",
-      `n=$(cat ${dir}/pn 2>/dev/null || echo 0); n=$((n + 1)); echo $n > ${dir}/pn; [ "$n" = 1 ] && echo 4242 && exit 0; exit 1`,
+      [
+        `[ ! -f ${dir}/installed ] && { [ -f ${running} ] && echo 4242 && exit 0; exit 1; }`,
+        `n=$(cat ${dir}/pn 2>/dev/null || echo 0); n=$((n + 1)); echo $n > ${dir}/pn`,
+        `[ "$n" = 1 ] && echo 4242 && exit 0`,
+        `exit 1`,
+      ].join("\n"),
     );
   } else {
     writeTool(dir, "pgrep", `[ -f ${running} ] && echo 4242 && exit 0; exit 1`);
   }
-  writeTool(dir, "kill", `rm -f ${running}; exit 0`);
+  writeTool(dir, "kill", `printf '%s\\n' "kill $*" >> ${calls}; rm -f ${running}; exit 0`);
   writeTool(
     dir,
     "PlistBuddy",
@@ -109,7 +132,7 @@ function run({ args = ["run"], brew = {}, codesign = 0, spctl = 0, leftover = fa
     },
   });
   const lines = fs.existsSync(calls) ? fs.readFileSync(calls, "utf8").trim().split("\n").filter(Boolean) : [];
-  return { res, lines, dir, app, listed };
+  return { res, lines, dir, app, listed, apps };
 }
 
 test("the Homebrew install proof is valid shell and keeps tracing off", () => {
@@ -154,9 +177,9 @@ test("dry-run reads the tap cask and does not install", () => {
 });
 
 test("run installs from the tap, checks the bundle, launches, quits, and uninstalls", () => {
-  const { res, lines, app } = run();
+  const { res, lines, app, apps } = run();
   assert.equal(res.status, 0, `${res.stdout}\n${res.stderr}`);
-  assert.ok(lines.includes(`brew install --cask ${cask}`));
+  assert.ok(lines.includes(`brew install --cask --appdir=${apps} ${cask}`));
   assert.ok(lines.some((line) => line.startsWith("codesign --verify --deep --strict")));
   assert.ok(lines.some((line) => line.startsWith("spctl --assess --type execute")));
   assert.ok(lines.includes(`brew uninstall --cask --force ${cask}`));
@@ -231,6 +254,29 @@ test("an app that exits during the startup delay is not a successful launch", ()
   assert.equal(res.status, 1, res.stdout);
   assert.match(res.stdout, /^FAIL: app exited before quit$/m);
   assert.match(res.stdout, /launch=fail/);
+});
+
+test("a leftover process is stopped before brew install and a failed open is not a pass", () => {
+  const { res, lines } = run({
+    staleProcess: true,
+    openOk: false,
+    env: { HOMEBREW_PROOF_LAUNCH_WAIT: "1" },
+  });
+  assert.equal(res.status, 1, res.stdout);
+  const killAt = lines.findIndex((line) => line.startsWith("kill "));
+  const installAt = lines.findIndex((line) => line.startsWith("brew install"));
+  assert.ok(killAt !== -1 && installAt !== -1 && killAt < installAt, lines.join("\n"));
+  assert.match(res.stdout, /^FAIL: app did not launch$/m);
+  assert.match(res.stdout, /launch=fail/);
+});
+
+test("brew install passes --appdir from HOMEBREW_PROOF_APPDIR", () => {
+  const { res, lines, apps } = run();
+  assert.equal(res.status, 0, res.stdout);
+  assert.equal(
+    lines.filter((line) => line.startsWith("brew install")).join("\n"),
+    `brew install --cask --appdir=${apps} ${cask}`,
+  );
 });
 
 if (spawnSync("shellcheck", ["-V"], { encoding: "utf8" }).status === 0) {

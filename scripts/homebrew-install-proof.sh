@@ -112,11 +112,23 @@ wait_until() {
 
 running() { [ -n "$(app_pids)" ]; }
 
+launch_wait=${HOMEBREW_PROOF_LAUNCH_WAIT:-20}
+
 launch_app() {
-  open -n -g -j "$app" >/dev/null 2>&1 || true
-  wait_until 20 running && return 0
+  if open -n -g -j "$app" >/dev/null 2>&1; then
+    wait_until "$launch_wait" running && return 0
+  fi
   nohup "$binary" >/dev/null 2>&1 &
-  wait_until 20 running
+  wait_until "$launch_wait" running
+}
+
+bind_binary() {
+  local exec_name=HermedBots
+  if [ -d "$app" ]; then
+    exec_name=$(plist_value "$app" CFBundleExecutable || true)
+    exec_name=${exec_name:-HermedBots}
+  fi
+  binary="$app/Contents/MacOS/$exec_name"
 }
 
 report() {
@@ -151,6 +163,7 @@ if [ "$mode" = dry-run ]; then
   report
 fi
 
+bind_binary
 if cask_listed || [ -e "$app" ]; then
   if uninstall_cask; then
     pass "leftover uninstall"
@@ -159,10 +172,12 @@ if cask_listed || [ -e "$app" ]; then
     report
   fi
 else
+  stop_app
   pass "no leftover cask"
 fi
+bind_binary
 
-if brew install --cask "$cask"; then
+if brew install --cask --appdir="$appdir" "$cask"; then
   install=pass
   pass "brew install --cask $cask"
 else
@@ -179,9 +194,7 @@ fi
 installed_version=$(plist_value "$app" CFBundleShortVersionString || true)
 installed_version=${installed_version:-none}
 bundle_version=$(plist_value "$app" CFBundleVersion || true)
-exec_name=$(plist_value "$app" CFBundleExecutable || true)
-exec_name=${exec_name:-HermedBots}
-binary="$app/Contents/MacOS/$exec_name"
+bind_binary
 if [ "$installed_version" = "$expected" ] && [ "$bundle_version" = "$expected" ]; then
   version_check=pass
   pass "installed version=$installed_version"
