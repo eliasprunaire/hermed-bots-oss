@@ -11,6 +11,7 @@ import os
 enum SSHFailure: Error, Equatable, Sendable {
     case forbiddenHost
     case relayRefused
+    case routeMismatch
     case invalidHost
     case invalidPort
     case unknownAlias
@@ -52,6 +53,7 @@ extension SSHFailure {
         switch self {
         case .forbiddenHost: String(localized: "Cet hôte est refusé en mode test.")
         case .relayRefused: String(localized: "Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte.")
+        case .routeMismatch: String(localized: "La lecture de la clé ne vise pas le même hôte que le tunnel. La clé n'est pas lue.")
         case .invalidHost: String(localized: "L'alias SSH n'est pas valide.")
         case .invalidPort: String(localized: "Le port n'est pas valide.")
         case .unknownAlias: String(localized: "Cet alias SSH est inconnu.")
@@ -708,7 +710,7 @@ actor SystemSSHBackend: SSHBackend {
         guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
         let dump = try await resolver.dumpAPIKey(alias: config.alias, profile: profile)
         let preview = SSHConfig.parse(dump, alias: config.alias, localUser: localUser)
-        _ = try SSHConnectionPlanner.config(from: preview, refuseTestHost: refuseTestHost)
+        _ = try SSHConnectionPlanner.config(from: preview, refuseTestHost: refuseTestHost, matching: config)
         let output: Spawn.Output
         do {
             output = try await Spawn.run(

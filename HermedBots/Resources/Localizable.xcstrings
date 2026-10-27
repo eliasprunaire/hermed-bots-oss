@@ -231,6 +231,11 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The bot list could not be read: %@" } }
       }
     },
+    "La lecture de la clé ne vise pas le même hôte que le tunnel. La clé n'est pas lue." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The key read does not target the same host as the tunnel. The key is not read." } }
+      }
+    },
     "Le bot attend votre réponse." : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The bot is waiting for your answer." } }

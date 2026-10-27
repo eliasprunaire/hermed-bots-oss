@@ -193,7 +193,7 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(SSHFailure.classify(stderr: ""), .unreachable(""))
         let retried = [SSHFailure.unreachable("x")].filter(\.retries)
         XCTAssertEqual(retried.count, 1)
-        for terminal in [SSHFailure.wrongKey(""), .hostKeyChanged(""), .unknownAlias, .unreadableConfig, .agentLockedOrEmpty(""), .certificateExpired(""), .forbiddenHost, .relayRefused, .invalidHost, .invalidPort] {
+        for terminal in [SSHFailure.wrongKey(""), .hostKeyChanged(""), .unknownAlias, .unreadableConfig, .agentLockedOrEmpty(""), .certificateExpired(""), .forbiddenHost, .relayRefused, .routeMismatch, .invalidHost, .invalidPort] {
             XCTAssertFalse(terminal.retries, "\(terminal)")
         }
     }
@@ -211,6 +211,13 @@ final class SSHTunnelConfigTests: XCTestCase {
             "ssh ne lit pas cette config SSH. L'alias est refusé."
         )
         XCTAssertFalse(SSHFailure.unreadableConfig.message.localizedCaseInsensitiveContains("Match"))
+    }
+
+    func testTheRouteMismatchBannerNamesNoMachine() {
+        let text = SSHFailure.routeMismatch.message
+        XCTAssertEqual(text, "La lecture de la clé ne vise pas le même hôte que le tunnel. La clé n'est pas lue.")
+        XCTAssertFalse(text.localizedCaseInsensitiveContains("Match"))
+        XCTAssertFalse(text.contains("docs/"))
     }
 
     func testTheForbiddenHostBannerNamesNoMachine() {

@@ -261,6 +261,29 @@ final class SSHConfigTests: XCTestCase {
             XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
         }
     }
+
+    func testAnAPIKeyDumpThatChangesTheTunnelDestinationIsRefused() throws {
+        let tunnel = try SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refuseTestHost: true)
+        let same = parse(
+            "user operator\nhostname gateway.invalid\nport 22\nidentityfile /tmp/fake-id.invalid\nproxyjump none\n",
+            alias: "lab.invalid"
+        )
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: same, refuseTestHost: true, matching: tunnel))
+        let shifts = [
+            "user operator\nhostname other.example.invalid\nport 22\nidentityfile /tmp/fake-id.invalid\nproxyjump none\n",
+            "user other\nhostname gateway.invalid\nport 22\nidentityfile /tmp/fake-id.invalid\nproxyjump none\n",
+            "user operator\nhostname gateway.invalid\nport 2222\nidentityfile /tmp/fake-id.invalid\nproxyjump none\n",
+        ]
+        for dump in shifts {
+            let preview = parse(dump, alias: "lab.invalid")
+            XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refuseTestHost: true, matching: tunnel), dump) {
+                XCTAssertEqual($0 as? SSHFailure, .routeMismatch, dump)
+            }
+            XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refuseTestHost: false, matching: tunnel), dump) {
+                XCTAssertEqual($0 as? SSHFailure, .routeMismatch, dump)
+            }
+        }
+    }
 }
 
 @MainActor
@@ -563,8 +586,10 @@ final class RealSshConfigTests: XCTestCase {
               Hostname gateway.example.invalid
               IdentityFile /tmp/fake-id.invalid
             """
-        XCTAssertNil(try await failure(config))
-        XCTAssertEqual(try await apiKeyFailure(config), .relayRefused)
+        let tunnel = try await failure(config)
+        XCTAssertNil(tunnel)
+        let key = try await apiKeyFailure(config)
+        XCTAssertEqual(key, .relayRefused)
     }
 
     func testAnAPIKeyMatchCommandThatResolvesExampleHostIsRefused() async throws {
@@ -577,8 +602,30 @@ final class RealSshConfigTests: XCTestCase {
               Hostname gateway.example.invalid
               IdentityFile /tmp/fake-id.invalid
             """
-        XCTAssertNil(try await failure(config))
-        XCTAssertEqual(try await apiKeyFailure(config), .forbiddenHost)
+        let tunnel = try await failure(config)
+        XCTAssertNil(tunnel)
+        let key = try await apiKeyFailure(config)
+        XCTAssertEqual(key, .forbiddenHost)
+    }
+
+    func testAnAPIKeyMatchCommandThatChangesTheTunnelDestinationIsRefused() async throws {
+        try await skipUnlessMatchCommand()
+        let config = """
+            Match command hermes*
+              Hostname other.example.invalid
+            Host lab.invalid
+              User operator
+              Hostname gateway.example.invalid
+              IdentityFile /tmp/fake-id.invalid
+            """
+        let tunnel = try await preview(config)
+        XCTAssertEqual(tunnel.hostname, "gateway.example.invalid")
+        let planned = try SSHConnectionPlanner.config(from: tunnel, refuseTestHost: true)
+        let key = try await apiKeyPreview(config)
+        XCTAssertEqual(key.hostname, "other.example.invalid")
+        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: key, refuseTestHost: true, matching: planned)) {
+            XCTAssertEqual($0 as? SSHFailure, .routeMismatch)
+        }
     }
 
     private func apiKeyPreview(_ config: String, alias: String = "lab.invalid", profile: String = "hv-bot-a", files: [String: String] = [:]) async throws -> SSHConnectionPreview {

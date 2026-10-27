@@ -220,9 +220,9 @@ enum SSHConfig {
 }
 
 enum SSHConnectionPlanner {
-    static func config(from preview: SSHConnectionPreview, refuseTestHost: Bool, remotePort: Int = 8642) throws -> SSHTunnelConfig {
+    static func config(from preview: SSHConnectionPreview, refuseTestHost: Bool, remotePort: Int = 8642, matching tunnel: SSHTunnelConfig? = nil) throws -> SSHTunnelConfig {
         if preview.hasRelay { throw SSHFailure.relayRefused }
-        return try SSHTunnelConfig(
+        let next = try SSHTunnelConfig(
             alias: preview.alias,
             hostname: preview.hostname,
             user: preview.user,
@@ -230,6 +230,14 @@ enum SSHConnectionPlanner {
             remotePort: remotePort,
             refuseTestHost: refuseTestHost
         )
+        if let tunnel, !sameRoute(next, tunnel) { throw SSHFailure.routeMismatch }
+        return next
+    }
+
+    static func sameRoute(_ left: SSHTunnelConfig, _ right: SSHTunnelConfig) -> Bool {
+        left.hostname.caseInsensitiveCompare(right.hostname) == .orderedSame
+            && left.user == right.user
+            && left.sshPort == right.sshPort
     }
 }
 
