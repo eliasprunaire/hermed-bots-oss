@@ -130,7 +130,7 @@ struct SSHTunnelConfig: Equatable, Sendable {
         Self.common([]) + [alias] + HermesAPIKey.remoteCommand(profile: try HermesAPIKey.validate(profile))
     }
 
-    /// Les ports ne servent qu'au tunnel
+    /// `ssh -G` reprend ces arguments pour que `Match sessiontype` et `Match command` voient le même lancement
     static func arguments(_ invocation: SSHInvocation, alias: String, localPort: Int = 1, remotePort: Int = 8642) -> [String] {
         switch invocation {
         case .tunnel: common(["-N"]) + ["-L", "127.0.0.1:\(localPort):127.0.0.1:\(remotePort)", alias]

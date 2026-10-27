@@ -376,7 +376,7 @@ final class GuardedSpawnTests: XCTestCase {
         let config = directory.appendingPathComponent("config")
         try "Match exec \"echo $$ > \(pidFile.path); exec sleep 30\"\nHost lab.invalid\n".write(to: config, atomically: true, encoding: .utf8)
         let resolver = SystemSSHConfigResolver(configFile: config.path)
-        let dump = Task { try await resolver.dump(alias: "lab.invalid") }
+        let dump = Task { try await resolver.dump(alias: "lab.invalid", invocation: .tunnel) }
         let sleeper = try await processID(in: pidFile)
         XCTAssertEqual(kill(sleeper, 0), 0, "la commande du Match exec doit vivre avant l'arrêt")
         ProcessGroups.killAll()

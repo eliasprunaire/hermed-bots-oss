@@ -71,6 +71,7 @@ test("app Swift never reads ~/.ssh/config and no longer refuses Match", () => {
     /hasMatchBlock/,
     /checking match for/,
     /namesAlias/,
+    /"-vv"/,
   ];
   const reads = [
     /String\s*\(\s*contentsOfFile\s*:/,

@@ -262,7 +262,7 @@ final class AppModel {
 
     private func resolvePreview(alias: String, id: Int) async {
         do {
-            let dump = try await sshResolver.dump(alias: alias)
+            let dump = try await sshResolver.dump(alias: alias, invocation: .tunnel)
             let next = SSHConfig.parse(
                 dump,
                 alias: alias,

@@ -211,13 +211,24 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: false))
     }
 
-    func testResolutionArgumentsAreDashGAndTheAlias() {
-        XCTAssertEqual(SystemSSHConfigResolver.arguments(alias: "lab.invalid"), ["-G", "lab.invalid"])
+    func testResolutionArgumentsAreDashGPlusTheLaunchAndNeverDashVv() throws {
+        let config = try SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refusePersoHermes: true)
+        let launched: [SSHInvocation: [String]] = [
+            .tunnel: config.arguments(localPort: 1),
+            .profileList: config.profileListArguments(),
+            .profileLocks: config.profileLocksArguments(),
+        ]
+        for invocation in SSHInvocation.allCases {
+            let args = SystemSSHConfigResolver.arguments(alias: "lab.invalid", invocation: invocation)
+            XCTAssertEqual(args, ["-G"] + launched[invocation]!, "\(invocation)")
+            XCTAssertFalse(args.contains("-vv"), "\(invocation)")
+        }
+        XCTAssertTrue(SystemSSHConfigResolver.arguments(alias: "lab.invalid", invocation: .tunnel).contains("-N"))
+        XCTAssertFalse(SystemSSHConfigResolver.arguments(alias: "lab.invalid", invocation: .profileList).contains("-N"))
         XCTAssertEqual(
-            SystemSSHConfigResolver.arguments(alias: "lab.invalid", configFile: "/tmp/fake-ssh.invalid"),
-            ["-G", "-F", "/tmp/fake-ssh.invalid", "lab.invalid"]
+            SystemSSHConfigResolver.arguments(alias: "lab.invalid", invocation: .tunnel, configFile: "/tmp/fake-ssh.invalid").prefix(3).map { $0 },
+            ["-G", "-F", "/tmp/fake-ssh.invalid"]
         )
-        XCTAssertFalse(SystemSSHConfigResolver.arguments(alias: "lab.invalid").contains("-vv"))
     }
 }
 
@@ -292,30 +303,41 @@ final class SSHConnectorTests: XCTestCase {
         XCTAssertEqual(startedAfterInvalid, ["a.invalid"])
     }
 
-    func testAValidAliasOpensAfterOneDump() async {
-        let resolver = ScriptedSSHResolver(dump: knownDump(hostname: "gateway.invalid"))
+    func testEverySshInvocationIsDumpedAndAValidAliasOpensWithTheTunnelPreview() async {
+        let dump = knownDump(hostname: "gateway.invalid")
+        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump, .profileList: dump, .profileLocks: dump])
         let connector = SSHConnector(resolver: resolver, localUser: "operator")
         var opened: [String] = []
         var refused: [SSHFailure] = []
         connector.begin(alias: "lab.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         await eventually { opened == ["lab.invalid"] }
         let asked = await resolver.asked
-        XCTAssertEqual(asked, ["lab.invalid"])
+        XCTAssertEqual(asked, [.tunnel, .profileList, .profileLocks])
         XCTAssertEqual(refused, [])
     }
 
-    func testARelayInTheDumpIsRefusedInEveryMode() async {
-        let dump = SSHConfigDump(
+    func testARelayThatOnlyOneInvocationSeesIsRefusedInEveryMode() async {
+        let clean = knownDump(hostname: "gateway.invalid")
+        let relay = SSHConfigDump(
             stdout: "user operator\nhostname gateway.invalid\nport 22\nidentityfile /tmp/fake-id.invalid\nproxyjump bastion.invalid\n"
         )
+        let relays: [(SSHInvocation, SSHConfigDump)] = [
+            (.tunnel, relay),
+            (.profileList, relay),
+            (.profileLocks, relay),
+        ]
         for refuse in [true, false] {
-            let connector = SSHConnector(resolver: ScriptedSSHResolver(dump: dump), localUser: "operator")
-            var opened: [String] = []
-            var refused: [SSHFailure] = []
-            connector.begin(alias: "lab.invalid", refusePersoHermes: refuse, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
-            await eventually { !refused.isEmpty || !opened.isEmpty }
-            XCTAssertEqual(refused, [.relayRefused], "refuse=\(refuse)")
-            XCTAssertEqual(opened, [], "refuse=\(refuse)")
+            for (invocation, extra) in relays {
+                var dumps: [SSHInvocation: SSHConfigDump] = [.tunnel: clean, .profileList: clean, .profileLocks: clean]
+                dumps[invocation] = extra
+                let connector = SSHConnector(resolver: ScriptedSSHResolver(dumps: dumps), localUser: "operator")
+                var opened: [String] = []
+                var refused: [SSHFailure] = []
+                connector.begin(alias: "lab.invalid", refusePersoHermes: refuse, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+                await eventually { !refused.isEmpty || !opened.isEmpty }
+                XCTAssertEqual(refused, [.relayRefused], "\(invocation) refuse=\(refuse)")
+                XCTAssertEqual(opened, [], "\(invocation) refuse=\(refuse)")
+            }
         }
     }
 
@@ -350,9 +372,11 @@ private actor GatedSSHResolver: SSHConfigResolving {
         self.dumps = dumps
     }
 
-    func dump(alias: String) async throws -> SSHConfigDump {
-        started.append(alias)
-        await withCheckedContinuation { gates[alias] = $0 }
+    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
+        if invocation == .tunnel {
+            started.append(alias)
+            await withCheckedContinuation { gates[alias] = $0 }
+        }
         return dumps[alias] ?? SSHConfigDump(stdout: "")
     }
 
@@ -363,16 +387,16 @@ private actor GatedSSHResolver: SSHConfigResolving {
 }
 
 private actor ScriptedSSHResolver: SSHConfigResolving {
-    private let configured: SSHConfigDump
-    private(set) var asked: [String] = []
+    private let dumps: [SSHInvocation: SSHConfigDump]
+    private(set) var asked: [SSHInvocation] = []
 
-    init(dump: SSHConfigDump) {
-        configured = dump
+    init(dumps: [SSHInvocation: SSHConfigDump]) {
+        self.dumps = dumps
     }
 
-    func dump(alias: String) async throws -> SSHConfigDump {
-        asked.append(alias)
-        return configured
+    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
+        asked.append(invocation)
+        return dumps[invocation] ?? SSHConfigDump(stdout: "")
     }
 }
 
@@ -385,7 +409,7 @@ final class RealSshConfigTests: XCTestCase {
         for (name, text) in files.merging(["config": config], uniquingKeysWith: { $1 }) {
             try text.replacingOccurrences(of: "$DIR", with: directory.path).write(to: directory.appendingPathComponent(name), atomically: true, encoding: .utf8)
         }
-        let dump = try await SystemSSHConfigResolver(configFile: directory.appendingPathComponent("config").path).dump(alias: alias)
+        let dump = try await SystemSSHConfigResolver(configFile: directory.appendingPathComponent("config").path).dump(alias: alias, invocation: .tunnel)
         return SSHConfig.parse(dump, alias: alias, localUser: "operator")
     }
 
@@ -551,7 +575,8 @@ final class AppModelConnectTests: XCTestCase {
     }
 
     func testConnectNeverReadsTheKeychainAndOpensWithTheAlias() async {
-        let resolver = ScriptedSSHResolver(dump: knownDump(hostname: "gateway.invalid"))
+        let dumps = knownDump(hostname: "gateway.invalid")
+        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dumps, .profileList: dumps, .profileLocks: dumps])
         let environment = AppEnvironment.resolve([:], defaults: isolatedDefaults(), keychain: { ConnectSpyStore() })
         let model = AppModel(environment: environment, sshResolver: resolver)
         model.host = "lab.invalid"
