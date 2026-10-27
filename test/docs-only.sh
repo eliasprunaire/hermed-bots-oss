@@ -18,6 +18,8 @@ setup() {
   git_in "$dir" config user.email t@example.test
   git_in "$dir" config user.name t
   git_in "$dir" config commit.gpgsign false
+  # Git default: quote non-ASCII paths, whatever the machine config says
+  git_in "$dir" config core.quotePath true
 }
 
 teardown() {
@@ -126,6 +128,66 @@ printf '# agents\n' >"$dir/AGENTS.md"
 git_in "$dir" add -A
 git_in "$dir" commit -q -m agents
 expect 1 no "$base" HEAD
+teardown
+
+setup
+printf 'a\n' >"$dir/README.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m init
+base=$(git_in "$dir" rev-parse HEAD)
+mkdir -p "$dir/docs"
+printf '# agents\n' >"$dir/docs/AGENTS.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m docs-agents
+expect 1 no "$base" HEAD
+teardown
+
+setup
+printf 'a\n' >"$dir/README.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m init
+base=$(git_in "$dir" rev-parse HEAD)
+mkdir -p "$dir/docs/runbook"
+printf '# agents\n' >"$dir/docs/runbook/AGENTS.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m nested-agents
+expect 1 no "$base" HEAD
+teardown
+
+setup
+printf 'a\n' >"$dir/README.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m init
+base=$(git_in "$dir" rev-parse HEAD)
+mkdir -p "$dir/docs"
+printf 'n\n' >"$dir/docs/café.md"
+printf 'n\n' >"$dir/docs/with space.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m accents
+expect 0 yes "$base" HEAD
+teardown
+
+setup
+mkdir -p "$dir/docs"
+printf 'same content\nline two\nline three\n' >"$dir/docs/café.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m init
+base=$(git_in "$dir" rev-parse HEAD)
+mkdir -p "$dir/src"
+git_in "$dir" mv docs/café.md src/café.md
+git_in "$dir" commit -q -m move-accent
+expect 1 no "$base" HEAD
+teardown
+
+setup
+mkdir -p "$dir/docs"
+printf 'same content\nline two\nline three\n' >"$dir/docs/café.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m init
+base=$(git_in "$dir" rev-parse HEAD)
+git_in "$dir" mv docs/café.md docs/déjà.md
+git_in "$dir" commit -q -m rename-accent
+expect 0 yes "$base" HEAD
 teardown
 
 setup

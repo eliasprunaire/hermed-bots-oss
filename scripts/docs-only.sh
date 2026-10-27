@@ -105,37 +105,34 @@ path_allowed() {
   [ "$last" = 1 ]
 }
 
-if ! diff_out=$(git diff --name-status -M "${base}...${head}" 2>/dev/null); then
+# -z: NUL-delimited, unquoted paths (the default output escapes non-ASCII names)
+diff_file=$(mktemp "${TMPDIR:-/tmp}/docs-only-diff-XXXXXX") || finish error tmpfile 2
+trap 'rm -f "$diff_file"' EXIT
+
+if ! git diff -z --name-status -M "${base}...${head}" >"$diff_file" 2>/dev/null; then
   finish error git 2
 fi
 
-if [ -z "$diff_out" ]; then
+if [ ! -s "$diff_file" ]; then
   finish error empty-diff 2
 fi
 
-while IFS=$'\t' read -r status p1 p2; do
-  p1=${p1:-}
-  p2=${p2:-}
-  [ -n "$status" ] || continue
+while IFS= read -r -d '' status; do
+  p1=
+  p2=
+  IFS= read -r -d '' p1 || finish error unreadable-diff 2
   case $status in
     [RC]*)
-      if [ -z "${p1:-}" ] || [ -z "${p2:-}" ]; then
+      IFS= read -r -d '' p2 || finish error unreadable-diff 2
+      if [ -z "$p1" ] || [ -z "$p2" ]; then
         finish error unreadable-diff 2
       fi
       if ! path_allowed "$p1" || ! path_allowed "$p2"; then
         finish no "$p2" 1
       fi
       ;;
-    D)
-      if [ -z "${p1:-}" ]; then
-        finish error unreadable-diff 2
-      fi
-      if ! path_allowed "$p1"; then
-        finish no "$p1" 1
-      fi
-      ;;
-    A | M | T)
-      if [ -z "${p1:-}" ]; then
+    D | A | M | T)
+      if [ -z "$p1" ]; then
         finish error unreadable-diff 2
       fi
       if ! path_allowed "$p1"; then
@@ -146,6 +143,6 @@ while IFS=$'\t' read -r status p1 p2; do
       finish error unreadable-diff 2
       ;;
   esac
-done <<<"$diff_out"
+done <"$diff_file"
 
 finish yes allowlist 0
