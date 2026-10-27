@@ -190,7 +190,9 @@ Mettre à jour le cask depuis Homebrew.
 brew upgrade --cask eliasprunaire/tap/hermed-bots
 ```
 
-Homebrew ignore un cask marqué `auto_updates true` pendant `brew upgrade`, sauf avec `--greedy`.
+Sans nom de cask, `brew upgrade` saute `hermed-bots` (`auto_updates true`) sauf avec `--greedy` ou `--greedy-auto-updates`.
+Il l'inclut aussi si Homebrew voit le bundle installé plus ancien que la version du cask.
+La commande ci-dessus nomme le cask, donc Homebrew le traite avec `greedy: true`.
 La recherche dans le menu de l'app installe la version suivante.
 
 Désinstaller l'app.
