@@ -45,7 +45,7 @@ case "$1" in
 esac
 `;
 
-function runPass(codes) {
+function runPass(codes, { omitForbiddenHost = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "lanes-all-guard-"));
   try {
     const here = join(dir, "repo", "docs", "spike", "hd07-instruments");
@@ -82,7 +82,9 @@ function runPass(codes) {
           GUARD_SNAPSHOT: String(codes.snapshot),
           GUARD_REFUSED: String(codes.refused),
           GUARD_ALLOWED: String(codes.allowed),
-          HV_FORBIDDEN_HOST: "example-host.invalid",
+          ...(omitForbiddenHost
+            ? {}
+            : { HV_FORBIDDEN_HOST: "example-host.invalid" }),
         },
       },
     );
@@ -125,5 +127,16 @@ test("witness: expected guard codes run the nine lane stubs in script order", ()
   const run = runPass({ snapshot: 0, refused: 22, allowed: 0 });
   assert.equal(run.status, 0, run.output);
   assert.deepEqual(run.started, LANES);
+  assert.match(run.output, /RESULT OK/);
+});
+
+test("lib.sh default probe still refuses without HV_FORBIDDEN_HOST in the env", () => {
+  const run = runPass(
+    { snapshot: 0, refused: 22, allowed: 0 },
+    { omitForbiddenHost: true },
+  );
+  assert.equal(run.status, 0, run.output);
+  assert.deepEqual(run.started, LANES);
+  assert.match(run.output, /example-host\.invalid : code 22/);
   assert.match(run.output, /RESULT OK/);
 });

@@ -11,6 +11,8 @@ URL=http://127.0.0.1:$PORT
 CT=hv-hermes-test
 SSH_HOST=$host.example
 export SSH_HOST
+: "${HV_FORBIDDEN_HOST:=example-host.invalid}"
+export HV_FORBIDDEN_HOST
 export PATH="$PATH:/usr/sbin"
 
 say() { printf '[%s Paris] %s\n' "$(TZ=Europe/Paris date +%H:%M:%S)" "$*"; }

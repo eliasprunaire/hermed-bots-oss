@@ -9,6 +9,8 @@ APPD=${APPD:-$HVW/dd/Build/Products/Debug/HermedBots.app/Contents/MacOS/HermedBo
 # dossier des clés de test : chemin fixe, hors de tout dossier de preuves, supprimé par drop_alias
 KEYDIR=$HVW/hd07-key
 SSH_HOST=host.example
+: "${HV_FORBIDDEN_HOST:=example-host.invalid}"
+export HV_FORBIDDEN_HOST
 # alias de la config OpenSSH écrits par new_alias : le premier est accepté par le conteneur, le second jamais (sa clé n'est pas installée)
 SSH_ALIAS=hv-hd07
 SSH_ALIAS_REFUSED=hv-hd07-refused
