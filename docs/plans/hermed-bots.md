@@ -1,7 +1,7 @@
 # Hermed Bots plan
 
 Hermed Bots is a native macOS app (SwiftUI and AppKit) that lists the user's Hermes bots, chats with them, switches the session model, and answers tool approvals over one SSH tunnel to the Hermes API server. The sources are `docs/prd/prd-consolide.md` and `docs/prd/spec.md`.
-The program enforces one rule. No agent reads, reaches, or holds a credential for perso-hermes. Every spike step and every test runs against the disposable OrbStack container `hv-hermes-test` or the fixture fake server.
+The program enforces one rule. No agent reads, reaches, or holds a credential for example-host. Every spike step and every test runs against the disposable OrbStack container `hv-hermes-test` or the fixture fake server.
 Phase 1 is the spike, PRD items S1 to S7, in HD-01 and HD-02. Phase 2 is the adapter layer in HD-03 to HD-05. Phase 3 is the macOS shell in HD-06 and HD-07. Phase 4 is the interface in HD-08 to HD-12. Phase 5 is resume, concurrency, the kill switch, and the daily test in HD-13 to HD-16.
 PRD items S8 to S12 ride with the PR that needs them. S8 lands in HD-04, S10 and S11 in HD-05, S12 in HD-07, and S9 in HD-14.
 No API route is a fact before HD-01 merges. Contract names such as `list_profiles` and `send_message` are logical names, and every path stays to be verified until a spike file cites it.
@@ -33,14 +33,14 @@ Tests alone are not sufficient verification. A PR is verified only when its unit
 - [x] Q1 (where code is written) is answered. On 2026-10-18 at 13:26 Paris the user validated in writing the PRD recommendations for Q1 to Q13, so Q1 is option (a). Claude Code and Codex write the code on the Mac, driven by the user. Source is the Dev Lead log `dev-roster/hermed-bots/etat.md` (19/10 13:53 entry, « validation écrite des 13 recommandations du 18/10 13:26 »). The CHARTE condition is met. Line 52 of the CHARTE allows the Mac as primary for hermes-desktop since the agreement of 2026-10-18 at 13:27 Paris. This repo is `eliasprunaire/hermes-desktop` renamed, as Manager checked in the `etat.md` backups and Dev Lead confirmed on 2026-10-21.
 - [x] Q3 (API server only in OrbStack) is answered by the same validation of 2026-10-18 at 13:26 Paris. The API server runs only in the OrbStack test instance. On 2026-10-18 at 16:15 Paris the user added that keys per profile are turned on by the user after the acceptance test ([issue #6 comment](https://github.com/eliasprunaire/hermed-bots/issues/6#issuecomment-6250948948)). S7 found one multiplexed port, so the Q3 port amendment is not needed.
 - [x] Q6 (test model without new spend) is answered. The choice is s1 for the CI and most tests and s2 for the end-to-end tests, with no paid API ([issue #5 comment](https://github.com/eliasprunaire/hermed-bots/issues/5#issuecomment-6250312790), validated 2026-10-18 at 13:26 Paris, recorded in `docs/spike/README.md`). The s2 path is not exercised yet, since `hv-hermes:spike` always starts the fake provider. The closing acceptance pass must add an s2 run before delivery.
-- [x] Q10 (no perso-hermes access) is answered by the same validation of 2026-10-18 at 13:26 Paris. No agent touches perso-hermes, and the ban below stays in force.
+- [x] Q10 (no example-host access) is answered by the same validation of 2026-10-18 at 13:26 Paris. No agent touches example-host, and the ban below stays in force.
 - [x] Q11 (Hermes versions for the test instance) is answered. On 2026-10-18 at 15:11 Paris the user chose `latest` for the test container, and the previous version is the release just before it ([issue #5 comment](https://github.com/eliasprunaire/hermed-bots/issues/5#issuecomment-6250324290), recorded in `docs/spike/README.md`).
 - [x] Ayo answered the two Ayo questions. On 2026-10-19 at 13:55 and 13:57 Paris, in the Dev Lead chat, Ayo chose all active profiles, not a pinned list, and the new session button label « Nouvelle session », which sends `/new`, never `/reset`. HD-08 and HD-09 may open.
 - [x] Q5 (macOS CI) is answered by the same validation of 2026-10-18 at 13:26 Paris. The CI stays on Linux, Engineer runs the macOS tests on the MacBook, and a macOS GitHub runner needs the free quota or the user's written approval. Source is `dev-roster/hermed-bots/etat.md` (18/10 21:04 entry) and issue #15.
 - [x] Q4 (macOS minimum and distribution) is answered. On 2026-10-19 at 06:37 Paris the user chose option d1, a local ad hoc signed app, with the macOS minimum set to the MacBook's version, not below macOS 14. The MacBook runs macOS 27.0.1, so the minimum is macOS 27. HD-06 may open.
 - [x] Q2 (kill switch means) is answered. On 2026-10-18 at 13:26 Paris the user chose K1 and K3. K1 is a « Tout arrêter » button that calls the API cancel, if S3 confirms it. K3 is the guaranteed fallback. Ayo stops the Hermes process of the profile on the VM. Cutting the tunnel is not enough. HD-15 may open.
 - [x] Q8 (pause notification form) is answered. On 2026-10-18 at 13:26 Paris the user chose both an in-app banner and a macOS notification, the only exception to the out-of-scope « Notifications ». HD-12 may open.
-- [ ] Hold the perso-hermes ban. No agent opens SSH to perso-hermes, reads its files or history, calls its network address, or stores its keys. `scripts/hv-guard.sh target` refuses any target that contains `perso-hermes` with code 22.
+- [ ] Hold the example-host ban. No agent opens SSH to example-host, reads its files or history, calls its network address, or stores its keys. `scripts/hv-guard.sh target` refuses any target that contains `example-host` with code 22.
 - [ ] On the operator's go, arm the audit tick as `/loop 1h` with the tick prompt below. Never leave the cadence to memory.
 - [ ] Use this tick prompt, verbatim. "Re-read the execution playbook from trunk. Audit the operation against it and fix drift in this tick. Probe every active lane and judge progress by side effects only. Stand down a stuck lane and dispatch its replacement now. Then post a short status message to the operator in chat only when the audit found a tracked change that no earlier status message reported, such as a PR opened, a code-ready head, a round launched or closed, a verdict, a merge, a stuck agent and the action taken, a blocker added or cleared, or a decision only the operator can make. Name every such change and nothing else. Do not repeat a table, the merged list, or an unchanged blocker. If the audit found none, end the turn with no reply text. Either way, log this tick's row in your decision trail. The row names the items reported, or none."
 - [ ] On the operator's hold or stand-down, send every owner a zero-writes order at once.
@@ -97,7 +97,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 - [ ] Wait for ready. `scripts/hv-hermes-env.sh doctor <mode>` answers and the profile list returns `hv-bot-a` and `hv-bot-b`.
 - [ ] Snapshot the protected paths with `scripts/hv-guard.sh snapshot` before the lane and run `scripts/hv-guard.sh check` after it. A change stops the lane with code 20 and alerts the user.
 - [ ] Deliver input only through `control-cli` commands, `hd-probe` from HD-03 on, or XCUITest through `scripts/hv-run.sh ui`. The read-only diagnostics are `scripts/hv-hermes-env.sh doctor`, `scripts/hv-guard.sh snapshot`, `GET /_hv/log` on the fake server, `docker exec hv-hermes-test ps` on the Mac, and the evidence folder `$HV_WORK/evidence/`.
-- [ ] Never target perso-hermes. A lane that needs a host other than `127.0.0.1` stops and reports BLOCKED.
+- [ ] Never target example-host. A lane that needs a host other than `127.0.0.1` stops and reports BLOCKED.
 - [ ] Save every screenshot to `/tmp/swarm-<pr-id>/worker-<n>/<slug>.png` and return the paths with the report. A CLI lane saves a PNG of its terminal transcript. A Mac lane copies the `HVShot` capture from `$HV_SHOTS`.
 
 ## Record the spike S1 to S7 against the OrbStack Hermes (HD-01)
@@ -120,7 +120,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 - [ ] Read the three Hermes doc pages and the code of the tested version read-only first. Then observe each item on `hv-hermes-test`.
 - [ ] Give each item a reference, a doc anchor, a code path at a commit, or a captured request and response. Name the contract it feeds. S1 feeds `send_message` and `run_events`, S2 the replay of `run_events`, S3 `cancel_run`, S4 `set_model` and `new_session`, S5 `list_sessions`, S6 `list_profiles`, and S7 the routing of all of them.
 - [ ] Record an item that cannot work as an impossibility finding and stop for the user's decision. The spike does not propose a replacement.
-- [ ] Hold the target. Only `hv-hermes-test` on `127.0.0.1:18642`. No SSH, no read, no key, and no network call to perso-hermes.
+- [ ] Hold the target. Only `hv-hermes-test` on `127.0.0.1:18642`. No SSH, no read, no key, and no network call to example-host.
 - [ ] Settle how a cloud lane worker dispatches a Mac lane to the launchd runner and reads `$HV_WORK/evidence/`. Record it in `docs/spike/README.md` before the swarm.
 
 **You see.**
@@ -144,7 +144,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 - [ ] Lane 7. S6. Read the profile list from the source the report names. Save `hd01-s6-profiles.png`. Pass when the nine seeded active profiles appear and `hv-old` is excluded or flagged as `docs/spike/S6-profiles.md` records.
 - [ ] Lane 8. S7. Reach each of the nine seeded profiles through the API port. Save `hd01-s7-multiplex.png`. Pass when every profile answers through the mechanism `docs/spike/S7-multiplexing.md` records, a `/p/<profile>/` prefix or one port per profile.
 - [ ] Lane 9. Protected paths. Run `scripts/hv-guard.sh snapshot` before lanes 2 to 8 and `scripts/hv-guard.sh check` after them. Save `hd01-guard.png`. Pass when the check exits 0 and both paths stay absent.
-- [ ] Lane 10. No perso-hermes contact. Run `scripts/hv-netwatch.sh` during lanes 2 to 8, then `scripts/hv-guard.sh target perso-hermes`. Save `hd01-netwatch.png`. Pass when every connection goes to `127.0.0.1:18642` and the target check exits 22.
+- [ ] Lane 10. No example-host contact. Run `scripts/hv-netwatch.sh` during lanes 2 to 8, then `scripts/hv-guard.sh target example-host`. Save `hd01-netwatch.png`. Pass when every connection goes to `127.0.0.1:18642` and the target check exits 22.
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
@@ -472,7 +472,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 - [ ] Observe S12 first. Compare system `ssh` with a library for a local forward to `127.0.0.1:8642`, with the identity that the user's SSH config names for the alias. A key management service manages the keys outside the app, and the app never asks for a private key. Record the chosen option in `docs/spike/S12-tunnel.md`.
 - [ ] Start the `ssh` child in its own process group and kill the group on quit and on timeout, so no orphan survives.
 - [ ] Keep the key out of argv, logs, files, and screenshots.
-- [ ] In test mode, open the tunnel to an SSH endpoint inside `hv-hermes-test`. Refuse any host that contains `perso-hermes`.
+- [ ] In test mode, open the tunnel to an SSH endpoint inside `hv-hermes-test`. Refuse any host that contains `example-host`.
 - [ ] Reopen the tunnel when it drops. Show a clear message on a wrong key, with no retry loop.
 
 **You see.**
@@ -481,7 +481,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] `SSHTunnelTests` gains a case that the argument list carries no secret and a case that a `perso-hermes` host is refused. Run `xcodebuild test -scheme HermedBots -destination 'platform=macOS'`.
+- [ ] `SSHTunnelTests` gains a case that the argument list carries no secret and a case that an `example-host` host is refused. Run `xcodebuild test -scheme HermedBots -destination 'platform=macOS'`.
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. Ten lanes on `grok-4.7-xhigh` at the PR head, per the boot recipe. Every lane is a Mac lane.
 
@@ -492,7 +492,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 - [ ] Lane 5. Use a wrong test key. Save `hd07-wrong-key.png`. Pass when a clear message shows and the logs show one attempt, not a loop.
 - [ ] Lane 6. Run `scripts/hv-netwatch.sh` during a session. Save `hd07-netwatch.png`. Pass when the only outbound connection is the tunnel.
 - [ ] Lane 7. Read `ps -o args` for the `ssh` child and search the evidence folder for the key. Save `hd07-no-secret.png`. Pass when the key value appears nowhere.
-- [ ] Lane 8. Enter a host that contains `perso-hermes` in test mode. Save `hd07-refuse-prod.png`. Pass when the app refuses before any connection attempt.
+- [ ] Lane 8. Enter a host that contains `example-host` in test mode. Save `hd07-refuse-prod.png`. Pass when the app refuses before any connection attempt.
 - [ ] Lane 9. Run `docker network disconnect bridge hv-hermes-test`, wait 30 s, and reconnect. Save `hd07-network-cut.png`. Pass when the tunnel reopens without user action.
 - [ ] Lane 10. Run `scripts/hv-guard.sh snapshot` and `check` around lanes 1 to 9. Save `hd07-guard.png`. Pass when the check exits 0.
 
@@ -1070,7 +1070,7 @@ Unproven until later PRs. The version source (S8, HD-04). Desktop detection (S9,
 | Risk | PR | What the owner watches |
 | --- | --- | --- |
 | A spike item is impossible, so v1 is not deliverable as written | HD-01 | Stop and hand the decision to the user. Propose no replacement. |
-| Contact with perso-hermes | Every PR | `hv-guard.sh target` code 22, the netwatch, and no production key in any test environment. |
+| Contact with example-host | Every PR | `hv-guard.sh target` code 22, the netwatch, and no production key in any test environment. |
 | A pass writes `~/.hermes/hermes-agent` or `~/.local/bin/hermes` | Every Mac lane | The guard before and after every pass, and code 20 stops the pass. |
 | The macOS surface has no cloud control skill, so Mac lanes need the user's MacBook and the user present | HD-01 to HD-16 | The owner of HD-01 settles, before its swarm, how a cloud lane worker dispatches a Mac lane to the launchd runner and reads `$HV_WORK/evidence/`. Every later PR reuses that mechanism. |
 | Code on the Mac outside the CHARTE | HD-01 | Q1 answered and the CHARTE updated by Manager before any code. |

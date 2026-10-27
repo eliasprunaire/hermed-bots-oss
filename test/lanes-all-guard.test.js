@@ -108,7 +108,7 @@ test("refused target returning 0 instead of 22 stops the pass before any lane", 
   const run = runPass({ snapshot: 0, refused: 0, allowed: 0 });
   assert.notEqual(run.status, 0, run.output);
   assert.deepEqual(run.started, []);
-  assert.match(run.output, /perso-hermes\.invalid code 0, 22 attendu/);
+  assert.match(run.output, /example-host\.invalid code 0, 22 attendu/);
   assert.doesNotMatch(run.output, /RESULT OK/);
 });
 

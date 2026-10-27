@@ -68,7 +68,7 @@ shots_png "$(sec lane-5)" "Lane 5 : une clé refusée, un message, une seule ten
 text_png "$(sec lane-6)" "Lane 6 : hv-netwatch.sh pendant une session, la seule connexion sortante est le tunnel" "$OUT/hd07-netwatch.png"
 text_png "$(sec lane-7)" "Lane 7 : la valeur de la clé n'apparaît ni dans ps, ni dans les preuves, ni dans le dépôt" "$OUT/hd07-no-secret.png"
 cat "$(sec lanes-2)" "$(sec lane-8)" > "$EVD/render/lane8-text.txt"
-shots_png "$EVD/render/lane8-text.txt" "Lane 8 : un hôte qui contient perso-hermes est refusé avant toute connexion (gauche : saisi dans la vue, droite : donné au lancement)" "$OUT/hd07-refuse-prod.png" "$EVD/lane2-8/shots/hd07-refuse-prod.png" "$EVD/lane8/shots/hd07-refuse-launch.png"
+shots_png "$EVD/render/lane8-text.txt" "Lane 8 : un hôte qui contient example-host est refusé avant toute connexion (gauche : saisi dans la vue, droite : donné au lancement)" "$OUT/hd07-refuse-prod.png" "$EVD/lane2-8/shots/hd07-refuse-prod.png" "$EVD/lane8/shots/hd07-refuse-launch.png"
 shots_png "$LANE9_LOG" "Lane 9 : réseau du conteneur coupé 30 s puis rétabli (gauche : pendant la coupure, droite : après)" "$OUT/hd07-network-cut.png" "$LANE9_DIR/network-during.png" "$LANE9_DIR/network-after.png"
 text_png "$(sec lane-10)" "Lane 10 : hv-guard.sh snapshot avant les lanes 1 à 9, check après" "$OUT/hd07-guard.png"
 ls -la "$OUT"/hd07-*.png

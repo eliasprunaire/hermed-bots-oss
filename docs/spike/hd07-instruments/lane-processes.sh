@@ -25,7 +25,7 @@ python3 "$HERE/summarize-samples.py" "$SAMPLES"; src=$?
 [ $rc -eq 0 ] && rc=$src
 if printf '%s' "$*" | grep -q 'testAPersoHermesHostInTheEnvironmentNeverStartsSsh'; then
   if grep -E '/usr/bin/ssh ' "$SAMPLES" >/dev/null; then
-    echo "RESULT FAIL : /usr/bin/ssh vu pendant le refus de perso-hermes"
+    echo "RESULT FAIL : /usr/bin/ssh vu pendant le refus d'example-host"
     rc=1
   fi
 fi
