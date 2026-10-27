@@ -398,6 +398,12 @@ Le résultat est install pass, version 0.1.2 après relance, codesign pass et sp
 Le script était au commit `6bdc827f`.
 Le code de sortie est 0.
 
+Cette passe précède `prove_single_copy`.
+Sa ligne de résultat n'a pas de champ `single-copy`.
+Elle ne prouve donc pas qu'une seule copie de l'app reste après la mise à jour.
+Une passe publiée actuelle doit imprimer `SPARKLE-PROOF-PUBLISHED` avec `single-copy pass`.
+Cette ligne n'est pas encore enregistrée.
+
 La preuve locale du 24/10/2026 reste dans la section précédente.
 Elle ne remplace pas cette passe publiée.
 
@@ -423,3 +429,6 @@ Rejouer la mise à jour depuis le flux publié.
 ```bash
 bash scripts/sparkle-update-proof.sh published
 ```
+
+La dernière ligne commence par `SPARKLE-PROOF-PUBLISHED`.
+Le code de sortie 0 exige `single-copy pass`.
