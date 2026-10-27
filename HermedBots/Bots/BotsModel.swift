@@ -33,6 +33,8 @@ final class BotsModel {
         var threads: [String: Threads] = [:]
         /// Le numéro de la lecture rangée de la liste des fils de chaque bot, pris à son départ : la conversation le compare à la confirmation d'un choix
         var reads: [String: Int] = [:]
+        /// Le numéro de la dernière lecture des fils partie pour chaque bot : une réponse plus ancienne, erreur comprise, ne s'applique pas
+        var issued: [String: Int] = [:]
         var expanded: Set<String> = []
     }
 
@@ -122,18 +124,19 @@ final class BotsModel {
         if hosts[host, default: Host()].threads[id] == nil { hosts[host, default: Host()].threads[id] = .loading }
         startedReads += 1
         let read = startedReads
+        hosts[host, default: Host()].issued[id] = read
+        let result: Threads
         do {
             switch try await client.listSessions(profile: id) {
-            case .sessions(let sessions):
-                // une réponse partie avant celle qui est rangée ne la remplace pas
-                guard read > hosts[host, default: Host()].reads[id, default: 0] else { return }
-                hosts[host, default: Host()].threads[id] = .loaded(sessions)
-                hosts[host, default: Host()].reads[id] = read
-            case .disabled(let message): hosts[host, default: Host()].threads[id] = .disabled(message)
+            case .sessions(let sessions): result = .loaded(sessions)
+            case .disabled(let message): result = .disabled(message)
             }
         } catch {
-            hosts[host, default: Host()].threads[id] = .failed(Self.message(error))
+            result = .failed(Self.message(error))
         }
+        guard read == hosts[host, default: Host()].issued[id] else { return }
+        hosts[host, default: Host()].threads[id] = result
+        if case .loaded = result { hosts[host, default: Host()].reads[id] = read }
     }
 
     private static func message(_ error: Error) -> String {

@@ -1454,6 +1454,27 @@ final class ConversationModelTests: XCTestCase {
         XCTAssertEqual(bots.listedThread(bot, "t")?.model, "server-new")
     }
 
+    /// Un 401 de `list_sessions` parti avant la relecture arrive après les fils rechargés et ne les remplace pas
+    func testALateUnauthorizedListSessionsDoesNotReplaceReloadedThreads() async throws {
+        let link = Link(host: hostA, url: "http://host-a.invalid")
+        _ = makeModel(link)
+        let bots = makeBots(link, profiles: [hostA: [bot]])
+        await bots.refresh()
+        bots.toggle(bot)
+        try await held(0, "GET", "/p/\(bot)/api/sessions").reply(listing("fil-1"))
+        await eventually("fils listés") { listed(bots, bot) == ["fil-1"] }
+
+        bots.reload(bot)
+        let older = try await held(1, "GET", "/p/\(bot)/api/sessions")
+        bots.reload(bot)
+        try await held(2, "GET", "/p/\(bot)/api/sessions").reply(listing("fil-1", "fil-2"))
+        await eventually("fils rechargés") { listed(bots, bot) == ["fil-1", "fil-2"] }
+
+        older.reply(#"{"error":{"message":"Invalid gateway API key"}}"#, status: 401)
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(listed(bots, bot), ["fil-1", "fil-2"], "le 401 de la lecture précédente ne remplace pas les fils rechargés")
+    }
+
     private enum Operation: String, CaseIterable {
         case load, create, firstSend, startRun, stream, reread
     }
