@@ -11,11 +11,20 @@ URL=http://127.0.0.1:$PORT
 CT=hv-hermes-test
 SSH_HOST=$host.example
 export SSH_HOST
-: "${HV_FORBIDDEN_HOST:=example-host.invalid}"
-export HV_FORBIDDEN_HOST
 export PATH="$PATH:/usr/sbin"
 
 say() { printf '[%s Paris] %s\n' "$(TZ=Europe/Paris date +%H:%M:%S)" "$*"; }
+
+require_forbidden_target() {
+  if [ -z "${HV_FORBIDDEN_HOST:-}" ]; then
+    say "HV_FORBIDDEN_HOST unset, skip forbidden-target probe"
+    return 0
+  fi
+  "$SK/hv-guard.sh" target "$HV_FORBIDDEN_HOST"
+  g=$?
+  echo "hv-guard.sh target HV_FORBIDDEN_HOST : code $g (22 attendu)"
+  [ "$g" = 22 ] || { echo "RESULT FAIL : target HV_FORBIDDEN_HOST code $g, 22 attendu, aucune lane lancée"; exit 1; }
+}
 cmd() { printf '$ %s\n' "$*"; "$@"; local rc=$?; printf 'rc=%s\n' "$rc"; return 0; }
 
 xctestrun() { ls "$HVW/${1:-dd}"/Build/Products/*.xctestrun | head -1; }

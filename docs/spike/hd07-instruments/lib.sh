@@ -9,8 +9,6 @@ APPD=${APPD:-$HVW/dd/Build/Products/Debug/HermedBots.app/Contents/MacOS/HermedBo
 # dossier des clés de test : chemin fixe, hors de tout dossier de preuves, supprimé par drop_alias
 KEYDIR=$HVW/hd07-key
 SSH_HOST=host.example
-: "${HV_FORBIDDEN_HOST:=example-host.invalid}"
-export HV_FORBIDDEN_HOST
 # alias de la config OpenSSH écrits par new_alias : le premier est accepté par le conteneur, le second jamais (sa clé n'est pas installée)
 SSH_ALIAS=hv-hd07
 SSH_ALIAS_REFUSED=hv-hd07-refused
@@ -18,6 +16,17 @@ SSH_CONFIG=$HOME/.ssh/config
 export PATH="$PATH:/usr/sbin"
 
 say() { printf '[%s Paris] %s\n' "$(TZ=Europe/Paris date +%H:%M:%S)" "$*"; }
+
+require_forbidden_target() {
+  if [ -z "${HV_FORBIDDEN_HOST:-}" ]; then
+    say "HV_FORBIDDEN_HOST unset, skip forbidden-target probe"
+    return 0
+  fi
+  "$SK/hv-guard.sh" target "$HV_FORBIDDEN_HOST"
+  g=$?
+  echo "hv-guard.sh target HV_FORBIDDEN_HOST : code $g (22 attendu)"
+  [ "$g" = 22 ] || { echo "RESULT FAIL : hv-guard.sh target HV_FORBIDDEN_HOST code $g, 22 attendu, aucune lane lancée"; exit 1; }
+}
 # affiche la commande puis son résultat ; ne propage pas le code (il est imprimé)
 cmd() { printf '$ %s\n' "$*"; "$@"; local rc=$?; printf 'rc=%s\n' "$rc"; return 0; }
 

@@ -106,10 +106,13 @@ for (const code of [20, 21]) {
 }
 
 test("refused target returning 0 instead of 22 stops the pass before any lane", () => {
-  const run = runPass({ snapshot: 0, refused: 0, allowed: 0 });
+  const run = runPass(
+    { snapshot: 0, refused: 0, allowed: 0 },
+    { HV_FORBIDDEN_HOST: "operator-host.invalid" },
+  );
   assert.notEqual(run.status, 0, run.output);
   assert.deepEqual(run.started, []);
-  assert.match(run.output, /example-host\.invalid code 0, 22 attendu/);
+  assert.match(run.output, /HV_FORBIDDEN_HOST code 0, 22 attendu/);
   assert.doesNotMatch(run.output, /RESULT OK/);
 });
 
@@ -128,18 +131,22 @@ test("witness: expected guard codes run the nine lane stubs in script order", ()
   assert.match(run.output, /RESULT OK/);
 });
 
-test("without HV_FORBIDDEN_HOST the pass probes the example host and still refuses it", () => {
-  const run = runPass({ snapshot: 0, refused: 22, allowed: 0 });
+test("without HV_FORBIDDEN_HOST the pass skips the forbidden probe and still starts the lanes", () => {
+  const run = runPass({ snapshot: 0, refused: 0, allowed: 0 });
   assert.equal(run.status, 0, run.output);
-  assert.match(run.output, /hv-guard\.sh target example-host\.invalid : code 22/);
+  assert.deepEqual(run.started, LANES);
+  assert.match(run.output, /HV_FORBIDDEN_HOST unset/);
+  assert.doesNotMatch(run.output, /example-host\.invalid/);
+  assert.match(run.output, /RESULT OK/);
 });
 
-test("HV_FORBIDDEN_HOST from the operator replaces the example host", () => {
+test("HV_FORBIDDEN_HOST from the operator is probed and must exit 22", () => {
   const run = runPass(
     { snapshot: 0, refused: 22, allowed: 0 },
     { HV_FORBIDDEN_HOST: "operator-host.invalid" },
   );
   assert.equal(run.status, 0, run.output);
-  assert.match(run.output, /hv-guard\.sh target operator-host\.invalid : code 22/);
+  assert.deepEqual(run.started, LANES);
+  assert.match(run.output, /HV_FORBIDDEN_HOST : code 22/);
   assert.doesNotMatch(run.output, /example-host/);
 });
