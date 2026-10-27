@@ -1,8 +1,6 @@
 # gitignore-style; last match wins; ! rejects
-*.md
+/*.md
 !AGENTS.md
-!.cursor/**
-!src/**
 docs/**
 !docs/spike/**
 !docs/plans/**

@@ -47,6 +47,17 @@ expect() {
 }
 
 setup
+printf 'a\n' >"$dir/LICENSE"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m init
+base=$(git_in "$dir" rev-parse HEAD)
+printf 'r\n' >"$dir/README.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m readme
+expect 0 yes "$base" HEAD
+teardown
+
+setup
 printf 'a\n' >"$dir/README.md"
 git_in "$dir" add -A
 git_in "$dir" commit -q -m init
@@ -79,6 +90,30 @@ mkdir -p "$dir/.cursor"
 printf 'x\n' >"$dir/.cursor/x.md"
 git_in "$dir" add -A
 git_in "$dir" commit -q -m cursor
+expect 1 no "$base" HEAD
+teardown
+
+setup
+printf 'a\n' >"$dir/README.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m init
+base=$(git_in "$dir" rev-parse HEAD)
+mkdir -p "$dir/.github"
+printf 'x\n' >"$dir/.github/x.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m github
+expect 1 no "$base" HEAD
+teardown
+
+setup
+printf 'a\n' >"$dir/README.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m init
+base=$(git_in "$dir" rev-parse HEAD)
+mkdir -p "$dir/Tests"
+printf 'x\n' >"$dir/Tests/x.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m tests
 expect 1 no "$base" HEAD
 teardown
 
