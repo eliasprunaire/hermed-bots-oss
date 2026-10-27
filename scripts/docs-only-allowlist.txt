@@ -1,0 +1,10 @@
+# gitignore-style; last match wins; ! rejects
+*.md
+!AGENTS.md
+!.cursor/**
+!src/**
+docs/**
+!docs/spike/**
+!docs/plans/**
+!docs/perf-probes.md
+LICENSE

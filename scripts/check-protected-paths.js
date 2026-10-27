@@ -10,6 +10,8 @@ const GATE_FILES = [
   ".github/workflows/protected-paths.yml",
   "scripts/verdict-gate.js",
   "scripts/check-protected-paths.js",
+  "scripts/docs-only.sh",
+  "scripts/docs-only-allowlist.txt",
 ];
 const GATE_LABEL = "gate-change-approved";
 
