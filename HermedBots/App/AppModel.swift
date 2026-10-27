@@ -1,5 +1,6 @@
 import AppSettings
 import HermesAdapter
+import LoopGuard
 import Observation
 import SwiftUI
 import UpdateCheck
@@ -44,7 +45,7 @@ final class AppModel {
         },
         onAPIRecovered: { [unowned self] in self.apiError = nil },
         onAPIError: { [unowned self] error, profile in Task { await self.handleAPIError(error, profile: profile) } },
-        notifyPause: { await LoopPauseNotifications.shared.post(cause: $0) }
+        notifyPause: { [unowned self] cause in await self.notifyPause(cause) }
     )
     @ObservationIgnored lazy var profileLock = ProfileLock(
         connection: { [unowned self] in self.connection },
@@ -99,6 +100,8 @@ final class AppModel {
     /// Un test injecte la lecture de `API_SERVER_KEY` et la session HTTP ; l'app lit par SSH et par la session par défaut
     private let apiKeyReader: (@MainActor (String) async throws -> String?)?
     private let urlConfiguration: URLSessionConfiguration
+    /// L'app injecte la notification macOS ; la cible de test n'embarque pas `UNUserNotificationCenter`
+    private let notifyPause: @Sendable (LoopGuard.Cause) async -> String
 
     var canCheckForUpdates: Bool {
         _ = updateRender
@@ -122,9 +125,11 @@ final class AppModel {
         updates: UpdateCheck = UpdateCheck(driver: NullUpdateDriver()),
         sshResolver: any SSHConfigResolving = SystemSSHConfigResolver(),
         apiKeyReader: (@MainActor (String) async throws -> String?)? = nil,
-        urlConfiguration: URLSessionConfiguration = .ephemeral
+        urlConfiguration: URLSessionConfiguration = .ephemeral,
+        notifyPause: @escaping @Sendable (LoopGuard.Cause) async -> String = { _ in "Notification indisponible." }
     ) {
         self.apiKeyReader = apiKeyReader
+        self.notifyPause = notifyPause
         self.urlConfiguration = urlConfiguration
         self.environment = environment
         self.updates = updates
