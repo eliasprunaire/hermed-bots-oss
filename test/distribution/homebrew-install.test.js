@@ -29,7 +29,7 @@ function writeTool(dir, name, body) {
   fs.writeFileSync(path.join(dir, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
 }
 
-function run({ args = ["run"], brew = {}, codesign = 0, spctl = 0, leftover = false, version = "0.1.2", env = {} } = {}) {
+function run({ args = ["run"], brew = {}, codesign = 0, spctl = 0, leftover = false, version = "0.1.2", env = {}, pgrep = "file" } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "hermed-brew-proof-"));
   const calls = path.join(dir, "calls");
   const listed = path.join(dir, "listed");
@@ -75,7 +75,15 @@ function run({ args = ["run"], brew = {}, codesign = 0, spctl = 0, leftover = fa
   writeTool(dir, "codesign", `printf '%s\\n' "codesign $*" >> ${calls}; exit ${codesign}`);
   writeTool(dir, "spctl", `printf '%s\\n' "spctl $*" >> ${calls}; exit ${spctl}`);
   writeTool(dir, "open", `printf '%s\\n' "open $*" >> ${calls}; echo 1 > ${running}; exit 0`);
-  writeTool(dir, "pgrep", `[ -f ${running} ] && echo 4242 && exit 0; exit 1`);
+  if (pgrep === "once") {
+    writeTool(
+      dir,
+      "pgrep",
+      `n=$(cat ${dir}/pn 2>/dev/null || echo 0); n=$((n + 1)); echo $n > ${dir}/pn; [ "$n" = 1 ] && echo 4242 && exit 0; exit 1`,
+    );
+  } else {
+    writeTool(dir, "pgrep", `[ -f ${running} ] && echo 4242 && exit 0; exit 1`);
+  }
   writeTool(dir, "kill", `rm -f ${running}; exit 0`);
   writeTool(
     dir,
@@ -192,6 +200,37 @@ test("a pinned version that is not the tap version fails before install", () => 
   assert.equal(res.status, 1);
   assert.match(res.stdout, /^FAIL: HOMEBREW_PROOF_VERSION=0\.1\.0 does not match tap version=0\.1\.2$/m);
   assert.equal(lines.some((line) => line.startsWith("brew install")), false);
+});
+
+test("dry-run with a pinned version that is not the tap version exits non-zero", () => {
+  const { res, lines } = run({ args: ["dry-run"], env: { HOMEBREW_PROOF_VERSION: "0.1.0" } });
+  assert.equal(res.status, 1);
+  assert.match(res.stdout, /^FAIL: HOMEBREW_PROOF_VERSION=0\.1\.0 does not match tap version=0\.1\.2$/m);
+  assert.equal(lines.some((line) => line.startsWith("brew install")), false);
+});
+
+test("dry-run with a pinned version still fails when the tap cask cannot be read", () => {
+  const { res } = run({
+    args: ["dry-run"],
+    brew: { info: 1 },
+    env: { HOMEBREW_PROOF_VERSION: "0.1.2" },
+  });
+  assert.equal(res.status, 1);
+  assert.match(res.stdout, /^FAIL: cask eliasprunaire\/tap\/hermed-bots is not readable from the tap$/m);
+});
+
+test("a brew uninstall that exits non-zero fails even after the files are gone", () => {
+  const { res } = run({ brew: { uninstall: 1 } });
+  assert.equal(res.status, 1, res.stdout);
+  assert.match(res.stdout, /^FAIL: brew uninstall --cask eliasprunaire\/tap\/hermed-bots$/m);
+  assert.match(res.stdout, /uninstall=fail/);
+});
+
+test("an app that exits during the startup delay is not a successful launch", () => {
+  const { res } = run({ pgrep: "once" });
+  assert.equal(res.status, 1, res.stdout);
+  assert.match(res.stdout, /^FAIL: app exited before quit$/m);
+  assert.match(res.stdout, /launch=fail/);
 });
 
 if (spawnSync("shellcheck", ["-V"], { encoding: "utf8" }).status === 0) {

@@ -36,6 +36,7 @@ uninstall=skip
 expected=${HOMEBREW_PROOF_VERSION:-}
 installed_version=none
 binary=''
+outcome=fail
 
 say() { printf '%s\n' "$*"; }
 pass() { say "PASS: $*"; }
@@ -71,14 +72,15 @@ cask_listed() {
 }
 
 uninstall_cask() {
+  local st=0
   stop_app
   if cask_listed; then
-    brew uninstall --cask --force "$cask" >/dev/null
+    brew uninstall --cask --force "$cask" >/dev/null || st=$?
   fi
   if [ -e "$app" ]; then
-    rm -rf "$app"
+    rm -rf "$app" || st=1
   fi
-  if cask_listed || [ -e "$app" ]; then
+  if [ "$st" != 0 ] || cask_listed || [ -e "$app" ]; then
     return 1
   fi
   return 0
@@ -118,13 +120,7 @@ launch_app() {
 
 report() {
   printf '%s\n' "HOMEBREW-INSTALL-PROOF version=${installed_version:-none} expected=${expected:-none} install=$install version-check=$version_check codesign=$codesign_verdict spctl=$spctl_verdict launch=$launch uninstall=$uninstall"
-  if [ "$mode" = dry-run ]; then
-    [ "$expected" != none ] && [ -n "$expected" ] && exit 0
-    exit 1
-  fi
-  if [ "$install" = pass ] && [ "$version_check" = pass ] && [ "$codesign_verdict" = pass ] && [ "$spctl_verdict" = pass ] && [ "$launch" = pass ] && [ "$uninstall" = pass ]; then
-    exit 0
-  fi
+  [ "$outcome" = pass ] && exit 0
   exit 1
 }
 
@@ -150,6 +146,7 @@ fi
 if [ "$mode" = dry-run ]; then
   pass "dry-run (no install)"
   installed_version=$expected
+  outcome=pass
   report
 fi
 
@@ -213,6 +210,11 @@ fi
 
 if launch_app; then
   sleep 1
+  if ! running; then
+    launch=fail
+    fail_step "app exited before quit"
+    report
+  fi
   stop_app
   if running; then
     launch=fail
@@ -237,4 +239,5 @@ else
 fi
 
 trap - EXIT
+outcome=pass
 report
