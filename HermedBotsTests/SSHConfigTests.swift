@@ -1,3 +1,4 @@
+import HermesAdapter
 import XCTest
 
 final class SSHConfigTests: XCTestCase {

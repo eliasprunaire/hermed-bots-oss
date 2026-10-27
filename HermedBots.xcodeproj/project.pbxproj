@@ -27,6 +27,8 @@
 		F14400000000000000000001 /* ProfileLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14400000000000000000002 /* ProfileLock.swift */; };
 		F15500000000000000000001 /* KillSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15500000000000000000002 /* KillSwitch.swift */; };
 		F14600000000000000000001 /* ResumeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14600000000000000000002 /* ResumeStore.swift */; };
+		F14700000000000000000001 /* ResumeAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14700000000000000000002 /* ResumeAPI.swift */; };
+		F14800000000000000000001 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14800000000000000000002 /* AppModel.swift */; };
 		F16400000000000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = F16400000000000000000003 /* Sparkle */; };
 		F12300000000000000000001 /* UpdateCheck in Frameworks */ = {isa = PBXBuildFile; productRef = F12300000000000000000003 /* UpdateCheck */; };
 		F12300000000000000000002 /* UpdateCheck in Frameworks */ = {isa = PBXBuildFile; productRef = F12300000000000000000004 /* UpdateCheck */; };
@@ -64,6 +66,8 @@
 		F14400000000000000000002 /* ProfileLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileLock.swift; sourceTree = "<group>"; };
 		F15500000000000000000002 /* KillSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermedBots/KillSwitch/KillSwitch.swift; sourceTree = SOURCE_ROOT; };
 		F14600000000000000000002 /* ResumeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermedBots/Transport/ResumeStore.swift; sourceTree = SOURCE_ROOT; };
+		F14700000000000000000002 /* ResumeAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeAPI.swift; sourceTree = "<group>"; };
+		F14800000000000000000002 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -171,6 +175,7 @@
 			isa = PBXGroup;
 			children = (
 				D852961B587E19128FA0D037 /* AppEnvironment.swift */,
+				F14800000000000000000002 /* AppModel.swift */,
 				C0C0D9B1C2E3F40596A7C822 /* MainThreadWatch.swift */,
 			);
 			path = App;
@@ -206,6 +211,7 @@
 				A7C1D2E3F4B5069788AABB01 /* SSHTunnel.swift */,
 				A7C1D2E3F4B5069788AABB11 /* SSHConfig.swift */,
 				F14400000000000000000002 /* ProfileLock.swift */,
+				F14700000000000000000002 /* ResumeAPI.swift */,
 			);
 			path = Transport;
 			sourceTree = "<group>";
@@ -402,6 +408,8 @@
 			files = (
 				F15500000000000000000001 /* KillSwitch.swift in Sources */,
 				F14600000000000000000001 /* ResumeStore.swift in Sources */,
+				F14700000000000000000001 /* ResumeAPI.swift in Sources */,
+				F14800000000000000000001 /* AppModel.swift in Sources */,
 				5D2A7F19BC7DA2B216AD9C8F /* AccessibilityID.swift in Sources */,
 				E2E2F1D4A5B6C70829384A01 /* ApprovalParams.swift in Sources */,
 				D38EDC3C712F8F95FBC572B9 /* AppEnvironment.swift in Sources */,
