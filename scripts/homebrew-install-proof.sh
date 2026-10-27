@@ -114,11 +114,27 @@ running() { [ -n "$(app_pids)" ]; }
 
 launch_wait=${HOMEBREW_PROOF_LAUNCH_WAIT:-20}
 
+open_app() {
+  "$python" - "$app" "$launch_wait" <<'PY'
+import subprocess, sys
+app, limit = sys.argv[1], int(sys.argv[2])
+try:
+    run = subprocess.run(
+        ["open", "-n", "-g", "-j", app],
+        timeout=limit,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+except subprocess.TimeoutExpired:
+    sys.exit(124)
+sys.exit(run.returncode)
+PY
+}
+
 launch_app() {
-  if open -n -g -j "$app" >/dev/null 2>&1; then
-    wait_until "$launch_wait" running && return 0
-  fi
-  nohup "$binary" >/dev/null 2>&1 &
+  local rc=0
+  open_app || rc=$?
+  [ "$rc" = 0 ] || return "$rc"
   wait_until "$launch_wait" running
 }
 
@@ -222,26 +238,31 @@ else
   report
 fi
 
-if launch_app; then
-  sleep 1
-  if ! running; then
-    launch=fail
-    fail_step "app exited before quit"
-    report
-  fi
-  stop_app
-  if running; then
-    launch=fail
-    fail_step "app did not quit"
-    report
-  fi
-  launch=pass
-  pass "launch and quit"
-else
+launch_rc=0
+launch_app || launch_rc=$?
+if [ "$launch_rc" = 124 ]; then
+  launch=fail
+  fail_step "open timed out"
+  report
+elif [ "$launch_rc" != 0 ]; then
   launch=fail
   fail_step "app did not launch"
   report
 fi
+sleep 1
+if ! running; then
+  launch=fail
+  fail_step "app exited before quit"
+  report
+fi
+stop_app
+if running; then
+  launch=fail
+  fail_step "app did not quit"
+  report
+fi
+launch=pass
+pass "launch and quit"
 
 if uninstall_cask; then
   uninstall=pass

@@ -37,6 +37,7 @@ function run({
   leftover = false,
   staleProcess = false,
   openOk = true,
+  openHang = false,
   version = "0.1.2",
   env = {},
   pgrep = "file",
@@ -69,10 +70,14 @@ function run({
       `  exit 1`,
       `fi`,
       `if [ "$1" = install ]; then`,
-      `  mkdir -p '${app}/Contents/MacOS'`,
-      `  printf '%s\\n' '${plist(version).replace(/'/g, `'\\''`)}' > '${app}/Contents/Info.plist'`,
-      `  printf '%s\\n' '#!/bin/sh' > '${app}/Contents/MacOS/HermedBots'`,
-      `  chmod 755 '${app}/Contents/MacOS/HermedBots'`,
+      `  dest='${dir}/ignored/HermedBots.app'`,
+      `  for arg in "$@"; do`,
+      `    case $arg in --appdir=*) dest=\${arg#--appdir=}/HermedBots.app ;; esac`,
+      `  done`,
+      `  mkdir -p "$dest/Contents/MacOS"`,
+      `  printf '%s\\n' '${plist(version).replace(/'/g, `'\\''`)}' > "$dest/Contents/Info.plist"`,
+      `  printf '%s\\n' '#!/bin/sh' > "$dest/Contents/MacOS/HermedBots"`,
+      `  chmod 755 "$dest/Contents/MacOS/HermedBots"`,
       `  echo 1 > ${listed}`,
       `  echo 1 > ${dir}/installed`,
       `  exit ${brew.install ?? 0}`,
@@ -87,12 +92,14 @@ function run({
   );
   writeTool(dir, "codesign", `printf '%s\\n' "codesign $*" >> ${calls}; exit ${codesign}`);
   writeTool(dir, "spctl", `printf '%s\\n' "spctl $*" >> ${calls}; exit ${spctl}`);
-  if (openOk) {
+  if (openHang) {
+    writeTool(dir, "open", `printf '%s\\n' "open $*" >> ${calls}; sleep 30; echo 1 > ${running}; exit 0`);
+  } else if (openOk) {
     writeTool(dir, "open", `printf '%s\\n' "open $*" >> ${calls}; echo 1 > ${running}; exit 0`);
   } else {
     writeTool(dir, "open", `printf '%s\\n' "open $*" >> ${calls}; exit 1`);
   }
-  writeTool(dir, "nohup", `printf '%s\\n' "nohup $*" >> ${calls}; exit 0`);
+  writeTool(dir, "nohup", `printf '%s\\n' "nohup $*" >> ${calls}; echo 1 > ${running}; exit 0`);
   if (pgrep === "once") {
     writeTool(
       dir,
@@ -141,6 +148,7 @@ test("the Homebrew install proof is valid shell and keeps tracing off", () => {
   const source = fs.readFileSync(PROOF, "utf8");
   assert.match(source, /^set \+x$/m);
   assert.doesNotMatch(source, /SPARKLE_PRIVATE_KEY|DISTRIBUTION_TOKEN|APPLE_TEAM_ID/);
+  assert.doesNotMatch(source, /\bnohup\b/);
 });
 
 test("the Homebrew install proof refuses a machine that is not macOS and an unknown mode", () => {
@@ -267,6 +275,27 @@ test("a leftover process is stopped before brew install and a failed open is not
   const installAt = lines.findIndex((line) => line.startsWith("brew install"));
   assert.ok(killAt !== -1 && installAt !== -1 && killAt < installAt, lines.join("\n"));
   assert.match(res.stdout, /^FAIL: app did not launch$/m);
+  assert.match(res.stdout, /launch=fail/);
+});
+
+test("a simulated nohup start after a failed open is not a launch pass", () => {
+  const { res, lines } = run({
+    openOk: false,
+    env: { HOMEBREW_PROOF_LAUNCH_WAIT: "1" },
+  });
+  assert.equal(res.status, 1, res.stdout);
+  assert.equal(lines.some((line) => line.startsWith("nohup ")), false);
+  assert.match(res.stdout, /^FAIL: app did not launch$/m);
+  assert.match(res.stdout, /launch=fail/);
+});
+
+test("an open that hangs past the launch wait fails with an explicit timeout", () => {
+  const { res } = run({
+    openHang: true,
+    env: { HOMEBREW_PROOF_LAUNCH_WAIT: "1" },
+  });
+  assert.equal(res.status, 1, res.stdout);
+  assert.match(res.stdout, /^FAIL: open timed out$/m);
   assert.match(res.stdout, /launch=fail/);
 });
 
