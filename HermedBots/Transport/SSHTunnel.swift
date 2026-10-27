@@ -16,32 +16,35 @@ enum SSHFailure: Error, Equatable, Sendable {
     case unknownAlias
     case matchBlockRefused
     case unreadableConfig
-    case agentLockedOrEmpty
-    case certificateExpired
-    case wrongKey
-    case hostKeyChanged
+    case agentLockedOrEmpty(String)
+    case certificateExpired(String)
+    case wrongKey(String)
+    case hostKeyChanged(String)
     case unreachable(String)
 
     var retries: Bool {
         if case .unreachable = self { true } else { false }
     }
 
-    /// Lit la sortie d'erreur de ssh ; les textes sont ceux d'OpenSSH 10 (docs/spike/S12-tunnel.md)
     static func classify(stderr: String) -> SSHFailure {
         let text = stderr
+        let last = lastLine(text)
         if text.localizedCaseInsensitiveContains("agent refused operation")
             || text.contains("Could not open a connection to your authentication agent") {
-            return .agentLockedOrEmpty
+            return .agentLockedOrEmpty(last)
         }
         if text.localizedCaseInsensitiveContains("certificate invalid")
             || text.localizedCaseInsensitiveContains("certificate expired")
             || text.localizedCaseInsensitiveContains("certificate has expired") {
-            return .certificateExpired
+            return .certificateExpired(last)
         }
-        if text.contains("Permission denied") { return .wrongKey }
-        if text.contains("REMOTE HOST IDENTIFICATION HAS CHANGED") || text.contains("Host key verification failed") { return .hostKeyChanged }
-        let last = text.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        if text.contains("Permission denied") { return .wrongKey(last) }
+        if text.contains("REMOTE HOST IDENTIFICATION HAS CHANGED") || text.contains("Host key verification failed") { return .hostKeyChanged(last) }
         return .unreachable(last)
+    }
+
+    private static func lastLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
     }
 }
 
@@ -55,16 +58,20 @@ extension SSHFailure {
         case .unknownAlias: String(localized: "Cet alias SSH est inconnu.")
         case .matchBlockRefused: String(localized: "Ta config SSH contient un bloc Match. Hermed Bots ne l'interprète pas et refuse l'alias : remplace le bloc Match par des blocs Host.")
         case .unreadableConfig: String(localized: "Hermed Bots ne lit pas cette config SSH avec certitude : erreur de syntaxe, Include sans fichier ou journal trop long. L'alias est refusé.")
-        case .agentLockedOrEmpty: String(localized: "L'agent SSH est verrouillé ou vide.")
-        case .certificateExpired: String(localized: "Le certificat SSH a expiré.")
-        case .wrongKey: String(localized: "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.")
-        case .hostKeyChanged: String(localized: "La clé de l'hôte a changé. Le tunnel reste fermé.")
+        case .agentLockedOrEmpty(let detail): sshLine(detail) ?? String(localized: "L'agent SSH est verrouillé ou vide.")
+        case .certificateExpired(let detail): sshLine(detail) ?? String(localized: "Le certificat SSH a expiré.")
+        case .wrongKey(let detail): sshLine(detail) ?? String(localized: "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.")
+        case .hostKeyChanged(let detail): sshLine(detail) ?? String(localized: "La clé de l'hôte a changé. Le tunnel reste fermé.")
         case .unreachable(let reason): reason.isEmpty ? String(localized: "Hôte injoignable.") : String(localized: "Hôte injoignable : \(reason)")
         }
     }
+
+    private func sshLine(_ detail: String) -> String? {
+        let line = detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        return line.isEmpty ? nil : line
+    }
 }
 
-/// La commande distante a répondu une erreur : son code de sortie et la dernière ligne de sa sortie d'erreur
 struct RemoteCommandFailure: Error, Equatable, Sendable {
     let status: Int32
     let detail: String

@@ -600,6 +600,17 @@ final class RealSshConfigTests: XCTestCase {
 }
 
 #if DEBUG
+private final class ConnectSpyStore: SecretStore {
+    func apiKey(profile: String) throws -> String? {
+        XCTFail("KeychainSecretStore appelé")
+        return nil
+    }
+
+    func setAPIKey(_ key: String, profile: String) throws {
+        XCTFail("KeychainSecretStore appelé")
+    }
+}
+
 @MainActor
 final class AppModelConnectTests: XCTestCase {
     private func isolatedDefaults() -> UserDefaults {
@@ -672,7 +683,24 @@ final class AppModelConnectTests: XCTestCase {
         }
     }
 
-    // MARK: lecture de la clé API après un refus
+    func testConnectNeverReadsTheKeychainAndOpensWithTheAlias() async {
+        let dumps = knownDump(alias: "lab.invalid", hostname: "gateway.invalid")
+        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dumps, .profileList: dumps, .profileLocks: dumps])
+        let environment = AppEnvironment.resolve([:], defaults: isolatedDefaults(), keychain: { ConnectSpyStore() })
+        let model = AppModel(environment: environment, sshResolver: resolver)
+        model.host = "lab.invalid"
+        model.connect()
+        await eventually {
+            switch model.tunnel.state {
+            case .opening, .open, .failed, .reopening: true
+            case .idle: false
+            }
+        }
+        let args = try! SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refusePersoHermes: false).arguments(localPort: 1)
+        XCTAssertEqual(args.last, "lab.invalid")
+        XCTAssertNil(args.firstIndex(of: "-i"))
+        await model.tunnel.stop()
+    }
 
     private func keyModel(keys: [String: String] = [:], profiles: [String], reads: KeyReads, serve: @escaping @Sendable (URLRequest) -> Int) -> AppModel {
         let table = (["Profile  Model  Gateway  Alias  Distribution"] + profiles.map { "  \($0)   hv-fake-1   running   —   —" }).joined(separator: "\n")

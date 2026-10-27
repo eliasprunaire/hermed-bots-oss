@@ -59,11 +59,11 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 | Alias inconnu (aucun bloc `Host` n'écrit l'alias tel quel dans `ssh -G -vv` ; `Host *`, `Host mon*` et tout motif avec joker ne suffisent pas, quelles que soient leurs valeurs ; un bloc nommé aux valeurs standard reste valide) | Cet alias SSH est inconnu. |
 | Config qui contient un bloc `Match`, quelle que soit sa forme (`Match all`, `Match user *`, `Match host *`, `Match originalhost *`, `Match exec …`, même nommé sur l'alias) ; le refus vaut aussi pour un `Match` dans un fichier inclus ou après un autre `Host` | Ta config SSH contient un bloc Match. Hermed Bots ne l'interprète pas et refuse l'alias : remplace le bloc Match par des blocs Host. |
 | Config que l'app ne lit pas avec certitude : `ssh -G` sort en erreur (guillemet non fermé, option inconnue, argument manquant), `Include` sans fichier, journal `-vv` de 64 Ko ou plus | Hermed Bots ne lit pas cette config SSH avec certitude : erreur de syntaxe, Include sans fichier ou journal trop long. L'alias est refusé. |
-| Agent verrouillé ou vide | L'agent SSH est verrouillé ou vide. |
-| Certificat expiré | Le certificat SSH a expiré. |
-| Serveur refuse l'identité | Le serveur refuse l'identité SSH. |
-| Clé d'hôte changée | La clé de l'hôte a changé. |
-| Hôte injoignable | Hôte injoignable. |
+| Agent verrouillé ou vide | Dernière ligne stderr de ssh, ou « L'agent SSH est verrouillé ou vide. » si cette ligne est vide. |
+| Certificat expiré | Dernière ligne stderr de ssh, ou « Le certificat SSH a expiré. » si cette ligne est vide. |
+| Serveur refuse l'identité | Dernière ligne stderr de ssh, ou le bandeau français si cette ligne est vide. |
+| Clé d'hôte changée | Dernière ligne stderr de ssh, ou « La clé de l'hôte a changé. Le tunnel reste fermé. » si cette ligne est vide. |
+| Hôte injoignable | Dernière ligne stderr de ssh, précédée de « Hôte injoignable : » quand elle n'est pas vide. |
 | `perso-hermes` en mode test, sur l'alias ou sur l'hôte résolu d'un lancement ; l'alias tapé est refusé avant `ssh -G` | Cet hôte est refusé en mode test. |
 | `ProxyJump` ou `ProxyCommand`, quelle que soit la valeur (hors `none` entier ; `none,none` est une liste de sauts), vu par l'un des trois lancements ; tous les modes | Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte. |
 | Clé API absente sur l'hôte | Clé API introuvable sur l'hôte pour le profil … |
@@ -83,4 +83,4 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 - `AppModel` avec deux profils : un 401 d'un bot en arrière-plan, échec temporaire de la lecture, puis « Réessayer » relit ce bot et pas celui de l'écran. Une clé trop courte qui reste refusée ne coûte qu'une lecture SSH, malgré un `/health` valide.
 - Deux bots refusés en même temps : chaque refus nomme son bot, pas celui à l'écran (`onAPIError`).
 - Affichage en lecture seule sans secret ni saisie API.
-- Le magasin de secrets ne lit plus de clé SSH dans le Trousseau. Mode test : pas de `SecItem*`.
+- Connect ne lit pas le Trousseau. Un faux magasin qui échoue s'il est appelé reste silencieux. `SystemSSHBackend.open` lance `/usr/bin/ssh` avec l'alias. Mode test : pas de `SecItem*`.
