@@ -6,7 +6,6 @@ cask=eliasprunaire/tap/hermed-bots
 token=hermed-bots
 app_name=HermedBots.app
 export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1
-homebrew_no_install_from_api_owned=0
 
 mode=${1:-run}
 case "$mode" in dry-run|run) ;; *) echo 'Usage: homebrew-install-proof.sh [dry-run|run]' >&2; exit 2 ;; esac
@@ -38,10 +37,7 @@ pass() { say "PASS: $*"; }
 fail_step() { say "FAIL: $*"; }
 
 restore_homebrew_install_from_api() {
-  if [ "${homebrew_no_install_from_api_owned:-0}" = 1 ]; then
-    unset HOMEBREW_NO_INSTALL_FROM_API
-    homebrew_no_install_from_api_owned=0
-  fi
+  unset HOMEBREW_NO_INSTALL_FROM_API
 }
 
 plist_value() {

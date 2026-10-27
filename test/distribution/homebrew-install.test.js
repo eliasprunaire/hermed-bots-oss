@@ -158,8 +158,6 @@ test("the Homebrew install proof is valid shell and keeps tracing off", () => {
   assert.match(source, /^set \+x$/m);
   assert.doesNotMatch(source, /SPARKLE_PRIVATE_KEY|DISTRIBUTION_TOKEN|APPLE_TEAM_ID/);
   assert.doesNotMatch(source, /\bnohup\b/);
-  assert.match(source, /restore_homebrew_install_from_api/);
-  assert.match(source, /unset HOMEBREW_NO_INSTALL_FROM_API/);
   assert.doesNotMatch(source, /export HOMEBREW_NO_INSTALL_FROM_API=/);
 });
 
@@ -339,23 +337,10 @@ test("a blocking open does not hang the script and a missing process is launch=f
   assert.doesNotMatch(res.stdout, /uninstall=skip/);
 });
 
-test("restore_homebrew_install_from_api unsets HOMEBREW_NO_INSTALL_FROM_API only when the proof owned it", () => {
-  const source = fs.readFileSync(PROOF, "utf8");
-  const match = source.match(/restore_homebrew_install_from_api\(\) \{\n[\s\S]*?\n\}/);
-  assert.ok(match, "restore_homebrew_install_from_api is missing");
-  const res = spawnSync("bash", ["-c", `${match[0]}\n
-homebrew_no_install_from_api_owned=1
-export HOMEBREW_NO_INSTALL_FROM_API=1
-restore_homebrew_install_from_api
-if [ -n "\${HOMEBREW_NO_INSTALL_FROM_API+x}" ]; then echo still-set; exit 1; fi
-homebrew_no_install_from_api_owned=0
-export HOMEBREW_NO_INSTALL_FROM_API=1
-restore_homebrew_install_from_api
-if [ -z "\${HOMEBREW_NO_INSTALL_FROM_API+x}" ]; then echo dropped-inherited; exit 1; fi
-echo kept-inherited
-`], { encoding: "utf8" });
-  assert.equal(res.status, 0, res.stdout + res.stderr);
-  assert.match(res.stdout, /kept-inherited/);
+test("an inherited HOMEBREW_NO_INSTALL_FROM_API is still visible to brew during the proof", () => {
+  const { res, lines } = run({ env: { HOMEBREW_NO_INSTALL_FROM_API: "1" } });
+  assert.equal(res.status, 0, res.stdout);
+  assert.ok(lines.some((line) => line === "brew-env HOMEBREW_NO_INSTALL_FROM_API=1"));
 });
 
 test("brew install passes --appdir from HOMEBREW_PROOF_APPDIR", () => {
