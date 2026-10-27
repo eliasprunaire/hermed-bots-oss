@@ -64,7 +64,7 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 | Serveur refuse l'identité | Dernière ligne stderr de ssh, ou le bandeau français si cette ligne est vide. |
 | Clé d'hôte changée | Dernière ligne stderr de ssh, ou « La clé de l'hôte a changé. Le tunnel reste fermé. » si cette ligne est vide. |
 | Hôte injoignable | Dernière ligne stderr de ssh, précédée de « Hôte injoignable : » quand elle n'est pas vide. |
-| `example-host` en mode test, sur l'alias ou sur l'hôte résolu d'un lancement ; l'alias tapé est refusé avant `ssh -G` | Cet hôte est refusé en mode test. |
+| Hôte interdit du mode test, sur l'alias ou sur l'hôte résolu. `example-host` est le nom documenté, pas le jeton compilé. L'alias tapé est refusé avant `ssh -G`. | Cet hôte est refusé en mode test. |
 | `ProxyJump` ou `ProxyCommand`, quelle que soit la valeur (hors `none` entier ; `none,none` est une liste de sauts), vu par l'un des trois lancements ; tous les modes | Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte. |
 | Clé API absente sur l'hôte | Clé API introuvable sur l'hôte pour le profil … |
 | Clé API détenue et refusée par Hermes | La clé API est refusée pour le profil … |

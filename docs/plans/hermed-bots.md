@@ -472,7 +472,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 - [ ] Observe S12 first. Compare system `ssh` with a library for a local forward to `127.0.0.1:8642`, with the identity that the user's SSH config names for the alias. A key management service manages the keys outside the app, and the app never asks for a private key. Record the chosen option in `docs/spike/S12-tunnel.md`.
 - [ ] Start the `ssh` child in its own process group and kill the group on quit and on timeout, so no orphan survives.
 - [ ] Keep the key out of argv, logs, files, and screenshots.
-- [ ] In test mode, open the tunnel to an SSH endpoint inside `hv-hermes-test`. Refuse any host that contains `example-host`.
+- [ ] In test mode, open the tunnel to an SSH endpoint inside `hv-hermes-test`. Refuse the test-mode forbidden host. The compiled tests still own that check. `example-host` in this plan is a docs placeholder, not a name to type into the app.
 - [ ] Reopen the tunnel when it drops. Show a clear message on a wrong key, with no retry loop.
 
 **You see.**
@@ -481,7 +481,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
-- [ ] `SSHTunnelTests` gains a case that the argument list carries no secret and a case that an `example-host` host is refused. Run `xcodebuild test -scheme HermedBots -destination 'platform=macOS'`.
+- [ ] `SSHTunnelTests` gains a case that the argument list carries no secret and a case that the test-mode forbidden host is refused. Run `xcodebuild test -scheme HermedBots -destination 'platform=macOS'`.
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. Ten lanes on `grok-4.7-xhigh` at the PR head, per the boot recipe. Every lane is a Mac lane.
 
@@ -492,7 +492,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 - [ ] Lane 5. Use a wrong test key. Save `hd07-wrong-key.png`. Pass when a clear message shows and the logs show one attempt, not a loop.
 - [ ] Lane 6. Run `scripts/hv-netwatch.sh` during a session. Save `hd07-netwatch.png`. Pass when the only outbound connection is the tunnel.
 - [ ] Lane 7. Read `ps -o args` for the `ssh` child and search the evidence folder for the key. Save `hd07-no-secret.png`. Pass when the key value appears nowhere.
-- [ ] Lane 8. Enter a host that contains `example-host` in test mode. Save `hd07-refuse-prod.png`. Pass when the app refuses before any connection attempt.
+- [ ] Lane 8. Run `testAHostThatNamesPersoHermesIsRefusedBeforeAnyConnection` and `testAPersoHermesHostInTheEnvironmentNeverStartsSsh`. Save `hd07-refuse-prod.png`. Pass when both tests pass and no ssh starts. Do not type `example-host` into the app. That string is a docs placeholder. The compiled guard still uses the existing fixtures.
 - [ ] Lane 9. Run `docker network disconnect bridge hv-hermes-test`, wait 30 s, and reconnect. Save `hd07-network-cut.png`. Pass when the tunnel reopens without user action.
 - [ ] Lane 10. Run `scripts/hv-guard.sh snapshot` and `check` around lanes 1 to 9. Save `hd07-guard.png`. Pass when the check exits 0.
 

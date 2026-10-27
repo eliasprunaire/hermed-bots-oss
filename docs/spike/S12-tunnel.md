@@ -58,9 +58,9 @@ The app does not interpret SSH config criteria. It refuses what it cannot read w
 
 The real `ssh -G -vv -F` runs these rules in `RealSshConfigTests`: every form of `Match`, a `Match` in an included file or after another `Host`, a config cut at the limit, an unresolved `Include`, a config `ssh` cannot parse.
 
-The app refuses any alias whose resolved config holds a ProxyJump or a ProxyCommand, in every mode, before the tunnel `ssh`. The value does not matter, and any one of the three launches is enough to refuse. Only `none` as the whole value, which removes an inherited relay, is not a relay. `none,none` is a list of two hops named `none`, so it is refused. The name of a hop does not prove where the hop leads: an alias can lead to `example-host`. The message tells the user to use an alias that connects directly.
+The app refuses any alias whose resolved config holds a ProxyJump or a ProxyCommand, in every mode, before the tunnel `ssh`. The value does not matter, and any one of the three launches is enough to refuse. Only `none` as the whole value, which removes an inherited relay, is not a relay. `none,none` is a list of two hops named `none`, so it is refused. The name of a hop does not prove where the hop leads. An alias can lead to a production host. The message tells the user to use an alias that connects directly.
 
-Test mode also refuses `example-host` on the typed alias, before any `ssh`, and on the resolved host of each launch.
+Test mode also refuses a documented fake host on the typed alias, before any `ssh`, and on the resolved host of each launch. This file writes that host as `example-host`. The compiled tests on this tree still use the existing forbidden-host fixtures.
 
 The check runs when the user connects. A config file edited afterwards is read again at the next connection or reopening, without a new check.
 
@@ -95,7 +95,7 @@ After `docker network disconnect bridge hv-hermes-test`, a probe that resolved `
 
 - `StrictHostKeyChecking=accept-new` on a real host: the first connection trusts the key it sees. The spike kept `known_hosts` in the private directory so each run started clean. The product leaves host-key files to the user's OpenSSH config.
 - A changed host key (the table above quotes the OpenSSH text).
-- example-host during the spike. Test mode now refuses that name on the full route before `ssh` starts.
+- A production host during the spike. Test mode now refuses that class of name on the full route before `ssh` starts. This file uses `example-host` as the documented placeholder.
 
 ## Reproduce
 
