@@ -36,8 +36,6 @@ test("matches agent config and the gate files", () => {
     "sub/.mcp.json",
     "scripts/check-protected-paths.js",
     "scripts/verdict-gate.js",
-    "scripts/docs-only.sh",
-    "scripts/docs-only-allowlist.txt",
     ".github/workflows/verdict-gate.yml",
     ".github/workflows/protected-paths.yml",
     "docs/scripts/verdict-gate.js",
@@ -50,8 +48,6 @@ test("matches agent config and the gate files", () => {
     ".Claude/settings.json",
     "scripts/check-protected-paths.js",
     "scripts/verdict-gate.js",
-    "scripts/docs-only.sh",
-    "scripts/docs-only-allowlist.txt",
     ".github/workflows/verdict-gate.yml",
     ".github/workflows/protected-paths.yml",
   ]);

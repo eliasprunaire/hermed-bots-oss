@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Classify a git range as documentation-only against scripts/docs-only-allowlist.txt.
+# Classify a git range as documentation-only against scripts/docs-only-allowlist.txt
 # Usage: scripts/docs-only.sh <base> <head>
 set -u
 
@@ -98,7 +98,7 @@ path_allowed() {
     case $rule in
       !*)
         # Exclusions are case-insensitive: AGENTS.md and Agents.MD are the same
-        # name on a case-insensitive volume.
+        # name on a case-insensitive volume
         shopt -s nocasematch
         if [[ $path =~ $ere ]]; then
           last=0
