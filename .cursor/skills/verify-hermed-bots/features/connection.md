@@ -58,14 +58,14 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 | Clé d'hôte changée | La clé de l'hôte a changé. |
 | Hôte injoignable | Hôte injoignable. |
 | `perso-hermes` en mode test, sur l'alias ou sur l'hôte résolu d'un lancement ; l'alias tapé est refusé avant `ssh -G` | Cet hôte est refusé en mode test. |
-| `ProxyJump` ou `ProxyCommand`, quelle que soit la valeur (hors `none`), vu par l'un des trois lancements ; tous les modes | Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte. |
+| `ProxyJump` ou `ProxyCommand`, quelle que soit la valeur (hors `none` entier ; `none,none` est une liste de sauts), vu par l'un des trois lancements ; tous les modes | Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte. |
 
 ## Vérification unitaire
 
 - Parser `ssh -G` simulé : cas `Include` (alias `lab` → `gateway.invalid`) et cas alias inconnu (`unknown-alias.invalid`, port 22).
 - `RealSshConfigTests` lance le vrai `/usr/bin/ssh -G -vv -F` : toutes les formes de `Match`, un `Match` hors de portée de l'alias, un journal coupé à 64 Ko, un `Include` sans fichier, une config illisible, les alias nommés ou couverts par un motif.
 - Arguments exacts de la résolution : `-G -vv` plus ceux du lancement réel, pour les trois lancements.
-- Relais (`ProxyJump` ou `ProxyCommand`, valeurs de toute forme) : refusé en mode test et hors mode test, y compris quand un seul lancement (tunnel, liste des profils, détection) le voit. `none` n'est pas un relais.
+- Relais (`ProxyJump` ou `ProxyCommand`, valeurs de toute forme, y compris URI, `user@hop`, `none,none`, `NONE,NONE`) : refusé en mode test et hors mode test, y compris quand un seul lancement (tunnel, liste des profils, détection) le voit. Seul `none` comme valeur entière n'est pas un relais.
 - Arguments exacts du tunnel : alias, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, pas de `-F`, `-i`, `-l`, `-p`, agent privé ni `known_hosts` temporaire.
 - Recette HD-07 : `new_alias` (`docs/spike/hd07-instruments/lib.sh`) crée une clé éphémère et les alias `hv-hd07` (clé installée dans le conteneur) et `hv-hd07-refused` (clé jamais installée). Il les écrit dans un bloc `Include` marqué en tête de `~/.ssh/config` du compte qui lance la lane. `drop_alias` retire le bloc, puis les clés. Il réécrit la config à travers un lien symbolique et la laisse identique à l'octet près. Si le bloc ne part pas, il échoue avec un message et garde les clés. `new_alias` refuse un lien symbolique sans cible et une config illisible : il n'écrit rien et la config garde ses octets. Test : `test/hd07-alias-lib.test.js`. L'app n'a plus de variable de clé ni d'utilisateur.
 - Affichage en lecture seule sans secret.
