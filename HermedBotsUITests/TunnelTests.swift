@@ -147,7 +147,7 @@ final class TunnelTests: XCTestCase {
         let app = launch(host: "example-host.invalid")
         let banner = wait(for: .bannerError, in: app, toContain: "refusé en mode test", timeout: 10)
         XCTAssertTrue(banner.contains("refusé en mode test"), banner)
-        // le temps à l'échantillonneur de voir qu'aucun /usr/bin/ssh ne démarre, y compris `ssh -G -vv` (`lane-processes.sh` échoue s'il en voit un)
+        // le temps à l'échantillonneur de voir qu'aucun /usr/bin/ssh ne démarre, y compris `ssh -G` (`lane-processes.sh` échoue s'il en voit un)
         sleep(4)
         XCTAssertEqual(text(of: element(.statusVersion, in: app)), "inconnue")
         HVShot.capture("hd07-refuse-launch", app)

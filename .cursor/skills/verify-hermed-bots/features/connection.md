@@ -56,7 +56,7 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 
 | Cas | Message |
 | --- | --- |
-| Alias dont la forme n'est pas un nom SSH valide | Cet alias SSH est inconnu. / L'alias SSH n'est pas valide. |
+| Alias dont la forme n'est pas un nom SSH valide | L'alias SSH n'est pas valide. |
 | `ssh -G` sort en erreur (guillemet non fermé, option inconnue, argument manquant) | ssh ne lit pas cette config SSH. L'alias est refusé. |
 | Agent verrouillé ou vide | Dernière ligne stderr de ssh, ou « L'agent SSH est verrouillé ou vide. » si cette ligne est vide. |
 | Certificat expiré | Dernière ligne stderr de ssh, ou « Le certificat SSH a expiré. » si cette ligne est vide. |
