@@ -63,28 +63,37 @@ test("ssh -G resolves a Match block reached through Include", () => {
   }
 });
 
+function appReadsSshConfig(text) {
+  if (/\.ssh\/config/.test(text)) return true;
+  if (!/\.ssh/.test(text)) return false;
+  return (
+    /contents\(atPath:/.test(text) ||
+    /String\s*\(\s*contentsOf/.test(text) ||
+    /Data\s*\(\s*contentsOf/.test(text) ||
+    /contentsOfFile/.test(text)
+  );
+}
+
+test("the source scan fails when app Swift reads the user ssh config", () => {
+  assert.equal(appReadsSshConfig('let p = home.appending("/.ssh/config")'), true);
+  assert.equal(appReadsSshConfig('String(contentsOf: url)\nlet dir = ".ssh"'), true);
+  assert.equal(appReadsSshConfig("FileManager.default.contents(atPath: path + \".ssh\")"), true);
+  assert.equal(appReadsSshConfig("Data(contentsOf: url)"), false);
+});
+
 test("app Swift never reads ~/.ssh/config and no longer refuses Match", () => {
   const forbidden = [
-    /~\/\.ssh\/config/,
-    /"\$HOME\/\.ssh\/config"/,
     /matchBlockRefused/,
     /hasMatchBlock/,
     /checking match for/,
     /namesAlias/,
     /"-vv"/,
   ];
-  const reads = [
-    /String\s*\(\s*contentsOfFile\s*:/,
-    /Data\s*\(\s*contentsOf\s*:/,
-    /contentsOf:\s*URL/,
-  ];
   for (const file of walkSwift(APP_SWIFT)) {
     const text = readFileSync(file, "utf8");
+    assert.equal(appReadsSshConfig(text), false, `${file} reads an ssh config file`);
     for (const pattern of forbidden) {
       assert.equal(pattern.test(text), false, `${file} still matches ${pattern}`);
-    }
-    if (/ssh\/config/.test(text) && reads.some((pattern) => pattern.test(text))) {
-      assert.fail(`${file} reads an ssh config file`);
     }
   }
 });
