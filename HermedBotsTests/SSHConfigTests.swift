@@ -400,7 +400,6 @@ private actor ScriptedSSHResolver: SSHConfigResolving {
     }
 }
 
-/// Le vrai `/usr/bin/ssh -G -F <config>` : Match et Include viennent d'OpenSSH
 final class RealSshConfigTests: XCTestCase {
     private func preview(_ config: String, alias: String = "lab.invalid", files: [String: String] = [:]) async throws -> SSHConnectionPreview {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hb-test-\(UUID().uuidString.prefix(8))")

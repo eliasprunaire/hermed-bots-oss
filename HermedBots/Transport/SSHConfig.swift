@@ -44,10 +44,8 @@ protocol SSHConfigResolving: Sendable {
     func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump
 }
 
-/// `/usr/bin/ssh -G` plus les arguments du lancement : stdout = config aplatie, Match et Include compris
 struct SystemSSHConfigResolver: SSHConfigResolving {
     let environment: [String: String]
-    /// `-F` : un test seulement ; l'app résout toujours avec la config de l'utilisateur
     let configFile: String?
 
     init(environment: [String: String] = ProcessInfo.processInfo.environment, configFile: String? = nil) {

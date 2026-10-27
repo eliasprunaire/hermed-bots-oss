@@ -75,7 +75,6 @@ struct RemoteCommandFailure: Error, Equatable, Sendable {
     let detail: String
 }
 
-/// Les lancements de `/usr/bin/ssh` après la résolution `-G` (plus `apiKeyArguments`)
 enum SSHInvocation: CaseIterable, Sendable {
     case tunnel
     case profileList
@@ -130,7 +129,6 @@ struct SSHTunnelConfig: Equatable, Sendable {
         Self.common([]) + [alias] + HermesAPIKey.remoteCommand(profile: try HermesAPIKey.validate(profile))
     }
 
-    /// `ssh -G` reprend ces arguments pour que `Match sessiontype` et `Match command` voient le même lancement
     static func arguments(_ invocation: SSHInvocation, alias: String, localPort: Int = 1, remotePort: Int = 8642) -> [String] {
         switch invocation {
         case .tunnel: common(["-N"]) + ["-L", "127.0.0.1:\(localPort):127.0.0.1:\(remotePort)", alias]
