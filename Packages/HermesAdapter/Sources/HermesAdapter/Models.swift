@@ -126,7 +126,7 @@ public enum HermesError: Error, Equatable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .apiKeyMissing(let profile):
-            return "Clé API absente pour le profil \(profile). Enregistrez sa clé dans Connexion."
+            return "Clé API introuvable sur l'hôte pour le profil \(profile)."
         case .emptyMessage:
             return "message vide : rien n'est envoyé"
         case .unreachable(let url, let reason):

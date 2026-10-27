@@ -39,6 +39,121 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(Array(args.dropLast(2)), Array(try config().profileListArguments().dropLast(4)))
     }
 
+    func testTheAPIKeyReadRunsOnlyTheFrozenHermesConfigGetWithTheSameAlias() throws {
+        let args = try config().apiKeyArguments(profile: "cyber")
+        XCTAssertEqual(Array(args.suffix(8)), ["lab.invalid", "hermes", "-p", "cyber", "config", "get", "API_SERVER_KEY", "--raw"])
+        XCTAssertEqual(HermesAPIKey.remoteCommand(profile: "cyber"), ["hermes", "-p", "cyber", "config", "get", "API_SERVER_KEY", "--raw"])
+        for absent in ["-N", "-L", "-R", "-D", "-F", "-i", "-l"] { XCTAssertFalse(args.contains(absent), absent) }
+        XCTAssertEqual(args.indices.filter { args[$0] == "-p" }.map { args[$0 + 1] }, ["cyber"])
+        for required in ["-T", "BatchMode=yes", "ForwardAgent=no", "ControlMaster=no", "ControlPath=none", "ConnectTimeout=5"] {
+            XCTAssertTrue(args.contains(required), required)
+        }
+        XCTAssertNil(args.firstIndex(of: "-F"))
+        XCTAssertNil(args.firstIndex(of: "-i"))
+        XCTAssertNil(args.firstIndex(of: "-l"))
+    }
+
+    func testAnInvalidProfileNeverBuildsSSHArguments() {
+        for profile in ["", "-p", "a b", "a;id", "ho$st", "a\nid", String(repeating: "p", count: 65)] {
+            XCTAssertThrowsError(try config().apiKeyArguments(profile: profile), profile) {
+                XCTAssertEqual($0 as? HermesProfileName, .invalid, profile)
+            }
+        }
+    }
+
+    func testUnauthorizedRecoveryFetchesOnlyTheNamedProfileAndNeverPutsTheKeyInMessages() async throws {
+        let secret = "fetched-profile-key-VALUE"
+        var store = InMemorySecretStore(apiKey: nil)
+        var calls: [String] = []
+        let key = try await APIKeyRecovery.refresh(profile: "cyber", into: &store) { name in
+            calls.append(name)
+            return name == "cyber" ? secret : "default-should-not-be-used"
+        }
+        XCTAssertEqual(key, secret)
+        XCTAssertEqual(calls, ["cyber"])
+        XCTAssertEqual(try store.apiKey(profile: "cyber"), secret)
+        XCTAssertNil(try store.apiKey(profile: "default"))
+
+        XCTAssertNil(HermesAPIKey.parse(" \n "))
+        XCTAssertEqual(HermesAPIKey.parse("  \(secret)\nignored-line\n"), secret)
+
+        let simulated = try await Spawn.run("/bin/sh", ["-c", "printf '%s\\n' '\(secret)'"], environment: ["PATH": "/usr/bin:/bin", "LC_ALL": "C"], timeout: .seconds(5))
+        XCTAssertEqual(simulated.status, 0)
+        XCTAssertEqual(HermesAPIKey.parse(simulated.stdout), secret)
+        XCTAssertFalse(HermesAPIKey.missingMessage(profile: "cyber").contains(secret))
+    }
+
+    @MainActor
+    func testAnExplicitRetryReopensTheKeyReadAfterATemporaryFailure() async throws {
+        let secret = "fetched-profile-key-VALUE"
+        var store = InMemorySecretStore(apiKey: nil)
+        let fetches = APIKeyFetches()
+        var reads: [String] = []
+        func read(_ name: String) async throws -> String? {
+            reads.append(name)
+            if reads.count == 1 { throw SSHFailure.unreachable("coupure") }
+            return secret
+        }
+
+        let failed = await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(failed)
+        // le même refus ne relit pas
+        let sameRefusal = await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(sameRefusal)
+        XCTAssertEqual(reads, ["cyber"])
+
+        fetches.reset()
+        let retried = await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertEqual(retried, secret)
+        XCTAssertEqual(reads, ["cyber", "cyber"])
+        XCTAssertEqual(try store.apiKey(profile: "cyber"), secret)
+
+        // un profil qui a répondu rouvre sa lecture sans toucher aux autres
+        _ = await fetches.fetch(profile: "sport", into: &store, read: read)
+        fetches.settle("cyber")
+        _ = await fetches.fetch(profile: "cyber", into: &store, read: read)
+        _ = await fetches.fetch(profile: "sport", into: &store, read: read)
+        XCTAssertEqual(reads, ["cyber", "cyber", "sport", "cyber"])
+    }
+
+    func testAHeldKeyThatHermesRefusesIsNotReportedAsMissing() {
+        XCTAssertTrue(HermesAPIKey.unauthorizedMessage(profile: "cyber", holdsKey: true).contains("clé API est refusée pour le profil cyber"))
+        XCTAssertEqual(HermesAPIKey.unauthorizedMessage(profile: "cyber", holdsKey: false), HermesAPIKey.missingMessage(profile: "cyber"))
+    }
+
+    func testANamedProfileWithoutAKeyShowsTheMissingBannerAndNeverSendsTheDefaultKey() async throws {
+        let defaultKey = "default-host-key-VALUE"
+        var store = InMemorySecretStore(apiKey: defaultKey)
+        var fetched: [String] = []
+        let recovered = try await APIKeyRecovery.refresh(profile: "sport", into: &store) { name in
+            fetched.append(name)
+            XCTAssertNotEqual(name, "default")
+            return name == "default" ? defaultKey : nil
+        }
+        XCTAssertNil(recovered)
+        XCTAssertEqual(fetched, ["sport"])
+        XCTAssertNil(try store.resolvedAPIKey(profile: "sport"))
+        XCTAssertEqual(try store.resolvedAPIKey(profile: "default"), defaultKey)
+        XCTAssertNil(try store.apiKey(profile: "sport"))
+
+        let message = HermesAPIKey.missingMessage(profile: "sport")
+        XCTAssertEqual(message, "Clé API introuvable sur l'hôte pour le profil sport.")
+        XCTAssertFalse(message.contains(defaultKey))
+
+        let finalStore = store
+        let api = ResumeAPI(baseURL: URL(string: "http://hermes.invalid")!, apiKey: defaultKey, apiKeyForProfile: { try finalStore.resolvedAPIKey(profile: $0) })
+        let request = try api.makeRequest(profile: "sport", input: "bonjour", session: "s", model: nil, key: "idem")
+        XCTAssertEqual(request.url?.path, "/p/sport/v1/runs")
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+        XCTAssertNil(try api.authorization(for: "sport"))
+    }
+
+    func testPersoHermesStaysRefusedWhenBuildingAPIKeyArgumentsInTestMode() {
+        XCTAssertThrowsError(try SSHTunnelConfig(alias: "perso-hermes.invalid", hostname: "gateway.invalid", user: "operator", refusePersoHermes: true).apiKeyArguments(profile: "cyber")) {
+            XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
+        }
+    }
+
     func testPersoHermesIsRefusedInTestModeOnTheAliasAndOnTheResolvedHost() {
         for alias in ["perso-hermes.invalid", "PERSO-HERMES.INVALID", "perso-hermes-alias.invalid"] {
             XCTAssertThrowsError(try config(alias: alias, hostname: "gateway.invalid"), alias) { XCTAssertEqual($0 as? SSHFailure, .forbiddenHost, alias) }

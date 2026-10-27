@@ -77,9 +77,6 @@ extension HermesClient {
     public func readVersion(profile: String) async throws -> String? {
         let variables = ["profile": profile]
         let request = try makeRequest(.version, variables, body: nil)
-        guard let authorization = request.value(forHTTPHeaderField: "Authorization"), authorization != "Bearer " else {
-            throw HermesError.apiKeyMissing(profile)
-        }
         let (status, body) = try await send(request)
         if status == 401 || status == 403 { throw httpError(.version, status, body, variables) }
         if status >= 500 { throw HermesError.unreachable(url: baseURL.absoluteString, reason: "réponse HTTP \(status)") }

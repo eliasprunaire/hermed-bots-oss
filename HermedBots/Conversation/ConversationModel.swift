@@ -115,7 +115,7 @@ final class ConversationModel {
     private let bots: @MainActor () -> [Bot]
     private let listedThread: @MainActor (String, String) -> (model: String?, read: Int)?
     private let startedReads: @MainActor () -> Int
-    private let onAPIError: @MainActor (Error) -> Void
+    private let onAPIError: @MainActor (Error, String) -> Void
     private let notifyPause: @Sendable (LoopGuard.Cause) async -> String
     private let approvalRetry: Duration
     let profileLock: ProfileLock?
@@ -137,7 +137,7 @@ final class ConversationModel {
         resumeStore: ResumeStore? = nil,
         startRun: (@MainActor (String, String, String, String?, String) async throws -> String)? = nil,
         onAPIRecovered: @escaping @MainActor () -> Void = {},
-        onAPIError: @escaping @MainActor (Error) -> Void = { _ in },
+        onAPIError: @escaping @MainActor (Error, String) -> Void = { _, _ in },
         notifyPause: @escaping @Sendable (LoopGuard.Cause) async -> String = { _ in "Notification indisponible." }
     ) {
         self.resumeStore = resumeStore
@@ -337,7 +337,7 @@ final class ConversationModel {
         do {
             apply(.loaded(key, Self.lines(try await client.messages(profile: key.bot, session: session))), on: connection)
         } catch {
-            if connection == self.connection() { reportAPIError(error) }
+            if connection == self.connection() { reportAPIError(error, bot: key.bot) }
             apply(.failed(key, Self.message(error)), on: connection)
         }
     }
@@ -351,7 +351,7 @@ final class ConversationModel {
             let saved = ConversationMachine.Key(bot: key.bot, thread: .session(session))
             startIDs[RunKey(connection: connection, thread: saved)] = startIDs.removeValue(forKey: RunKey(connection: connection, thread: key))
         } catch {
-            if connection == self.connection() { reportAPIError(error) }
+            if connection == self.connection() { reportAPIError(error, bot: key.bot) }
             apply(.failed(key, Self.message(error)), on: connection)
         }
     }
@@ -376,7 +376,7 @@ final class ConversationModel {
                 apply(.restored(key, run: record.run, lines: lines), on: host)
                 Task { await follow(key, run: record.run, on: host, restoring: true) }
             }
-        } catch { if host == connection() { onAPIError(error) } }
+        } catch { if host == connection() { onAPIError(error, bot) } }
     }
 
     private func run(_ key: ConversationMachine.Key, message: String, model: String?, on connection: String) async {
@@ -395,7 +395,7 @@ final class ConversationModel {
                         break
                     } catch {
                         guard Self.isLinkFailure(error) else { throw error }
-                        reportAPIError(error)
+                        reportAPIError(error, bot: key.bot)
                         try await Task.sleep(for: approvalRetry)
                     }
                 }
@@ -405,11 +405,11 @@ final class ConversationModel {
             }
             apply(.runStarted(key, run: run), on: connection)
             do { try resumeStore?.save(.init(session: session, run: run), connection: connection, bot: key.bot) }
-            catch { if connection == self.connection() { onAPIError(error) } }
+            catch { if connection == self.connection() { onAPIError(error, key.bot) } }
             guard connection == self.connection() else { return apply(.failed(key, Self.unreachable), on: connection) }
             await follow(key, run: run, on: connection)
         } catch {
-            if connection == self.connection() { reportAPIError(error) }
+            if connection == self.connection() { reportAPIError(error, bot: key.bot) }
             apply(.failed(key, Self.message(error)), on: connection)
         }
     }
@@ -479,12 +479,12 @@ final class ConversationModel {
                 guard machines[connection]?.threads[key]?.run == run else { return }
                 guard Self.isLinkFailure(error) else {
                     forget(runKey, run: run)
-                    if connection == self.connection() { reportAPIError(error) }
+                    if connection == self.connection() { reportAPIError(error, bot: key.bot) }
                     apply(.failed(key, Self.message(error)), on: connection)
                     return
                 }
                 if replay[runKey]?.disconnectedAt == nil { replay[runKey]?.disconnectedAt = Date().timeIntervalSince1970 }
-                if connection == self.connection() { reportAPIError(error) }
+                if connection == self.connection() { reportAPIError(error, bot: key.bot) }
                 do { try await Task.sleep(for: approvalRetry) } catch { return }
             }
         }
@@ -527,7 +527,7 @@ final class ConversationModel {
     private func forget(_ key: RunKey, run: String) {
         guard let session = key.thread.session else { return }
         do { try resumeStore?.remove(.init(session: session, run: run), connection: key.connection, bot: key.thread.bot) }
-        catch { if key.connection == connection() { onAPIError(error) } }
+        catch { if key.connection == connection() { onAPIError(error, key.thread.bot) } }
     }
 
     private func isPaused(_ key: RunKey, run: String) -> Bool {
@@ -570,7 +570,7 @@ final class ConversationModel {
             let lock = try await client.setModel(profile: key.bot, session: session, model: model)
             apply(.modelSet(key, model: lock.model, read: startedReads()), on: connection)
         } catch {
-            if connection == self.connection() { reportAPIError(error) }
+            if connection == self.connection() { reportAPIError(error, bot: key.bot) }
             apply(.modelFailed(key, Self.message(error)), on: connection)
             await probeSupport(.setModel, bot: key.bot, on: connection, force: true)
         }
@@ -586,7 +586,7 @@ final class ConversationModel {
                     _ = try await client.approve(profile: key.bot, run: run, request: request, choice: decision.choice)
                     return apply(.approved(key, requestID: id), on: connection)
                 } catch {
-                    if connection == self.connection() { reportAPIError(error) }
+                    if connection == self.connection() { reportAPIError(error, bot: key.bot) }
                     guard Self.isLinkFailure(error) else {
                         apply(.approvalFailed(key, requestID: id, Self.message(error)), on: connection)
                         return await probeSupport(.approve, bot: key.bot, on: connection, force: true)
@@ -601,10 +601,11 @@ final class ConversationModel {
         }
     }
 
-    private func reportAPIError(_ error: Error) {
-        if Self.isLinkFailure(error) { return onAPIError(error) }
+    /// `bot` est le profil dont la requête a échoué, pas celui qui est à l'écran
+    private func reportAPIError(_ error: Error, bot: String) {
+        if Self.isLinkFailure(error) { return onAPIError(error, bot) }
         if case HermesError.http(_, let status, _) = error, status == 401 || status == 403 {
-            onAPIError(error)
+            onAPIError(error, bot)
         }
     }
 

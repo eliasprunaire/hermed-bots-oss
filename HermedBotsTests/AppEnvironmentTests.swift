@@ -37,7 +37,7 @@ final class AppEnvironmentTests: XCTestCase {
         XCTAssertEqual(environment.baseURL, URL(string: "http://127.0.0.1:18642"))
     }
 
-    func testProfileKeysStayIsolatedAndOnlyDefaultFallsBack() throws {
+    func testProfileKeysStayIsolatedWithoutFallingBackToDefault() throws {
         var store = InMemorySecretStore(apiKey: "legacy-test-key", apiKeys: ["cyber": "cyber-test-key", "ia": "ia-test-key"])
         XCTAssertEqual(try store.apiKey(profile: "default"), "legacy-test-key")
         XCTAssertEqual(try store.apiKey(profile: "cyber"), "cyber-test-key")
@@ -47,6 +47,9 @@ final class AppEnvironmentTests: XCTestCase {
         XCTAssertEqual(try store.apiKey(profile: "cyber"), "replacement-test-key")
         XCTAssertEqual(try store.apiKey(profile: "ia"), "ia-test-key")
         XCTAssertEqual(try store.apiKey(profile: "default"), "default-test-key")
+        XCTAssertNil(try store.resolvedAPIKey(profile: "missing"))
+        XCTAssertEqual(try store.resolvedAPIKey(profile: "cyber"), "replacement-test-key")
+        XCTAssertEqual(try store.resolvedAPIKey(profile: "default"), "default-test-key")
     }
 
     func testTestModeLoadsDistinctProfileKeysWithoutTheKeychain() throws {
