@@ -8,7 +8,7 @@ EVD=${1:?usage: lane-processes.sh <dossier-de-preuves> <test ...>}; shift
 mkdir -p "$EVD"
 SAMPLES=$EVD/ps-samples.txt
 : > "$SAMPLES"
-# l'échantillonneur retient `/usr/bin/ssh` de l'app (`-G -vv` et le tunnel) et le gardien : pas les sessions `vssh`
+# l'échantillonneur retient `/usr/bin/ssh` de l'app (`-G` et le tunnel) et le gardien : pas les sessions `vssh`
 (
   while :; do
     t=$(perl -MTime::HiRes=time -e 'printf "%.2f", time')
@@ -23,9 +23,9 @@ sleep 3  # derniers échantillons, app fermée
 kill "$SAMPLER" 2>/dev/null; wait "$SAMPLER" 2>/dev/null
 python3 "$HERE/summarize-samples.py" "$SAMPLES"; src=$?
 [ $rc -eq 0 ] && rc=$src
-if printf '%s' "$*" | grep -q 'testAPersoHermesHostInTheEnvironmentNeverStartsSsh'; then
+if printf '%s' "$*" | grep -q 'testAnExampleHostInTheEnvironmentNeverStartsSsh'; then
   if grep -E '/usr/bin/ssh ' "$SAMPLES" >/dev/null; then
-    echo "RESULT FAIL : /usr/bin/ssh vu pendant le refus de l'hote interdit en mode test"
+    echo "RESULT FAIL : /usr/bin/ssh vu pendant le refus de example-host"
     rc=1
   fi
 fi

@@ -226,7 +226,7 @@ final class AppModel {
     }
 
     /// Relit `ssh -G` pour l'alias saisi et met à jour les champs en lecture seule
-    /// Un alias perso-hermes en mode test n'appelle pas `ssh -G`
+    /// Un alias `example-host` en mode test n'appelle pas `ssh -G`
     func refreshPreview() {
         previewGeneration += 1
         let id = previewGeneration
@@ -235,7 +235,7 @@ final class AppModel {
             preview = nil
             return
         }
-        if environment.refusePersoHermes, alias.lowercased().contains("perso-hermes") {
+        if environment.refuseTestHost, SSHTunnelConfig.isForbiddenTestHost(alias) {
             preview = nil
             return
         }
@@ -246,7 +246,7 @@ final class AppModel {
     func connect() {
         apiKeyFetches.reset()
         persistEndpoint()
-        connector.begin(alias: host, refusePersoHermes: environment.refusePersoHermes, opened: { [weak self] config, preview in
+        connector.begin(alias: host, refuseTestHost: environment.refuseTestHost, opened: { [weak self] config, preview in
             self?.preview = preview
             self?.openTunnel(config)
         }, refused: { [weak self] failure, preview in
@@ -278,7 +278,7 @@ final class AppModel {
     }
 
     private func openTunnel(_ config: SSHTunnelConfig) {
-        let backend = SystemSSHBackend()
+        let backend = SystemSSHBackend(resolver: sshResolver, refuseTestHost: environment.refuseTestHost)
         sshBackend = backend
         sshConfig = config
         tunnel.start(config, backend: backend)

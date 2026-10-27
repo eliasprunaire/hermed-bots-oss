@@ -12,7 +12,7 @@ tests=(
   SixActions/testDroppingSetModelDisablesThePickerAloneWithItsMessageAndSendingStillWorks
   SixActions/testLongEmojiAndRightToLeftNamesAreTruncatedAndReadable
   SixActions/testWithoutNamesTheRowsShowTheProfileIdAndTheThreadsShowTheirId
-  TunnelTests/testAPersoHermesHostInTheEnvironmentNeverStartsSsh
+  TunnelTests/testAnExampleHostInTheEnvironmentNeverStartsSsh
 )
 for run in 1 2 3; do
   echo "ISSUE57 répétition=$run tests=${#tests[@]}"
