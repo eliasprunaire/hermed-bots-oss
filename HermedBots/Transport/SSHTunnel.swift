@@ -14,7 +14,6 @@ enum SSHFailure: Error, Equatable, Sendable {
     case invalidHost
     case invalidPort
     case unknownAlias
-    case matchBlockRefused
     case unreadableConfig
     case agentLockedOrEmpty(String)
     case certificateExpired(String)
@@ -56,8 +55,7 @@ extension SSHFailure {
         case .invalidHost: String(localized: "L'alias SSH n'est pas valide.")
         case .invalidPort: String(localized: "Le port n'est pas valide.")
         case .unknownAlias: String(localized: "Cet alias SSH est inconnu.")
-        case .matchBlockRefused: String(localized: "Ta config SSH contient un bloc Match. Hermed Bots ne l'interprète pas et refuse l'alias : remplace le bloc Match par des blocs Host.")
-        case .unreadableConfig: String(localized: "Hermed Bots ne lit pas cette config SSH avec certitude : erreur de syntaxe, Include sans fichier ou journal trop long. L'alias est refusé.")
+        case .unreadableConfig: String(localized: "ssh ne lit pas cette config SSH. L'alias est refusé.")
         case .agentLockedOrEmpty(let detail): sshLine(detail) ?? String(localized: "L'agent SSH est verrouillé ou vide.")
         case .certificateExpired(let detail): sshLine(detail) ?? String(localized: "Le certificat SSH a expiré.")
         case .wrongKey(let detail): sshLine(detail) ?? String(localized: "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.")
@@ -77,8 +75,7 @@ struct RemoteCommandFailure: Error, Equatable, Sendable {
     let detail: String
 }
 
-/// Les quatre lancements de `/usr/bin/ssh` par l'app (les trois cas ci-dessous, plus `apiKeyArguments`)
-/// Un bloc `Match sessiontype none` ou `Match command …` ne vaut que pour l'un des trois cas : chacun est résolu avec ses arguments
+/// Les lancements de `/usr/bin/ssh` après la résolution `-G` (plus `apiKeyArguments`)
 enum SSHInvocation: CaseIterable, Sendable {
     case tunnel
     case profileList
@@ -133,8 +130,7 @@ struct SSHTunnelConfig: Equatable, Sendable {
         Self.common([]) + [alias] + HermesAPIKey.remoteCommand(profile: try HermesAPIKey.validate(profile))
     }
 
-    /// Une seule définition par lancement : `ssh -G` reçoit les mêmes arguments pour évaluer les mêmes blocs `Match`
-    /// Les ports ne servent qu'au tunnel ; `ssh -G` ne lie rien
+    /// Les ports ne servent qu'au tunnel
     static func arguments(_ invocation: SSHInvocation, alias: String, localPort: Int = 1, remotePort: Int = 8642) -> [String] {
         switch invocation {
         case .tunnel: common(["-N"]) + ["-L", "127.0.0.1:\(localPort):127.0.0.1:\(remotePort)", alias]

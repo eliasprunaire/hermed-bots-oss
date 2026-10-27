@@ -193,7 +193,7 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(SSHFailure.classify(stderr: ""), .unreachable(""))
         let retried = [SSHFailure.unreachable("x")].filter(\.retries)
         XCTAssertEqual(retried.count, 1)
-        for terminal in [SSHFailure.wrongKey(""), .hostKeyChanged(""), .unknownAlias, .matchBlockRefused, .unreadableConfig, .agentLockedOrEmpty(""), .certificateExpired(""), .forbiddenHost, .relayRefused, .invalidHost, .invalidPort] {
+        for terminal in [SSHFailure.wrongKey(""), .hostKeyChanged(""), .unknownAlias, .unreadableConfig, .agentLockedOrEmpty(""), .certificateExpired(""), .forbiddenHost, .relayRefused, .invalidHost, .invalidPort] {
             XCTAssertFalse(terminal.retries, "\(terminal)")
         }
     }
@@ -207,13 +207,10 @@ final class SSHTunnelConfigTests: XCTestCase {
 
     func testTheConfigRefusalBannersNameTheCauseAndTheWayOut() {
         XCTAssertEqual(
-            SSHFailure.matchBlockRefused.message,
-            "Ta config SSH contient un bloc Match. Hermed Bots ne l'interprète pas et refuse l'alias : remplace le bloc Match par des blocs Host."
-        )
-        XCTAssertEqual(
             SSHFailure.unreadableConfig.message,
-            "Hermed Bots ne lit pas cette config SSH avec certitude : erreur de syntaxe, Include sans fichier ou journal trop long. L'alias est refusé."
+            "ssh ne lit pas cette config SSH. L'alias est refusé."
         )
+        XCTAssertFalse(SSHFailure.unreadableConfig.message.localizedCaseInsensitiveContains("Match"))
     }
 
     func testTheForbiddenHostBannerNamesNoMachine() {
@@ -379,7 +376,7 @@ final class GuardedSpawnTests: XCTestCase {
         let config = directory.appendingPathComponent("config")
         try "Match exec \"echo $$ > \(pidFile.path); exec sleep 30\"\nHost lab.invalid\n".write(to: config, atomically: true, encoding: .utf8)
         let resolver = SystemSSHConfigResolver(configFile: config.path)
-        let dump = Task { try await resolver.dump(alias: "lab.invalid", invocation: .tunnel) }
+        let dump = Task { try await resolver.dump(alias: "lab.invalid") }
         let sleeper = try await processID(in: pidFile)
         XCTAssertEqual(kill(sleeper, 0), 0, "la commande du Match exec doit vivre avant l'arrêt")
         ProcessGroups.killAll()

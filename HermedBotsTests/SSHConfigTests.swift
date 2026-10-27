@@ -32,20 +32,9 @@ final class SSHConfigTests: XCTestCase {
         proxycommand none
         """
 
-    /// Ligne verbatim de `ssh -G -vv` (OpenSSH 10.3) pour un bloc Host dont le motif couvre l'alias
-    private func applying(_ pattern: String, line: Int = 3) -> String {
-        "debug1: /tmp/config line \(line): Applying options for \(pattern)\n"
-    }
-
-    private var unmatchedDebug: String { "debug1: Reading configuration data /tmp/config\n" + applying("*") }
-    private func matchedDebug(_ alias: String) -> String {
-        applying(alias) + applying("*", line: 9)
-    }
-
-    private func parse(_ dump: String, alias: String, debug: String = "", existing: Set<String> = [], authSock: String? = nil) -> SSHConnectionPreview {
+    private func parse(_ dump: String, alias: String, existing: Set<String> = [], authSock: String? = nil) -> SSHConnectionPreview {
         SSHConfig.parse(
             dump,
-            debug: debug,
             alias: alias,
             localUser: localUser,
             filesExist: { existing.contains($0) },
@@ -54,8 +43,7 @@ final class SSHConfigTests: XCTestCase {
     }
 
     func testAnIncludedHostBlockResolvesEveryFieldWithoutSecrets() {
-        let preview = parse(includedDump, alias: "lab", debug: matchedDebug("lab"), existing: ["/tmp/fake-id.invalid-cert.pub"])
-        XCTAssertFalse(preview.isUnknownAlias)
+        let preview = parse(includedDump, alias: "lab", existing: ["/tmp/fake-id.invalid-cert.pub"])
         XCTAssertEqual(preview.hostname, "gateway.invalid")
         XCTAssertEqual(preview.user, "operator")
         XCTAssertEqual(preview.port, 2222)
@@ -68,31 +56,20 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertFalse(preview.hostname.contains("BEGIN"))
         XCTAssertFalse(preview.identityPresentLabel.contains("/tmp"))
         XCTAssertFalse(preview.identity.label.contains("/tmp"))
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true))
     }
 
-    func testAnUnknownAliasIsTheNameAsTypedOnPort22WithOnlyDefaultIdentities() {
-        let preview = parse(defaultDump, alias: "unknown-alias.invalid", debug: unmatchedDebug)
-        XCTAssertTrue(preview.isUnknownAlias)
+    func testSshGStdoutIsAcceptedEvenWhenOnlyDefaultIdentitiesAppear() {
+        let preview = parse(defaultDump, alias: "unknown-alias.invalid")
         XCTAssertEqual(preview.hostname, "unknown-alias.invalid")
         XCTAssertEqual(preview.port, 22)
         XCTAssertFalse(preview.hasRelay)
         XCTAssertEqual(preview.identity, .file)
         XCTAssertFalse(preview.identityPresent)
-        XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
-            XCTAssertEqual($0 as? SSHFailure, .unknownAlias)
-        }
-    }
-
-    func testAValidAliasWithOnlyStandardValuesIsNotUnknown() {
-        let dump = defaultDump.replacingOccurrences(of: "unknown-alias.invalid", with: "lab.invalid")
-        let preview = parse(dump, alias: "lab.invalid", debug: matchedDebug("lab.invalid"))
-        XCTAssertFalse(preview.isUnknownAlias)
-        XCTAssertEqual(preview.hostname, "lab.invalid")
-        XCTAssertEqual(preview.port, 22)
         XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true))
     }
 
-    func testAMatchingBlockWithTheSameNameIsStillKnownWhenUserOrIdentityDiffer() {
+    func testAMissingPublicKeyOnDiskDoesNotRefuseTheAlias() {
         let dump = """
             user hermes
             hostname lab.invalid
@@ -101,12 +78,28 @@ final class SSHConfigTests: XCTestCase {
             identityfile ~/.ssh/id_rsa
             proxyjump none
             """
-        let preview = parse(dump, alias: "lab.invalid", debug: matchedDebug("lab.invalid"), existing: ["/tmp/fake-id.invalid.pub"])
-        XCTAssertFalse(preview.isUnknownAlias)
+        let preview = parse(dump, alias: "lab.invalid")
+        XCTAssertEqual(preview.identity, .file)
+        XCTAssertFalse(preview.identityPresent)
+        XCTAssertEqual(preview.identityPresentTitle, "Clé publique")
+        XCTAssertEqual(preview.identityPresentLabel, "absente")
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true))
+    }
+
+    func testAPresentPublicKeyIsOnlyALabel() {
+        let dump = """
+            user hermes
+            hostname lab.invalid
+            port 22
+            identityfile /tmp/fake-id.invalid
+            identityfile ~/.ssh/id_rsa
+            proxyjump none
+            """
+        let preview = parse(dump, alias: "lab.invalid", existing: ["/tmp/fake-id.invalid.pub"])
         XCTAssertEqual(preview.identity, .file)
         XCTAssertTrue(preview.identityPresent)
-        XCTAssertEqual(preview.identityPresentTitle, "Clé publique")
         XCTAssertEqual(preview.identityPresentLabel, "présente")
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true))
     }
 
     func testAnAgentIdentityUsesTheSessionSocketWithoutReadingTheKeychain() {
@@ -141,137 +134,44 @@ final class SSHConfigTests: XCTestCase {
             port 22
             identityfile /tmp/fake-id.invalid
             """
-        let preview = parse(dump, alias: "lab.invalid", debug: matchedDebug("lab.invalid"))
-        XCTAssertFalse(preview.isUnknownAlias)
+        let preview = parse(dump, alias: "lab.invalid")
         XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
             XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
         }
         XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: false))
     }
 
-    func testPersoHermesIsRefusedBeforeAnUnknownAliasCheck() {
+    func testPersoHermesAliasIsRefusedInTestMode() {
         let dump = defaultDump.replacingOccurrences(of: "unknown-alias.invalid", with: "perso-hermes.invalid")
-        let preview = parse(dump, alias: "perso-hermes.invalid", debug: unmatchedDebug)
-        XCTAssertTrue(preview.isUnknownAlias)
+        let preview = parse(dump, alias: "perso-hermes.invalid")
         XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
             XCTAssertEqual($0 as? SSHFailure, .forbiddenHost)
         }
     }
 
-    /// `ssh -G -vv -F /dev/null nom` n'écrit aucune ligne « Applying options for » : aucun bloc ne couvre l'alias
-    func testAnAliasWithNoApplyingOptionsLineAtAllIsUnknown() {
-        let noBlockDebug = "debug1: Reading configuration data /dev/null\n"
-        for debug in [noBlockDebug, ""] {
-            let preview = parse(defaultDump, alias: "unknown-alias.invalid", debug: debug)
-            XCTAssertTrue(preview.isUnknownAlias, debug)
-            XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)) {
-                XCTAssertEqual($0 as? SSHFailure, .unknownAlias)
-            }
-        }
-    }
-
-    /// `Host *` qui fixe des valeurs ne fait pas d'un nom quelconque un alias : seul un bloc Host ou Match qui nomme l'alias le rend connu
-    func testAnAliasWithNoBlockOfItsOwnIsUnknownWhateverHostStarSets() {
-        let dumps = [
-            "user otheroperator": defaultDump.replacingOccurrences(of: "user operator", with: "user otheroperator"),
-            "port 2222": defaultDump.replacingOccurrences(of: "port 22", with: "port 2222"),
-            "hostname other.invalid": defaultDump.replacingOccurrences(of: "unknown-alias.invalid", with: "other.invalid"),
-            "identityfile": "identityfile /tmp/fake-id.invalid\n" + defaultDump,
-            "identityagent": defaultDump + "\nidentityagent /tmp/fake-agent.invalid",
-            "certificatefile": defaultDump + "\ncertificatefile /tmp/fake-id.invalid-cert.pub",
-        ]
-        for (what, dump) in dumps {
-            let unnamed = parse(dump, alias: "unknown-alias.invalid", debug: unmatchedDebug)
-            XCTAssertTrue(unnamed.isUnknownAlias, what)
-            XCTAssertThrowsError(try SSHConnectionPlanner.config(from: unnamed, refusePersoHermes: true), what) {
-                XCTAssertEqual($0 as? SSHFailure, .unknownAlias, what)
-            }
-            let named = parse(dump, alias: "unknown-alias.invalid", debug: matchedDebug("unknown-alias.invalid"))
-            XCTAssertFalse(named.isUnknownAlias, what)
-        }
-    }
-
-    /// Ligne verbatim de `ssh -G -vv` (OpenSSH 10.3) : ssh l'écrit pour chaque ligne Match qu'il lit, qu'elle s'applique ou non
-    private func matchDebug(_ criteria: String, alias: String = "lab", found: Bool = true) -> String {
-        "debug2: checking match for '\(criteria)' host \(alias) originally \(alias)\ndebug2: match \(found ? "found" : "not found")\n"
-    }
-
-    /// Un bloc Match, quelle que soit sa forme, fait refuser la config : l'app n'interprète aucun critère
-    func testAnyMatchBlockRefusesTheConfigWhateverItsCriteria() {
-        let criteria = [
-            "all", "user *", "host *", "originalhost *", "localuser *", "exec true", "host lab", "originalhost lab",
-            #"exec "true \" host lab.invalid \"""#, "final all", "canonical host lab", "!host lab", "host la*,!lax", "all # host lab",
-            "host \"lab",
-        ]
-        for text in criteria {
-            for found in [true, false] {
-                let debug = matchedDebug("lab") + matchDebug(text, found: found)
-                let preview = parse(defaultDump, alias: "lab", debug: debug)
-                XCTAssertTrue(preview.hasMatchBlock, "\(text) found=\(found)")
-                XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true), text) {
-                    XCTAssertEqual($0 as? SSHFailure, .matchBlockRefused, text)
-                }
-            }
-        }
-    }
-
-    func testAConfigWithoutMatchBlockIsNotRefusedForOne() {
-        let preview = parse(defaultDump, alias: "lab", debug: matchedDebug("lab"))
-        XCTAssertFalse(preview.hasMatchBlock)
-        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true))
-    }
-
-    /// Seul un bloc Host qui écrit l'alias tel quel le rend connu
-    func testAHostBlockThatNamesTheAliasLiterallyMakesItKnown() {
-        for (pattern, alias) in [("monalias", "monalias"), ("lab.invalid", "lab.invalid")] {
-            let preview = parse(defaultDump, alias: alias, debug: applying(pattern) + applying("*", line: 9))
-            XCTAssertFalse(preview.isUnknownAlias, pattern)
-            XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true), pattern)
-        }
-    }
-
-    /// Un motif avec joker, nié ou d'une autre casse ne nomme jamais l'alias, même s'il le couvre
-    func testAHostPatternWithAWildcardNeverNamesTheAlias() {
-        for pattern in ["*", "**", "mon*", "m?nalias", "*alias", "monali?s", "!monalias", "monalias,other", "MonAlias"] {
-            let preview = parse(defaultDump, alias: "monalias", debug: applying(pattern))
-            XCTAssertTrue(preview.isUnknownAlias, pattern)
-            XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true), pattern) {
-                XCTAssertEqual($0 as? SSHFailure, .unknownAlias, pattern)
-            }
-        }
-    }
-
-    /// Une ligne que l'app ne lit pas avec certitude ne nomme pas l'alias : elle est refusée
-    func testALogLineTheParserCannotReadWithCertaintyDoesNotNameTheAlias() {
-        let lines = [
-            "debug1: Applying options for monalias",
-            "debug1: /tmp/config line 3: Applying options for monalias extra",
-            "debug1: /tmp/config line 3: Applying options for  monalias",
-            "debug1: /tmp/config line x: Applying options for monalias",
-            "debug2: /tmp/config line 3: Applying options for monalias",
-            "debug1: /tmp/config line 3: Applying options for \"monalias\"",
-            "/tmp/config line 3: Applying options for monalias",
-        ]
-        for line in lines {
-            let preview = parse(defaultDump, alias: "monalias", debug: line + "\n")
-            XCTAssertTrue(preview.isUnknownAlias, line)
-        }
-    }
-
-    /// `IdentityAgent none` désactive l'agent : la socket de la session ne compte plus, quelle que soit la casse
     func testIdentityAgentNoneUsesNoAgentEvenWithASessionSocket() {
         for value in ["none", "NONE"] {
-            let standard = parse(defaultDump + "\nidentityagent \(value)", alias: "lab.invalid", debug: matchedDebug("lab.invalid"), existing: [NSHomeDirectory() + "/.ssh/id_ed25519", "/tmp/example-agent.invalid"], authSock: "/tmp/example-agent.invalid")
+            let standard = parse(
+                defaultDump + "\nidentityagent \(value)",
+                alias: "lab.invalid",
+                existing: [NSHomeDirectory() + "/.ssh/id_ed25519", "/tmp/example-agent.invalid"],
+                authSock: "/tmp/example-agent.invalid"
+            )
             XCTAssertEqual(standard.identity, .file, value)
             XCTAssertNotEqual(standard.identity.label, "agent SSH", value)
             XCTAssertTrue(standard.identityPresent, value)
-            let custom = parse("user operator\nhostname lab.invalid\nport 22\nidentityagent \(value)\nidentityfile /tmp/fake-id.invalid", alias: "lab.invalid", debug: matchedDebug("lab.invalid"), existing: ["/tmp/example-agent.invalid"], authSock: "/tmp/example-agent.invalid")
+            let custom = parse(
+                "user operator\nhostname lab.invalid\nport 22\nidentityagent \(value)\nidentityfile /tmp/fake-id.invalid",
+                alias: "lab.invalid",
+                existing: ["/tmp/example-agent.invalid"],
+                authSock: "/tmp/example-agent.invalid"
+            )
             XCTAssertEqual(custom.identity, .file, value)
             XCTAssertFalse(custom.identityPresent, "\(value) : seule la socket existe, et l'agent est désactivé")
+            XCTAssertNoThrow(try SSHConnectionPlanner.config(from: custom, refusePersoHermes: true), value)
         }
     }
 
-    /// Un alias dont la config résolue contient un ProxyJump ou un ProxyCommand est refusé, quelle que soit la valeur, en mode test comme hors mode test
     func testAnyProxyJumpOrProxyCommandIsRefusedInEveryMode() {
         let relays = [
             "proxyjump bastion.invalid",
@@ -280,7 +180,6 @@ final class SSHConfigTests: XCTestCase {
             "proxyjump -",
             "proxyjump ssh://jump-alias.invalid,second.invalid",
             "proxyjump blocked@jump-alias.invalid",
-            // OpenSSH ne lit `none` seul que comme valeur entière : dans une liste, c'est le nom d'un saut
             "proxyjump none,none",
             "proxyjump NONE,NONE",
             "proxyjump none,bastion.invalid",
@@ -296,7 +195,7 @@ final class SSHConfigTests: XCTestCase {
                 identityfile /tmp/fake-id.invalid
                 \(relay)
                 """
-            let preview = parse(dump, alias: "lab.invalid", debug: matchedDebug("lab.invalid"))
+            let preview = parse(dump, alias: "lab.invalid")
             XCTAssertTrue(preview.hasRelay, relay)
             for refuse in [true, false] {
                 XCTAssertThrowsError(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: refuse), relay) {
@@ -306,38 +205,25 @@ final class SSHConfigTests: XCTestCase {
         }
     }
 
-    /// OpenSSH écrit `none` pour supprimer un relais hérité : ce n'est pas un relais
     func testNoneIsNotARelay() {
-        let preview = parse(includedDump, alias: "lab", debug: matchedDebug("lab"), existing: ["/tmp/fake-id.invalid-cert.pub"])
+        let preview = parse(includedDump, alias: "lab", existing: ["/tmp/fake-id.invalid-cert.pub"])
         XCTAssertFalse(preview.hasRelay)
         XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refusePersoHermes: false))
     }
 
-    /// Un bloc `Match sessiontype none` ou `Match command` ne s'applique qu'à un lancement : `ssh -G` reçoit les arguments exacts de chaque lancement réel
-    func testEachSshInvocationIsResolvedWithTheArgumentsItIsLaunchedWith() throws {
-        let config = try SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refusePersoHermes: true)
-        let launched: [SSHInvocation: [String]] = [
-            .tunnel: config.arguments(localPort: 1),
-            .profileList: config.profileListArguments(),
-            .profileLocks: config.profileLocksArguments(),
-        ]
-        XCTAssertEqual(Set(launched.keys), Set(SSHInvocation.allCases))
-        for invocation in SSHInvocation.allCases {
-            XCTAssertEqual(
-                SystemSSHConfigResolver.arguments(alias: "lab.invalid", invocation: invocation),
-                ["-G", "-vv"] + launched[invocation]!,
-                "\(invocation)"
-            )
-        }
-        XCTAssertTrue(SystemSSHConfigResolver.arguments(alias: "lab.invalid", invocation: .tunnel).contains("-N"))
-        XCTAssertFalse(SystemSSHConfigResolver.arguments(alias: "lab.invalid", invocation: .profileList).contains("-N"))
+    func testResolutionArgumentsAreDashGAndTheAlias() {
+        XCTAssertEqual(SystemSSHConfigResolver.arguments(alias: "lab.invalid"), ["-G", "lab.invalid"])
+        XCTAssertEqual(
+            SystemSSHConfigResolver.arguments(alias: "lab.invalid", configFile: "/tmp/fake-ssh.invalid"),
+            ["-G", "-F", "/tmp/fake-ssh.invalid", "lab.invalid"]
+        )
+        XCTAssertFalse(SystemSSHConfigResolver.arguments(alias: "lab.invalid").contains("-vv"))
     }
-
 }
 
 @MainActor
 final class SSHConnectorTests: XCTestCase {
-    private func knownDump(alias: String, hostname: String) -> SSHConfigDump {
+    private func knownDump(hostname: String) -> SSHConfigDump {
         SSHConfigDump(
             stdout: """
             user operator
@@ -345,15 +231,14 @@ final class SSHConnectorTests: XCTestCase {
             port 22
             identityfile /tmp/fake-id.invalid
             proxyjump none
-            """,
-            stderr: "debug1: /tmp/config line 3: Applying options for \(alias)\n"
+            """
         )
     }
 
     func testALaterConnectIgnoresAStaleResolution() async {
         let resolver = GatedSSHResolver(dumps: [
-            "a.invalid": knownDump(alias: "a.invalid", hostname: "alpha.invalid"),
-            "b.invalid": knownDump(alias: "b.invalid", hostname: "beta.invalid"),
+            "a.invalid": knownDump(hostname: "alpha.invalid"),
+            "b.invalid": knownDump(hostname: "beta.invalid"),
         ])
         let connector = SSHConnector(resolver: resolver, localUser: "operator")
         var opened: [String] = []
@@ -372,7 +257,7 @@ final class SSHConnectorTests: XCTestCase {
 
     func testAnEmptyBeginInvalidatesAnInFlightResolution() async {
         let resolver = GatedSSHResolver(dumps: [
-            "a.invalid": knownDump(alias: "a.invalid", hostname: "alpha.invalid"),
+            "a.invalid": knownDump(hostname: "alpha.invalid"),
         ])
         let connector = SSHConnector(resolver: resolver, localUser: "operator")
         var opened: [String] = []
@@ -391,7 +276,7 @@ final class SSHConnectorTests: XCTestCase {
 
     func testAnInvalidBeginInvalidatesAnInFlightResolutionWithoutADump() async {
         let resolver = GatedSSHResolver(dumps: [
-            "a.invalid": knownDump(alias: "a.invalid", hostname: "alpha.invalid"),
+            "a.invalid": knownDump(hostname: "alpha.invalid"),
         ])
         let connector = SSHConnector(resolver: resolver, localUser: "operator")
         var opened: [String] = []
@@ -407,44 +292,30 @@ final class SSHConnectorTests: XCTestCase {
         XCTAssertEqual(startedAfterInvalid, ["a.invalid"])
     }
 
-    private func dump(_ extra: String = "") -> SSHConfigDump {
-        SSHConfigDump(
-            stdout: "user operator\nhostname gateway.invalid\nport 22\nidentityfile /tmp/fake-id.invalid\n\(extra)",
-            stderr: "debug1: /tmp/config line 3: Applying options for lab.invalid\n"
-        )
-    }
-
-    func testEverySshInvocationIsDumpedAndAValidAliasOpensWithTheTunnelPreview() async {
-        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump(), .profileList: dump(), .profileLocks: dump()])
+    func testAValidAliasOpensAfterOneDump() async {
+        let resolver = ScriptedSSHResolver(dump: knownDump(hostname: "gateway.invalid"))
         let connector = SSHConnector(resolver: resolver, localUser: "operator")
         var opened: [String] = []
         var refused: [SSHFailure] = []
         connector.begin(alias: "lab.invalid", refusePersoHermes: true, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
         await eventually { opened == ["lab.invalid"] }
         let asked = await resolver.asked
-        XCTAssertEqual(asked, [.tunnel, .profileList, .profileLocks])
+        XCTAssertEqual(asked, ["lab.invalid"])
         XCTAssertEqual(refused, [])
     }
 
-    /// Un relais que seul un lancement voit (`Match sessiontype none` pour le tunnel, `Match command` pour les lectures) est refusé, en mode test comme hors mode test
-    func testARelayThatOnlyOneInvocationSeesIsRefusedInEveryMode() async {
-        let relays: [(SSHInvocation, String)] = [
-            (.tunnel, "proxyjump bastion.invalid"),
-            (.profileList, "proxycommand /usr/bin/nc bastion.invalid 22"),
-            (.profileLocks, "proxyjump bastion.invalid"),
-        ]
+    func testARelayInTheDumpIsRefusedInEveryMode() async {
+        let dump = SSHConfigDump(
+            stdout: "user operator\nhostname gateway.invalid\nport 22\nidentityfile /tmp/fake-id.invalid\nproxyjump bastion.invalid\n"
+        )
         for refuse in [true, false] {
-            for (invocation, relay) in relays {
-                var dumps: [SSHInvocation: SSHConfigDump] = [.tunnel: dump(), .profileList: dump(), .profileLocks: dump()]
-                dumps[invocation] = dump(relay)
-                let connector = SSHConnector(resolver: ScriptedSSHResolver(dumps: dumps), localUser: "operator")
-                var opened: [String] = []
-                var refused: [SSHFailure] = []
-                connector.begin(alias: "lab.invalid", refusePersoHermes: refuse, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
-                await eventually { !refused.isEmpty || !opened.isEmpty }
-                XCTAssertEqual(refused, [.relayRefused], "\(invocation) refuse=\(refuse)")
-                XCTAssertEqual(opened, [], "\(invocation) refuse=\(refuse)")
-            }
+            let connector = SSHConnector(resolver: ScriptedSSHResolver(dump: dump), localUser: "operator")
+            var opened: [String] = []
+            var refused: [SSHFailure] = []
+            connector.begin(alias: "lab.invalid", refusePersoHermes: refuse, opened: { config, _ in opened.append(config.alias) }, refused: { failure, _ in refused.append(failure) })
+            await eventually { !refused.isEmpty || !opened.isEmpty }
+            XCTAssertEqual(refused, [.relayRefused], "refuse=\(refuse)")
+            XCTAssertEqual(opened, [], "refuse=\(refuse)")
         }
     }
 
@@ -470,7 +341,6 @@ final class SSHConnectorTests: XCTestCase {
     }
 }
 
-/// Retient la résolution du tunnel jusqu'à `release` ; les deux autres lancements répondent tout de suite
 private actor GatedSSHResolver: SSHConfigResolving {
     private let dumps: [String: SSHConfigDump]
     private var gates: [String: CheckedContinuation<Void, Never>] = [:]
@@ -480,11 +350,9 @@ private actor GatedSSHResolver: SSHConfigResolving {
         self.dumps = dumps
     }
 
-    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
-        if invocation == .tunnel {
-            started.append(alias)
-            await withCheckedContinuation { gates[alias] = $0 }
-        }
+    func dump(alias: String) async throws -> SSHConfigDump {
+        started.append(alias)
+        await withCheckedContinuation { gates[alias] = $0 }
         return dumps[alias] ?? SSHConfigDump(stdout: "")
     }
 
@@ -494,108 +362,108 @@ private actor GatedSSHResolver: SSHConfigResolving {
     }
 }
 
-/// Une sortie par lancement, rendue tout de suite ; `asked` garde l'ordre des demandes
 private actor ScriptedSSHResolver: SSHConfigResolving {
-    private let dumps: [SSHInvocation: SSHConfigDump]
-    private(set) var asked: [SSHInvocation] = []
+    private let configured: SSHConfigDump
+    private(set) var asked: [String] = []
 
-    init(dumps: [SSHInvocation: SSHConfigDump]) {
-        self.dumps = dumps
+    init(dump: SSHConfigDump) {
+        configured = dump
     }
 
-    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
-        asked.append(invocation)
-        return dumps[invocation] ?? SSHConfigDump(stdout: "")
+    func dump(alias: String) async throws -> SSHConfigDump {
+        asked.append(alias)
+        return configured
     }
 }
 
-/// Le vrai `/usr/bin/ssh -G -vv -F <config>` : le format des lignes de débogage vient d'OpenSSH, pas d'un échantillon écrit à la main
+/// Le vrai `/usr/bin/ssh -G -F <config>` : Match et Include viennent d'OpenSSH
 final class RealSshConfigTests: XCTestCase {
-    /// L'échec que l'app montrerait pour `config`, ou nil quand l'alias est accepté ; `$DIR` vaut le dossier des fichiers de la config
-    private func failure(_ config: String, alias: String = "lab.invalid", files: [String: String] = [:]) async throws -> SSHFailure? {
+    private func preview(_ config: String, alias: String = "lab.invalid", files: [String: String] = [:]) async throws -> SSHConnectionPreview {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hb-test-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
         for (name, text) in files.merging(["config": config], uniquingKeysWith: { $1 }) {
             try text.replacingOccurrences(of: "$DIR", with: directory.path).write(to: directory.appendingPathComponent(name), atomically: true, encoding: .utf8)
         }
+        let dump = try await SystemSSHConfigResolver(configFile: directory.appendingPathComponent("config").path).dump(alias: alias)
+        return SSHConfig.parse(dump, alias: alias, localUser: "operator")
+    }
+
+    private func failure(_ config: String, alias: String = "lab.invalid", files: [String: String] = [:]) async throws -> SSHFailure? {
         do {
-            let dump = try await SystemSSHConfigResolver(configFile: directory.appendingPathComponent("config").path).dump(alias: alias, invocation: .tunnel)
-            let preview = SSHConfig.parse(dump, alias: alias, localUser: "operator")
-            _ = try SSHConnectionPlanner.config(from: preview, refusePersoHermes: true)
+            let next = try await preview(config, alias: alias, files: files)
+            _ = try SSHConnectionPlanner.config(from: next, refusePersoHermes: true)
             return nil
         } catch let failure as SSHFailure {
             return failure
         }
     }
 
-    func testEveryFormOfMatchRefusesTheConfig() async throws {
+    func testAMatchIncludeConfigResolvesTheAliasAndIsAccepted() async throws {
+        let result = try await failure(
+            "Include $DIR/inc.conf\n",
+            files: [
+                "inc.conf": """
+                Match originalhost lab.invalid
+                  User operator
+                  Port 2222
+                  Hostname gateway.example.invalid
+                  IdentityFile /tmp/fake-id.invalid
+                """,
+            ]
+        )
+        XCTAssertNil(result)
+        let next = try await preview(
+            "Include $DIR/inc.conf\n",
+            files: [
+                "inc.conf": """
+                Match originalhost lab.invalid
+                  User operator
+                  Port 2222
+                  Hostname gateway.example.invalid
+                  IdentityFile /tmp/fake-id.invalid
+                """,
+            ]
+        )
+        XCTAssertEqual(next.hostname, "gateway.example.invalid")
+        XCTAssertEqual(next.user, "operator")
+        XCTAssertEqual(next.port, 2222)
+        XCTAssertFalse(next.identityPresent)
+        XCTAssertNoThrow(try SSHConnectionPlanner.config(from: next, refusePersoHermes: true))
+    }
+
+    func testMatchFormsThatSshAcceptsDoNotRefuseTheAlias() async throws {
         let forms = [
-            "Match all", "match all", "Match\tall", "Match=all", "Match user *", "Match host *", "Match originalhost *", "Match localuser *",
-            "Match exec true", #"Match exec "true \" host lab.invalid \"""#, "Match host lab.invalid", "Match originalhost lab.invalid",
-            "Match final all", "Match canonical all", "Match all # host lab.invalid",
+            "Match all\nUser operator\nHostname gateway.example.invalid\n",
+            "Host lab.invalid\n  User operator\n  Hostname gateway.example.invalid\nMatch all\n",
+            "Match originalhost lab.invalid\n  User operator\n  Hostname gateway.example.invalid\n",
         ]
-        for form in forms {
-            for config in ["\(form)\nUser operator\n", "Host lab.invalid\n  User operator\n\(form)\n", "\(form)\nHost lab.invalid\n"] {
-                let result = try await failure(config)
-                XCTAssertEqual(result, .matchBlockRefused, config)
-            }
+        for config in forms {
+            let result = try await failure(config)
+            XCTAssertNil(result, config)
         }
     }
 
-    /// ssh lit la ligne Match d'un bloc Host qui ne s'applique pas, et d'un fichier inclus : la config est refusée aussi
-    func testAMatchBlockThatDoesNotApplyToTheAliasStillRefusesTheConfig() async throws {
-        let afterOtherHost = try await failure("Host lab.invalid\n  User operator\nHost other\n  User x\nMatch host other\n  User y\n")
-        XCTAssertEqual(afterOtherHost, .matchBlockRefused)
-        let included = try await failure("Host lab.invalid\nHost other\n  Include $DIR/inc.conf\n", files: ["inc.conf": "Match all\n"])
-        XCTAssertEqual(included, .matchBlockRefused)
-        let notMatching = try await failure("Host lab.invalid\nMatch originalhost other\n")
-        XCTAssertEqual(notMatching, .matchBlockRefused)
+    func testAMatchBlockThatDoesNotApplyDoesNotRefuseANamedHost() async throws {
+        let result = try await failure("Host lab.invalid\n  User operator\n  Hostname gateway.example.invalid\nMatch originalhost other.invalid\n  User y\n")
+        XCTAssertNil(result)
     }
 
-    func testAHostBlockNamesTheAliasOnlyByItsLiteralName() async throws {
-        let named = ["Host lab.invalid", "Host other lab.invalid", #"Host "lab.invalid""#, "Host *\nHost lab.invalid\n  User operator", "Host lab.invalid\n  User operator"]
+    func testANamedHostIsAccepted() async throws {
+        let named = ["Host lab.invalid", "Host other lab.invalid", #"Host "lab.invalid""#, "Host *\nHost lab.invalid\n  User operator"]
         for config in named {
             let result = try await failure(config + "\n")
             XCTAssertNil(result, config)
         }
         let monalias = try await failure("Host monalias\n", alias: "monalias")
         XCTAssertNil(monalias)
-        let unnamed = [
-            "Host *\n  User operator", "Host **", "Host lab.*\n  User operator", "Host lab.inval?d", "Host *.invalid",
-            "Host * lab.invalid", "Host Lab.invalid", "Host lab.invalid !lab.invalid", "Host !other *\n  User operator",
-        ]
-        for config in unnamed {
-            let result = try await failure(config + "\n")
-            XCTAssertEqual(result, .unknownAlias, config)
-        }
-        let byPattern = try await failure("Host mon*\n  User operator\n", alias: "monalias")
-        XCTAssertEqual(byPattern, .unknownAlias)
-        let noBlock = try await failure("User operator\n")
-        XCTAssertEqual(noBlock, .unknownAlias)
     }
 
-    /// Guillemet non fermé, option inconnue, argument manquant : ssh sort en erreur, la config est refusée
     func testAConfigThatSshCannotParseIsRefused() async throws {
         for config in ["Host \"lab\n", "Match\n", "Match exec\n", "Match bogus x\n", "Bogus yes\n", "Host lab.invalid\n  ProxyJump\n", "Host lab.invalid\n  Port\n"] {
             let result = try await failure(config)
             XCTAssertEqual(result, .unreadableConfig, config)
         }
-    }
-
-    /// Un `Include` qui ne désigne aucun fichier est un doute : refus
-    func testAnIncludeThatMatchesNoFileRefusesTheConfig() async throws {
-        let missing = try await failure("Host lab.invalid\nInclude $DIR/missing/*\n")
-        XCTAssertEqual(missing, .unreadableConfig)
-        let present = try await failure("Host lab.invalid\nInclude $DIR/inc.conf\n", files: ["inc.conf": "User operator\n"])
-        XCTAssertNil(present)
-    }
-
-    /// Le journal est coupé à 64 Ko : un Match au-delà de la coupure ne doit pas faire accepter la config
-    func testALogCutAtTheLimitRefusesTheConfig() async throws {
-        let config = "Host lab.invalid\n" + String(repeating: "Include $DIR/empty.conf\n", count: 1500) + "Match all\n"
-        let result = try await failure(config, files: ["empty.conf": "\n"])
-        XCTAssertEqual(result, .unreadableConfig)
     }
 }
 
@@ -620,7 +488,7 @@ final class AppModelConnectTests: XCTestCase {
         return defaults
     }
 
-    private func knownDump(alias: String, hostname: String) -> SSHConfigDump {
+    private func knownDump(hostname: String) -> SSHConfigDump {
         SSHConfigDump(
             stdout: """
             user operator
@@ -628,14 +496,13 @@ final class AppModelConnectTests: XCTestCase {
             port 22
             identityfile /tmp/fake-id.invalid
             proxyjump none
-            """,
-            stderr: "debug1: /tmp/config line 3: Applying options for \(alias)\n"
+            """
         )
     }
 
     func testAnEmptySecondRequestOnAppModelNeverOpensTheFirstTunnel() async {
         let resolver = GatedSSHResolver(dumps: [
-            "a.invalid": knownDump(alias: "a.invalid", hostname: "alpha.invalid"),
+            "a.invalid": knownDump(hostname: "alpha.invalid"),
         ])
         let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], defaults: isolatedDefaults(), keychain: { InMemorySecretStore(apiKey: nil) })
         let model = AppModel(environment: environment, sshResolver: resolver)
@@ -662,7 +529,7 @@ final class AppModelConnectTests: XCTestCase {
 
     func testPersoHermesOnAppModelNeverDumpsOrOpens() async {
         let resolver = GatedSSHResolver(dumps: [
-            "perso-hermes.invalid": knownDump(alias: "perso-hermes.invalid", hostname: "perso-hermes.invalid"),
+            "perso-hermes.invalid": knownDump(hostname: "perso-hermes.invalid"),
         ])
         let environment = AppEnvironment.resolve(
             ["HV_TEST_MODE": "1", "HV_SSH_HOST": "perso-hermes.invalid"],
@@ -684,8 +551,7 @@ final class AppModelConnectTests: XCTestCase {
     }
 
     func testConnectNeverReadsTheKeychainAndOpensWithTheAlias() async {
-        let dumps = knownDump(alias: "lab.invalid", hostname: "gateway.invalid")
-        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dumps, .profileList: dumps, .profileLocks: dumps])
+        let resolver = ScriptedSSHResolver(dump: knownDump(hostname: "gateway.invalid"))
         let environment = AppEnvironment.resolve([:], defaults: isolatedDefaults(), keychain: { ConnectSpyStore() })
         let model = AppModel(environment: environment, sshResolver: resolver)
         model.host = "lab.invalid"
@@ -811,7 +677,6 @@ final class AppModelConnectTests: XCTestCase {
     }
 }
 
-/// Lectures SSH de `API_SERVER_KEY` simulées : garde les profils lus, dans l'ordre ; `answer` rend la clé de la n-ième lecture, nil est un échec
 @MainActor
 private final class KeyReads {
     private(set) var profiles: [String] = []
@@ -826,7 +691,6 @@ private final class KeyReads {
     }
 }
 
-/// Un faux Hermes sans réseau : `serve` donne le statut de chaque requête, le corps est une version connue et une liste de fils vide
 private final class KeyStubProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var serve: (@Sendable (URLRequest) -> Int)?
 
