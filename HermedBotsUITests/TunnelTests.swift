@@ -9,7 +9,7 @@ final class TunnelTests: XCTestCase {
 
     override func setUpWithError() throws {
         continueAfterFailure = false
-        if !name.contains("testAPersoHermesHostInTheEnvironmentNeverStartsSsh") {
+        if !name.contains("testAnExampleHostInTheEnvironmentNeverStartsSsh") {
             try XCTSkipIf(environment["HV_SSH_HOST"] == nil, "HV_SSH_HOST absent : pas de sshd pour le tunnel")
         }
     }
@@ -108,14 +108,14 @@ final class TunnelTests: XCTestCase {
         XCTAssertTrue(text(of: element(.connectionMessage, in: app)).contains("Permission denied"))
     }
 
-    func testAHostThatNamesPersoHermesIsRefusedBeforeAnyConnection() throws {
+    func testAHostThatNamesExampleHostIsRefusedBeforeAnyConnection() throws {
         let app = launch()
         _ = settledVersion(in: app)
         openConnection(app)
         let host = element(.connectionHost, in: app)
         host.click()
         host.typeKey("a", modifierFlags: .command)
-        host.typeText("perso-hermes.invalid")
+        host.typeText("example-host.invalid")
         element(.connectionConnect, in: app).click()
         let message = wait(for: .connectionMessage, in: app, toContain: "refusé en mode test", timeout: 5)
         XCTAssertTrue(message.contains("refusé en mode test"), message)
@@ -143,8 +143,8 @@ final class TunnelTests: XCTestCase {
         XCTAssertEqual(app.state, .notRunning)
     }
 
-    func testAPersoHermesHostInTheEnvironmentNeverStartsSsh() throws {
-        let app = launch(host: "perso-hermes.invalid")
+    func testAnExampleHostInTheEnvironmentNeverStartsSsh() throws {
+        let app = launch(host: "example-host.invalid")
         let banner = wait(for: .bannerError, in: app, toContain: "refusé en mode test", timeout: 10)
         XCTAssertTrue(banner.contains("refusé en mode test"), banner)
         // le temps à l'échantillonneur de voir qu'aucun /usr/bin/ssh ne démarre, y compris `ssh -G -vv` (`lane-processes.sh` échoue s'il en voit un)
