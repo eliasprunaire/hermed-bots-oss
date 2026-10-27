@@ -6,6 +6,7 @@ cask=eliasprunaire/tap/hermed-bots
 token=hermed-bots
 app_name=HermedBots.app
 export HOMEBREW_NO_AUTO_UPDATE=1 HOMEBREW_NO_ANALYTICS=1
+homebrew_no_install_from_api_owned=0
 
 mode=${1:-run}
 case "$mode" in dry-run|run) ;; *) echo 'Usage: homebrew-install-proof.sh [dry-run|run]' >&2; exit 2 ;; esac
@@ -35,6 +36,13 @@ outcome=fail
 say() { printf '%s\n' "$*"; }
 pass() { say "PASS: $*"; }
 fail_step() { say "FAIL: $*"; }
+
+restore_homebrew_install_from_api() {
+  if [ "${homebrew_no_install_from_api_owned:-0}" = 1 ]; then
+    unset HOMEBREW_NO_INSTALL_FROM_API
+    homebrew_no_install_from_api_owned=0
+  fi
+}
 
 plist_value() {
   "${PLISTBUDDY:-/usr/libexec/PlistBuddy}" -c "Print :$2" "$1/Contents/Info.plist" 2>/dev/null
@@ -131,11 +139,21 @@ sys.exit(run.returncode)
 PY
 }
 
+launch_reason=
+
 launch_app() {
-  local rc=0
-  open_app || rc=$?
-  [ "$rc" = 0 ] || return "$rc"
-  wait_until "$launch_wait" running
+  launch_reason=
+  open_app || true
+  if ! wait_until "$launch_wait" running; then
+    launch_reason=missing
+    return 1
+  fi
+  sleep 1
+  if ! running; then
+    launch_reason=died
+    return 1
+  fi
+  return 0
 }
 
 bind_binary() {
@@ -148,13 +166,26 @@ bind_binary() {
 }
 
 report() {
+  restore_homebrew_install_from_api
   printf '%s\n' "HOMEBREW-INSTALL-PROOF version=${installed_version:-none} expected=${expected:-none} install=$install version-check=$version_check codesign=$codesign_verdict spctl=$spctl_verdict launch=$launch uninstall=$uninstall"
   [ "$outcome" = pass ] && exit 0
   exit 1
 }
 
+uninstall_and_record() {
+  stop_app || true
+  if uninstall_cask; then
+    uninstall=pass
+    pass "brew uninstall --cask $cask"
+    return 0
+  fi
+  uninstall=fail
+  fail_step "brew uninstall --cask $cask"
+  return 1
+}
+
 if [ "$mode" = run ]; then
-  trap 'stop_app || true; uninstall_cask || true' EXIT
+  trap 'stop_app || true; uninstall_cask || true; restore_homebrew_install_from_api' EXIT
   trap 'exit 130' INT TERM HUP
 fi
 
@@ -238,41 +269,27 @@ else
   report
 fi
 
-launch_rc=0
-launch_app || launch_rc=$?
-if [ "$launch_rc" = 124 ]; then
-  launch=fail
-  fail_step "open timed out"
-  report
-elif [ "$launch_rc" != 0 ]; then
-  launch=fail
-  fail_step "app did not launch"
-  report
-fi
-sleep 1
-if ! running; then
-  launch=fail
-  fail_step "app exited before quit"
-  report
-fi
-stop_app
-if running; then
-  launch=fail
-  fail_step "app did not quit"
-  report
-fi
-launch=pass
-pass "launch and quit"
-
-if uninstall_cask; then
-  uninstall=pass
-  pass "brew uninstall --cask $cask"
+if launch_app; then
+  stop_app
+  if running; then
+    launch=fail
+    fail_step "app did not quit"
+  else
+    launch=pass
+    pass "launch and quit"
+  fi
 else
-  uninstall=fail
-  fail_step "brew uninstall --cask $cask"
-  report
+  launch=fail
+  if [ "$launch_reason" = died ]; then
+    fail_step "app exited before quit"
+  else
+    fail_step "app did not launch"
+  fi
 fi
 
+uninstall_and_record || true
 trap - EXIT
-outcome=pass
+if [ "$launch" = pass ] && [ "$uninstall" = pass ]; then
+  outcome=pass
+fi
 report

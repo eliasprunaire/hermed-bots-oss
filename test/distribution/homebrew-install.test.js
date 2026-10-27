@@ -38,6 +38,7 @@ function run({
   staleProcess = false,
   openOk = true,
   openHang = false,
+  openHangLive = false,
   version = "0.1.2",
   env = {},
   pgrep = "file",
@@ -61,6 +62,7 @@ function run({
     "brew",
     [
       `printf '%s\\n' "brew $*" >> ${calls}`,
+      `printf '%s\\n' "brew-env HOMEBREW_NO_INSTALL_FROM_API=\${HOMEBREW_NO_INSTALL_FROM_API-}" >> ${calls}`,
       `if [ "$1" = info ]; then`,
       `  printf '%s\\n' '{"casks":[{"token":"hermed-bots","version":"${version}"}]}'`,
       `  exit ${brew.info ?? 0}`,
@@ -92,7 +94,13 @@ function run({
   );
   writeTool(dir, "codesign", `printf '%s\\n' "codesign $*" >> ${calls}; exit ${codesign}`);
   writeTool(dir, "spctl", `printf '%s\\n' "spctl $*" >> ${calls}; exit ${spctl}`);
-  if (openHang) {
+  if (openHangLive) {
+    writeTool(
+      dir,
+      "open",
+      `printf '%s\\n' "open $*" >> ${calls}; echo 1 > ${running}; sleep 30; exit 0`,
+    );
+  } else if (openHang) {
     writeTool(dir, "open", `printf '%s\\n' "open $*" >> ${calls}; sleep 30; echo 1 > ${running}; exit 0`);
   } else if (openOk) {
     writeTool(dir, "open", `printf '%s\\n' "open $*" >> ${calls}; echo 1 > ${running}; exit 0`);
@@ -129,6 +137,7 @@ function run({
   );
   const res = spawnSync("bash", [PROOF, ...args], {
     encoding: "utf8",
+    timeout: 15000,
     env: {
       ...process.env,
       PATH: `${dir}:${process.env.PATH}`,
@@ -149,6 +158,9 @@ test("the Homebrew install proof is valid shell and keeps tracing off", () => {
   assert.match(source, /^set \+x$/m);
   assert.doesNotMatch(source, /SPARKLE_PRIVATE_KEY|DISTRIBUTION_TOKEN|APPLE_TEAM_ID/);
   assert.doesNotMatch(source, /\bnohup\b/);
+  assert.match(source, /restore_homebrew_install_from_api/);
+  assert.match(source, /unset HOMEBREW_NO_INSTALL_FROM_API/);
+  assert.doesNotMatch(source, /export HOMEBREW_NO_INSTALL_FROM_API=/);
 });
 
 test("the Homebrew install proof refuses a machine that is not macOS and an unknown mode", () => {
@@ -202,6 +214,7 @@ test("run installs from the tap, checks the bundle, launches, quits, and uninsta
     /^HOMEBREW-INSTALL-PROOF version=0\.1\.2 expected=0\.1\.2 install=pass version-check=pass codesign=pass spctl=pass launch=pass uninstall=pass$/m,
   );
   assert.equal(fs.existsSync(app), false);
+  assert.equal(lines.some((line) => line === "brew-env HOMEBREW_NO_INSTALL_FROM_API=1"), false);
   assert.doesNotMatch(`${res.stdout}\n${res.stderr}`, /\/Users\/|\/home\/[^/\s]+/);
 });
 
@@ -258,10 +271,13 @@ test("a brew uninstall that exits non-zero fails even after the files are gone",
 });
 
 test("an app that exits during the startup delay is not a successful launch", () => {
-  const { res } = run({ pgrep: "once" });
+  const { res, lines } = run({ pgrep: "once" });
   assert.equal(res.status, 1, res.stdout);
   assert.match(res.stdout, /^FAIL: app exited before quit$/m);
   assert.match(res.stdout, /launch=fail/);
+  assert.match(res.stdout, /uninstall=pass/);
+  assert.doesNotMatch(res.stdout, /uninstall=skip/);
+  assert.ok(lines.some((line) => line.startsWith("brew uninstall")));
 });
 
 test("a leftover process is stopped before brew install and a failed open is not a pass", () => {
@@ -276,6 +292,9 @@ test("a leftover process is stopped before brew install and a failed open is not
   assert.ok(killAt !== -1 && installAt !== -1 && killAt < installAt, lines.join("\n"));
   assert.match(res.stdout, /^FAIL: app did not launch$/m);
   assert.match(res.stdout, /launch=fail/);
+  assert.match(res.stdout, /uninstall=pass/);
+  assert.doesNotMatch(res.stdout, /uninstall=skip/);
+  assert.ok(lines.some((line) => line.startsWith("brew uninstall")));
 });
 
 test("a simulated nohup start after a failed open is not a launch pass", () => {
@@ -287,16 +306,56 @@ test("a simulated nohup start after a failed open is not a launch pass", () => {
   assert.equal(lines.some((line) => line.startsWith("nohup ")), false);
   assert.match(res.stdout, /^FAIL: app did not launch$/m);
   assert.match(res.stdout, /launch=fail/);
+  assert.match(res.stdout, /uninstall=pass/);
+  assert.doesNotMatch(res.stdout, /uninstall=skip/);
 });
 
-test("an open that hangs past the launch wait fails with an explicit timeout", () => {
+test("a live process is a launch pass when open hangs until HOMEBREW_PROOF_LAUNCH_WAIT", () => {
+  const started = Date.now();
+  const { res } = run({
+    openHangLive: true,
+    env: { HOMEBREW_PROOF_LAUNCH_WAIT: "1" },
+  });
+  const elapsed = Date.now() - started;
+  assert.equal(res.status, 0, res.stdout);
+  assert.ok(elapsed < 8000, `open_app blocked the script for ${elapsed}ms`);
+  assert.match(res.stdout, /^PASS: launch and quit$/m);
+  assert.match(res.stdout, /launch=pass uninstall=pass/m);
+});
+
+test("a blocking open does not hang the script and a missing process is launch=fail", () => {
+  const started = Date.now();
   const { res } = run({
     openHang: true,
     env: { HOMEBREW_PROOF_LAUNCH_WAIT: "1" },
   });
+  const elapsed = Date.now() - started;
   assert.equal(res.status, 1, res.stdout);
-  assert.match(res.stdout, /^FAIL: open timed out$/m);
+  assert.ok(elapsed < 8000, `open_app blocked the script for ${elapsed}ms`);
+  assert.match(res.stdout, /^FAIL: app did not launch$/m);
+  assert.doesNotMatch(res.stdout, /open timed out/);
   assert.match(res.stdout, /launch=fail/);
+  assert.match(res.stdout, /uninstall=pass/);
+  assert.doesNotMatch(res.stdout, /uninstall=skip/);
+});
+
+test("restore_homebrew_install_from_api unsets HOMEBREW_NO_INSTALL_FROM_API only when the proof owned it", () => {
+  const source = fs.readFileSync(PROOF, "utf8");
+  const match = source.match(/restore_homebrew_install_from_api\(\) \{\n[\s\S]*?\n\}/);
+  assert.ok(match, "restore_homebrew_install_from_api is missing");
+  const res = spawnSync("bash", ["-c", `${match[0]}\n
+homebrew_no_install_from_api_owned=1
+export HOMEBREW_NO_INSTALL_FROM_API=1
+restore_homebrew_install_from_api
+if [ -n "\${HOMEBREW_NO_INSTALL_FROM_API+x}" ]; then echo still-set; exit 1; fi
+homebrew_no_install_from_api_owned=0
+export HOMEBREW_NO_INSTALL_FROM_API=1
+restore_homebrew_install_from_api
+if [ -z "\${HOMEBREW_NO_INSTALL_FROM_API+x}" ]; then echo dropped-inherited; exit 1; fi
+echo kept-inherited
+`], { encoding: "utf8" });
+  assert.equal(res.status, 0, res.stdout + res.stderr);
+  assert.match(res.stdout, /kept-inherited/);
 });
 
 test("brew install passes --appdir from HOMEBREW_PROOF_APPDIR", () => {
