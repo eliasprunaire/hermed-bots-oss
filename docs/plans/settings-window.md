@@ -1,6 +1,6 @@
 # Tabbed Settings window plan
 
-The macOS app still keeps connection fields, API keys, and the on-demand update action on the main window and in the connection sheet. This program moves those controls into the system Settings window, with one tab per group. The stored SSH endpoint survives a quit. The user never sees loopback ports, feed URLs, or other plumbing. macOS 27 and Swift 6 only.
+The macOS app still keeps connection fields and the on-demand update action on the main window and in the connection sheet. This program moves those controls into the system Settings window, with one tab per group. The stored SSH endpoint survives a quit. The user never sees loopback ports, feed URLs, or other plumbing. macOS 27 and Swift 6 only.
 The program enforces one rule. Settings live in `Settings`, not in the main split view.
 ST-01 is the only PR.
 
@@ -96,7 +96,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 **You see.**
 
 - [ ] The main window has bots, chat, and the kill switch. It has no connection form and no update button.
-- [ ] Settings has two tabs. Connexion keeps the SSH alias, the API key fields, and Connect, with no user field and no port field. Mises a jour runs the update action.
+- [ ] Settings has two tabs. Connexion keeps the SSH alias and Connect, with no user field, no port field, and no API key fields (removed). Mises a jour runs the update action.
 - [ ] A later launch fills the SSH alias from the last saved endpoint.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
