@@ -33,7 +33,6 @@ final class BotsModel {
         var threads: [String: Threads] = [:]
         /// Le numéro de la lecture rangée de la liste des fils de chaque bot, pris à son départ : la conversation le compare à la confirmation d'un choix
         var reads: [String: Int] = [:]
-        /// Le numéro de la dernière lecture des fils partie pour chaque bot : une réponse plus ancienne, erreur comprise, ne s'applique pas
         var issued: [String: Int] = [:]
         var expanded: Set<String> = []
     }

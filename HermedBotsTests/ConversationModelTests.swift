@@ -1454,7 +1454,6 @@ final class ConversationModelTests: XCTestCase {
         XCTAssertEqual(bots.listedThread(bot, "t")?.model, "server-new")
     }
 
-    /// Un 401 de `list_sessions` parti avant la relecture arrive après les fils rechargés et ne les remplace pas
     func testALateUnauthorizedListSessionsDoesNotReplaceReloadedThreads() async throws {
         let link = Link(host: hostA, url: "http://host-a.invalid")
         _ = makeModel(link)
