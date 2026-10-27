@@ -96,7 +96,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 **You see.**
 
 - [ ] The main window has bots, chat, and the kill switch. It has no connection form and no update button.
-- [ ] Settings has two tabs. Connexion keeps the SSH alias, the API key fields, and Connect, with no user field and no port field. Mises a jour runs the update action.
+- [ ] Settings has two tabs. Connexion keeps the SSH alias and Connect, with no user field, no port field, and no API key fields (removed). Mises a jour runs the update action.
 - [ ] A later launch fills the SSH alias from the last saved endpoint.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.

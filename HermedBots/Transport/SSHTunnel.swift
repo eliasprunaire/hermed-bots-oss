@@ -70,8 +70,8 @@ struct RemoteCommandFailure: Error, Equatable, Sendable {
     let detail: String
 }
 
-/// Les trois lancements de `/usr/bin/ssh` par l'app
-/// Un bloc `Match sessiontype none` ou `Match command …` ne vaut que pour l'un d'eux : chacun est résolu avec ses arguments
+/// Les quatre lancements de `/usr/bin/ssh` par l'app (les trois cas ci-dessous, plus `apiKeyArguments`)
+/// Un bloc `Match sessiontype none` ou `Match command …` ne vaut que pour l'un des trois cas : chacun est résolu avec ses arguments
 enum SSHInvocation: CaseIterable, Sendable {
     case tunnel
     case profileList
