@@ -160,6 +160,41 @@ git_in "$dir" add -A
 git_in "$dir" commit -q -m init
 base=$(git_in "$dir" rev-parse HEAD)
 mkdir -p "$dir/docs"
+printf '# agents\n' >"$dir/docs/agents.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m docs-agents-lower
+expect 1 no "$base" HEAD
+teardown
+
+setup
+printf 'a\n' >"$dir/README.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m init
+base=$(git_in "$dir" rev-parse HEAD)
+mkdir -p "$dir/docs/runbook"
+printf '# agents\n' >"$dir/docs/runbook/Agents.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m nested-agents-mixed
+expect 1 no "$base" HEAD
+teardown
+
+setup
+printf 'a\n' >"$dir/README.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m init
+base=$(git_in "$dir" rev-parse HEAD)
+printf '# agents\n' >"$dir/Agents.MD"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m agents-ext-upper
+expect 1 no "$base" HEAD
+teardown
+
+setup
+printf 'a\n' >"$dir/README.md"
+git_in "$dir" add -A
+git_in "$dir" commit -q -m init
+base=$(git_in "$dir" rev-parse HEAD)
+mkdir -p "$dir/docs"
 printf 'n\n' >"$dir/docs/café.md"
 printf 'n\n' >"$dir/docs/with space.md"
 git_in "$dir" add -A

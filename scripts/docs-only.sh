@@ -95,12 +95,22 @@ path_allowed() {
       *) pat=$rule ;;
     esac
     ere=$(glob_to_ere "$pat")
-    if [[ $path =~ $ere ]]; then
-      case $rule in
-        !*) last=0 ;;
-        *) last=1 ;;
-      esac
-    fi
+    case $rule in
+      !*)
+        # Exclusions are case-insensitive: AGENTS.md and Agents.MD are the same
+        # name on a case-insensitive volume.
+        shopt -s nocasematch
+        if [[ $path =~ $ere ]]; then
+          last=0
+        fi
+        shopt -u nocasematch
+        ;;
+      *)
+        if [[ $path =~ $ere ]]; then
+          last=1
+        fi
+        ;;
+    esac
   done
   [ "$last" = 1 ]
 }

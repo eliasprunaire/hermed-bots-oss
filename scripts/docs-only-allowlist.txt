@@ -1,4 +1,4 @@
-# gitignore-style; last match wins; ! rejects
+# gitignore-style; last match wins; ! rejects any letter-case of the path
 /*.md
 docs/**
 LICENSE
