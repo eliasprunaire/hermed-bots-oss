@@ -45,7 +45,7 @@ case "$1" in
 esac
 `;
 
-function runPass(codes, { omitForbiddenHost = false } = {}) {
+function runPass(codes, extraEnv = {}) {
   const dir = mkdtempSync(join(tmpdir(), "lanes-all-guard-"));
   try {
     const here = join(dir, "repo", "docs", "spike", "hd07-instruments");
@@ -82,9 +82,7 @@ function runPass(codes, { omitForbiddenHost = false } = {}) {
           GUARD_SNAPSHOT: String(codes.snapshot),
           GUARD_REFUSED: String(codes.refused),
           GUARD_ALLOWED: String(codes.allowed),
-          ...(omitForbiddenHost
-            ? {}
-            : { HV_FORBIDDEN_HOST: "example-host.invalid" }),
+          ...extraEnv,
         },
       },
     );
@@ -130,13 +128,18 @@ test("witness: expected guard codes run the nine lane stubs in script order", ()
   assert.match(run.output, /RESULT OK/);
 });
 
-test("lib.sh default probe still refuses without HV_FORBIDDEN_HOST in the env", () => {
+test("without HV_FORBIDDEN_HOST the pass probes the example host and still refuses it", () => {
+  const run = runPass({ snapshot: 0, refused: 22, allowed: 0 });
+  assert.equal(run.status, 0, run.output);
+  assert.match(run.output, /hv-guard\.sh target example-host\.invalid : code 22/);
+});
+
+test("HV_FORBIDDEN_HOST from the operator replaces the example host", () => {
   const run = runPass(
     { snapshot: 0, refused: 22, allowed: 0 },
-    { omitForbiddenHost: true },
+    { HV_FORBIDDEN_HOST: "operator-host.invalid" },
   );
   assert.equal(run.status, 0, run.output);
-  assert.deepEqual(run.started, LANES);
-  assert.match(run.output, /example-host\.invalid : code 22/);
-  assert.match(run.output, /RESULT OK/);
+  assert.match(run.output, /hv-guard\.sh target operator-host\.invalid : code 22/);
+  assert.doesNotMatch(run.output, /example-host/);
 });

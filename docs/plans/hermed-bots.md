@@ -144,7 +144,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 - [ ] Lane 7. S6. Read the profile list from the source the report names. Save `hd01-s6-profiles.png`. Pass when the nine seeded active profiles appear and `hv-old` is excluded or flagged as `docs/spike/S6-profiles.md` records.
 - [ ] Lane 8. S7. Reach each of the nine seeded profiles through the API port. Save `hd01-s7-multiplex.png`. Pass when every profile answers through the mechanism `docs/spike/S7-multiplexing.md` records, a `/p/<profile>/` prefix or one port per profile.
 - [ ] Lane 9. Protected paths. Run `scripts/hv-guard.sh snapshot` before lanes 2 to 8 and `scripts/hv-guard.sh check` after them. Save `hd01-guard.png`. Pass when the check exits 0 and both paths stay absent.
-- [ ] Lane 10. No production-host contact. Run `scripts/hv-netwatch.sh` during lanes 2 to 8, then `scripts/hv-guard.sh target "$HV_FORBIDDEN_HOST"`. Save `hd01-netwatch.png`. Pass when every connection goes to `127.0.0.1:18642` and the target check exits 22.
+- [ ] Lane 10. No production-host contact. Run `scripts/hv-netwatch.sh` during lanes 2 to 8, then `scripts/hv-guard.sh target "${HV_FORBIDDEN_HOST:-example-host.invalid}"`. Save `hd01-netwatch.png`. Pass when every connection goes to `127.0.0.1:18642` and the target check exits 22.
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
