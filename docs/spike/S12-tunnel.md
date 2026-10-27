@@ -48,21 +48,19 @@ A key protected by a passphrase failed at step 2 in 0.01 s (`rc=1`, `Enter passp
 
 The app launches `/usr/bin/ssh` with the user's alias and the default user config. It does not start `ssh-agent`, does not run `ssh-add`, does not write `key.pub`, and does not keep a temporary `known_hosts`. Identity comes from the session `SSH_AUTH_SOCK` and from `IdentityAgent` in the user's config. `IdentityAgent none` turns the agent off, the session socket included, and the connection view then shows a file identity. Arguments force `ForkAfterAuthentication=no` and `LogLevel=ERROR`.
 
-Resolution runs `/usr/bin/ssh -G -vv` once per launch of `ssh`, with the arguments of that launch: the tunnel (`-N -T -L …`), the profile list (`hermes profile list`) and the Desktop lock read (one fixed remote command). Each launch is resolved and checked with its own arguments: one dump of the bare alias cannot validate the three launches.
+Resolution runs `/usr/bin/ssh -G` plus the arguments of that launch. The four launches are the tunnel (`-N -T -L …`), the profile list (`hermes profile list`), the Desktop lock read (one fixed remote command), and the API key command (`hermes -p <profile> config get API_SERVER_KEY --raw`). There is no `-vv`. The app reads hostname, user, port, identityfile and proxyjump from stdout. It does not open `~/.ssh/config` and does not parse `Match` or `Include` itself.
 
-The app does not interpret SSH config criteria. It refuses what it cannot read with certainty, and in case of doubt it refuses:
+A config that `ssh -G` cannot read is refused. `ssh -G` exits with an error on an unclosed quote, an unknown option or a missing argument. Message: "ssh ne lit pas cette config SSH. L'alias est refusé." An alias that `ssh -G` accepts is accepted, including a name that only matches `Host *`.
 
-1. **Any `Match` block refuses the whole config**, whatever its form (`Match all`, `Match user *`, `Match host *`, `Match originalhost *`, `Match exec …` with or without quotes and escapes, `Match host <alias>`). OpenSSH writes `checking match for '<criteria>'` at `-vv` for every `Match` line it reads, applied or not, in an included file and in a `Host` block that does not apply too. The app looks for that line only and never reads the criteria. Message: "Ta config SSH contient un bloc Match…".
-2. **A config that `ssh -G` cannot read is refused.** `ssh -G` exits with an error on an unclosed quote, an unknown option or a missing argument. A `-vv` log of 64 KB or more is refused too, because the log is cut there and a `Match` line after the cut would go unseen. An `Include` that matches no file (`include … matched no files`) is a doubt as well. Message: "Hermed Bots ne lit pas cette config SSH avec certitude…".
-3. **An alias is known only when a `Host` block writes it as is.** OpenSSH writes `<file> line <n>: Applying options for <pattern>` with the first pattern of the `Host` line that covers the alias. The app accepts the line only when it has exactly that shape and the pattern is the alias itself, with no `*`, `?` or `!`, and with the same case. `Host *`, `Host **`, `Host mon*` and `Host * alias` never make an alias known, whatever values the block sets (`User`, `Port`, `HostName`, an identity): `ssh -G` accepts any name. Message: "Cet alias SSH est inconnu."
+`RealSshConfigTests` runs the real `/usr/bin/ssh -G -F`. A `Match` reached through `Include` resolves and is accepted. Forms that ssh reads are accepted. A config that ssh cannot parse is refused. The API key dump of the same ssh refuses a relay, the fake token `example-host`, or a hostname, user or port that differs from the tunnel, when those appear only under `Match command` (the case is skipped when ssh does not know that attribute).
 
-The real `ssh -G -vv -F` runs these rules in `RealSshConfigTests`: every form of `Match`, a `Match` in an included file or after another `Host`, a config cut at the limit, an unresolved `Include`, a config `ssh` cannot parse.
+The app refuses any alias whose resolved config holds a ProxyJump or a ProxyCommand, in every mode, before that `ssh` starts. The value does not matter, and any one launch is enough to refuse. Only `none` as the whole value, which removes an inherited relay, is not a relay. `none,none` is a list of two hops named `none`, so it is refused. The name of a hop does not prove where the hop leads. The message tells the user to use an alias that connects directly.
 
-The app refuses any alias whose resolved config holds a ProxyJump or a ProxyCommand, in every mode, before the tunnel `ssh`. The value does not matter, and any one of the three launches is enough to refuse. Only `none` as the whole value, which removes an inherited relay, is not a relay. `none,none` is a list of two hops named `none`, so it is refused. The name of a hop does not prove where the hop leads: an alias can lead to `perso-hermes`. The message tells the user to use an alias that connects directly.
+Test mode also refuses the fake token `example-host` on the typed alias, before any `ssh`, and on the resolved host of each launch, the API key dump included.
 
-Test mode also refuses `perso-hermes` on the typed alias, before any `ssh`, and on the resolved host of each launch.
+The API key dump is compared to the open tunnel. A different hostname, user or port refuses the read before that ssh starts. The thrown failure is not shown as its own banner. `APIKeyFetches.fetch` swallows it, leaves the 401 banner, and does not store a key.
 
-The check runs when the user connects. A config file edited afterwards is read again at the next connection or reopening, without a new check.
+The check runs when the user connects and when a key is read. A config file edited afterwards is read again at the next connection, reopening or key read.
 
 ## The forward
 
@@ -95,7 +93,7 @@ After `docker network disconnect bridge hv-hermes-test`, a probe that resolved `
 
 - `StrictHostKeyChecking=accept-new` on a real host: the first connection trusts the key it sees. The spike kept `known_hosts` in the private directory so each run started clean. The product leaves host-key files to the user's OpenSSH config.
 - A changed host key (the table above quotes the OpenSSH text).
-- perso-hermes during the spike. Test mode now refuses that name on the full route before `ssh` starts.
+- The fake test-mode token `example-host` during the spike. Test mode now refuses that token on the full route before `ssh` starts.
 
 ## Reproduce
 

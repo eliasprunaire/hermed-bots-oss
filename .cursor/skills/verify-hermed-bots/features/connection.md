@@ -31,7 +31,7 @@ Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché. 
 ## Clé API
 
 - Pas de champ, pas de section, pas de secours manuel.
-- Un HTTP 401 ou 403 déclenche une lecture SSH, même alias et même config que le tunnel.
+- Un HTTP 401 ou 403 déclenche une lecture SSH du même alias. Le dump de cette commande doit viser le même hostname, utilisateur et port que le tunnel ouvert. Un écart refuse la lecture avant le spawn. `APIKeyFetches.fetch` avale cette erreur : le bandeau 401 reste, la clé n'est pas stockée.
 - Commande distante figée : `hermes -p <profil> config get API_SERVER_KEY --raw`. Le profil passe une liste blanche.
 - Uniquement la clé du profil demandé (`hermes -p <profil> …`). Pas de repli sur `default`. Cache Trousseau `WhenUnlockedThisDeviceOnly`. Jamais affichée ni journalisée.
 - Échec sans clé détenue : bandeau `Clé API introuvable sur l'hôte pour le profil <id>`. Un profil nommé sans clé n'envoie jamais la clé de `default`.
@@ -65,7 +65,7 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 | Hôte injoignable | Dernière ligne stderr de ssh, précédée de « Hôte injoignable : » quand elle n'est pas vide. |
 | `example-host` en mode test, sur l'alias ou sur l'hôte résolu d'un lancement (tunnel, liste, détection, lecture de clé) ; l'alias tapé est refusé avant `ssh -G` | Cet hôte est refusé en mode test. |
 | `ProxyJump` ou `ProxyCommand`, quelle que soit la valeur (hors `none` entier ; `none,none` est une liste de sauts), vu par l'un des trois lancements ou par la lecture de clé ; tous les modes | Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte. |
-| Lecture de clé dont le hostname, l'utilisateur ou le port diffère du tunnel | La lecture de la clé ne vise pas le même hôte que le tunnel. La clé n'est pas lue. |
+| Lecture de clé dont le hostname, l'utilisateur ou le port diffère du tunnel | Aucun bandeau propre. `APIKeyFetches.fetch` avale `routeMismatch`. Le bandeau 401 ou « clé introuvable » reste. La clé n'est pas stockée. |
 | Clé API absente sur l'hôte | Clé API introuvable sur l'hôte pour le profil … |
 | Clé API détenue et refusée par Hermes | La clé API est refusée pour le profil … |
 
