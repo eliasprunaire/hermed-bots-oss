@@ -739,6 +739,40 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertEqual(reads.profiles, [])
     }
 
+    /// Un dépli lance `list_sessions` avant que la clé soit en cache : les fils restent en échec tant que rien ne les relit
+    func testThreadsExpandedBeforeTheKeyIsCachedAreReadAgainOnceTheKeyIsFetched() async {
+        let reads = KeyReads { _, _ in "key-a" }
+        let model = keyModel(profiles: ["hv-bot-a"], reads: reads) { request in
+            let open = request.url?.path.hasSuffix("/health") == true || request.value(forHTTPHeaderField: "Authorization") == "Bearer key-a"
+            return open ? 200 : 401
+        }
+        await model.bots.refresh()
+        model.bots.toggle("hv-bot-a")
+        await eventually {
+            if case .failed? = model.bots.threads["hv-bot-a"] { return true }
+            return false
+        }
+        XCTAssertEqual(reads.profiles, [])
+        await model.refreshVersion()
+        XCTAssertEqual(reads.profiles, ["hv-bot-a"])
+        await eventually { model.bots.threads["hv-bot-a"] == .loaded([]) }
+        XCTAssertNil(model.apiError)
+    }
+
+    /// Un bot replié n'est pas lu : la clé récupérée ne déplie rien
+    func testAFetchedKeyDoesNotReadThreadsOfABotThatIsCollapsed() async {
+        let reads = KeyReads { _, _ in "key-a" }
+        let model = keyModel(profiles: ["hv-bot-a"], reads: reads) { request in
+            let open = request.url?.path.hasSuffix("/health") == true || request.value(forHTTPHeaderField: "Authorization") == "Bearer key-a"
+            return open ? 200 : 401
+        }
+        await model.bots.refresh()
+        await model.refreshVersion()
+        XCTAssertEqual(reads.profiles, ["hv-bot-a"])
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertNil(model.bots.threads["hv-bot-a"])
+    }
+
     private func eventually(_ condition: () async -> Bool) async {
         let deadline = Date().addingTimeInterval(2)
         while Date() < deadline {
@@ -764,7 +798,7 @@ private final class KeyReads {
     }
 }
 
-/// Un faux Hermes sans réseau : `serve` donne le statut de chaque requête, le corps est une version connue
+/// Un faux Hermes sans réseau : `serve` donne le statut de chaque requête, le corps est une version connue et une liste de fils vide
 private final class KeyStubProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var serve: (@Sendable (URLRequest) -> Int)?
 
@@ -775,7 +809,7 @@ private final class KeyStubProtocol: URLProtocol, @unchecked Sendable {
         let status = Self.serve?(request) ?? 500
         guard let url = request.url, let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil) else { return }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data(#"{"version":"0.22.1"}"#.utf8))
+        client?.urlProtocol(self, didLoad: Data(#"{"version":"0.22.1","data":[]}"#.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
 
