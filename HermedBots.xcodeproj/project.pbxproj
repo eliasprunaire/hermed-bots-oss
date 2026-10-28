@@ -15,6 +15,7 @@
 		D38EDC3C712F8F95FBC572B9 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = D852961B587E19128FA0D037 /* AppEnvironment.swift */; };
 		A7C1D2E3F4B5069788AABB02 /* SSHTunnel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C1D2E3F4B5069788AABB01 /* SSHTunnel.swift */; };
 		A7C1D2E3F4B5069788AABB12 /* SSHConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C1D2E3F4B5069788AABB11 /* SSHConfig.swift */; };
+		A7C1D2E3F4B5069788AABB22 /* EphemeralSSHAgent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7C1D2E3F4B5069788AABB21 /* EphemeralSSHAgent.swift */; };
 		B0B0D8A1C2E3F40596A7B801 /* BotList.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0B0D8A1C2E3F40596A7B802 /* BotList.swift */; };
 		B0B0D8A1C2E3F40596A7B811 /* BotsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0B0D8A1C2E3F40596A7B812 /* BotsModel.swift */; };
 		C0C0D9B1C2E3F40596A7C801 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C802 /* Conversation.swift */; };
@@ -56,6 +57,7 @@
 		D852961B587E19128FA0D037 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		A7C1D2E3F4B5069788AABB01 /* SSHTunnel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHTunnel.swift; sourceTree = "<group>"; };
 		A7C1D2E3F4B5069788AABB11 /* SSHConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SSHConfig.swift; sourceTree = "<group>"; };
+		A7C1D2E3F4B5069788AABB21 /* EphemeralSSHAgent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EphemeralSSHAgent.swift; sourceTree = "<group>"; };
 		B0B0D8A1C2E3F40596A7B802 /* BotList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotList.swift; sourceTree = "<group>"; };
 		B0B0D8A1C2E3F40596A7B812 /* BotsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotsModel.swift; sourceTree = "<group>"; };
 		C0C0D9B1C2E3F40596A7C802 /* Conversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conversation.swift; sourceTree = "<group>"; };
@@ -210,6 +212,7 @@
 			children = (
 				A7C1D2E3F4B5069788AABB01 /* SSHTunnel.swift */,
 				A7C1D2E3F4B5069788AABB11 /* SSHConfig.swift */,
+				A7C1D2E3F4B5069788AABB21 /* EphemeralSSHAgent.swift */,
 				F14400000000000000000002 /* ProfileLock.swift */,
 				F14700000000000000000002 /* ResumeAPI.swift */,
 			);
@@ -416,6 +419,7 @@
 				3044136BDC4080ACEF153610 /* SecretStore.swift in Sources */,
 				A7C1D2E3F4B5069788AABB02 /* SSHTunnel.swift in Sources */,
 				A7C1D2E3F4B5069788AABB12 /* SSHConfig.swift in Sources */,
+				A7C1D2E3F4B5069788AABB22 /* EphemeralSSHAgent.swift in Sources */,
 				F14400000000000000000001 /* ProfileLock.swift in Sources */,
 				B0B0D8A1C2E3F40596A7B801 /* BotList.swift in Sources */,
 				B0B0D8A1C2E3F40596A7B811 /* BotsModel.swift in Sources */,

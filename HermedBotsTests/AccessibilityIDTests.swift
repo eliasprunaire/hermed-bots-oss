@@ -22,6 +22,9 @@ final class AccessibilityIDTests: XCTestCase {
     func testTheConnectionViewIdsAreStable() {
         XCTAssertEqual(AccessibilityID.connectionOpen.rawValue, "hd.connection.open")
         XCTAssertEqual(AccessibilityID.connectionHost.rawValue, "hd.connection.host")
+        XCTAssertEqual(AccessibilityID.connectionAuthMode.rawValue, "hd.connection.auth-mode")
+        XCTAssertEqual(AccessibilityID.connectionWrapper.rawValue, "hd.connection.wrapper")
+        XCTAssertEqual(AccessibilityID.connectionKeyCommand.rawValue, "hd.connection.key-command")
         XCTAssertEqual(AccessibilityID.connectionUser.rawValue, "hd.connection.user")
         XCTAssertEqual(AccessibilityID.connectionResolvedHost.rawValue, "hd.connection.resolved-host")
         XCTAssertEqual(AccessibilityID.connectionPort.rawValue, "hd.connection.port")

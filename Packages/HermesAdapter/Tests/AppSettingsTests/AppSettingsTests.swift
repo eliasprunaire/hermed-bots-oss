@@ -40,6 +40,28 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(SSHEndpoint.stored(in: defaults), endpoint)
     }
 
+    func testAnOldHostOnlyStoreDefaultsToTheSessionAgent() {
+        let defaults = isolatedDefaults()
+        defaults.set("lab.invalid", forKey: "ssh.host")
+        let stored = SSHEndpoint.stored(in: defaults)
+        XCTAssertEqual(stored?.authMode, .sessionAgent)
+        XCTAssertEqual(stored?.wrapperPath, "")
+        XCTAssertEqual(stored?.keyCommandPath, "")
+    }
+
+    func testAuthModeAndToolPathsRoundTripWithoutASecret() {
+        let defaults = isolatedDefaults()
+        let endpoint = SSHEndpoint(
+            host: "lab.invalid",
+            authMode: .ephemeralAgent,
+            wrapperPath: "/tmp/example-wrapper.invalid",
+            keyCommandPath: "/tmp/example-key-command.invalid"
+        )
+        endpoint.save(to: defaults)
+        XCTAssertEqual(SSHEndpoint.stored(in: defaults), endpoint)
+        XCTAssertEqual(SSHAuthMode.allCases.map(\.label), ["Agent de session", "Agent temporaire", "Exécutable"])
+    }
+
     func testTheUpdatesActionStartsOneDriverCheck() {
         let driver = FakeUpdateDriver()
         let updates = UpdateCheck(driver: driver)

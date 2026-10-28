@@ -1,4 +1,5 @@
 import AppKit
+import AppSettings
 import Darwin
 import Foundation
 import Observation
@@ -16,6 +17,9 @@ enum SSHFailure: Error, Equatable, Sendable {
     case invalidPort
     case unknownAlias
     case unreadableConfig
+    case missingAgent
+    case missingKey
+    case missingWrapper
     case agentLockedOrEmpty(String)
     case certificateExpired(String)
     case wrongKey(String)
@@ -29,8 +33,14 @@ enum SSHFailure: Error, Equatable, Sendable {
     static func classify(stderr: String) -> SSHFailure {
         let text = stderr
         let last = lastLine(text)
-        if text.localizedCaseInsensitiveContains("agent refused operation")
-            || text.contains("Could not open a connection to your authentication agent") {
+        if text.contains("Could not open a connection to your authentication agent")
+            || text.contains("Error connecting to agent") {
+            return .missingAgent
+        }
+        if text.contains("The agent has no identities") {
+            return .missingKey
+        }
+        if text.localizedCaseInsensitiveContains("agent refused operation") {
             return .agentLockedOrEmpty(last)
         }
         if text.localizedCaseInsensitiveContains("certificate invalid")
@@ -58,6 +68,9 @@ extension SSHFailure {
         case .invalidPort: String(localized: "Le port n'est pas valide.")
         case .unknownAlias: String(localized: "Cet alias SSH est inconnu.")
         case .unreadableConfig: String(localized: "ssh ne lit pas cette config SSH. L'alias est refusé.")
+        case .missingAgent: String(localized: "L'agent SSH est absent. La connexion s'arrête.")
+        case .missingKey: String(localized: "La clé SSH n'est pas chargée dans l'agent. La connexion s'arrête.")
+        case .missingWrapper: String(localized: "L'exécutable SSH configuré est introuvable.")
         case .agentLockedOrEmpty(let detail): sshLine(detail) ?? String(localized: "L'agent SSH est verrouillé ou vide.")
         case .certificateExpired(let detail): sshLine(detail) ?? String(localized: "Le certificat SSH a expiré.")
         case .wrongKey(let detail): sshLine(detail) ?? String(localized: "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.")
@@ -135,6 +148,17 @@ struct SSHTunnelConfig: Equatable, Sendable {
         common([]) + [alias] + HermesAPIKey.remoteCommand(profile: try HermesAPIKey.validate(profile))
     }
 
+    /// Place `IdentityAgent` en tête des `-o` : ssh retient la première valeur, donc l'agent temporaire l'emporte
+    static func withIdentityAgent(_ arguments: [String], socket: String) -> [String] {
+        var args = arguments
+        if let index = args.firstIndex(of: "-T") {
+            args.insert(contentsOf: ["-o", "IdentityAgent=\(socket)"], at: index + 1)
+        } else {
+            args.insert(contentsOf: ["-o", "IdentityAgent=\(socket)"], at: 0)
+        }
+        return args
+    }
+
     static func arguments(_ invocation: SSHInvocation, alias: String, localPort: Int = 1, remotePort: Int = 8642) -> [String] {
         switch invocation {
         case .tunnel: common(["-N"]) + ["-L", "127.0.0.1:\(localPort):127.0.0.1:\(remotePort)", alias]
@@ -174,13 +198,27 @@ struct SSHTunnelConfig: Equatable, Sendable {
 }
 
 /// L'environnement des processus ssh est construit à la main : l'app peut porter des variables de test
-/// `SSH_AUTH_SOCK` vient de la session ; `IdentityAgent` de la config ssh a priorité, ssh l'applique lui-même
+/// `SSH_AUTH_SOCK` vient de la session ; `agentSocket` le remplace pour l'agent temporaire
+/// Cette fonction ne pose pas `IdentityAgent` : ssh le lit dans la config, qui l'emporte sur `SSH_AUTH_SOCK`
+/// Le mode agent temporaire passe aussi `-o IdentityAgent` en tête des arguments, qui l'emporte sur la config
 enum SSHChildEnvironment {
-    static func make(_ session: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+    static func make(_ session: [String: String] = ProcessInfo.processInfo.environment, agentSocket: String? = nil) -> [String: String] {
         var environment = ["PATH": "/usr/bin:/bin", "LC_ALL": "C"]
         for key in ["HOME", "USER", "LOGNAME", "SSH_AUTH_SOCK"] {
             if let value = session[key], !value.isEmpty { environment[key] = value }
         }
+        if let agentSocket { environment["SSH_AUTH_SOCK"] = agentSocket }
+        return environment
+    }
+
+    /// Environnement d'un outil choisi par l'utilisateur (commande de clé, exécutable) : sans variables de test
+    static func forUserTool(_ session: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        var environment: [String: String] = [:]
+        for (key, value) in session {
+            if key.hasPrefix("HV_TEST_") || key == "HV_API_URL" { continue }
+            environment[key] = value
+        }
+        environment["LC_ALL"] = "C"
         return environment
     }
 }
@@ -608,6 +646,7 @@ final class SSHTunnel {
             }
             guard failure.retries else {
                 state = .failed(failure)
+                await backend.close()
                 return
             }
             let delay = delays[min(failures, delays.count - 1)]
@@ -621,73 +660,96 @@ final class SSHTunnel {
 // MARK: - ssh système
 
 /// Ouvre le tunnel avec `/usr/bin/ssh` (chemin absolu : le `ssh` du PATH d'un shell peut être un alias)
-/// La config et l'agent de l'utilisateur s'appliquent : pas de `-F /dev/null`, pas de `-i`, pas d'agent privé
+/// Mode session : config et agent de l'utilisateur, pas de `-F`, pas de `-i`
+/// Mode agent temporaire : `ssh-agent` privé, clé par `ssh-add -`, `-o IdentityAgent` ; destruction à la fermeture, sur erreur fatale du tunnel, et par le gardien
+/// Mode exécutable : binaire configuré à la place de `/usr/bin/ssh`
 /// Les ssh sont dans un seul groupe de processus, tué d'un coup à la fermeture
 actor SystemSSHBackend: SSHBackend {
     private let environment: [String: String]
     private let resolver: any SSHConfigResolving
     private let refuseTestHost: Bool
     private let localUser: String
+    private let client: SSHClientSettings
+    private let keySource: (any SSHPrivateKeySource)?
+    private let identityLifetime: Int
     private var watchdog: Child?
     /// le gardien en préparation, que `close()` arrête sans attendre la fin de l'ouverture
     private var preparing: Child?
     private var closed = false
+    private var agentDirectory: URL?
+    private var ephemeral: EphemeralSSHAgent?
+    private var identityLoadedAt: ContinuousClock.Instant?
 
     init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         resolver: any SSHConfigResolving = SystemSSHConfigResolver(),
         refuseTestHost: Bool = false,
-        localUser: String = NSUserName()
+        localUser: String = NSUserName(),
+        client: SSHClientSettings = SSHClientSettings(),
+        keySource: (any SSHPrivateKeySource)? = nil,
+        identityLifetime: Int = EphemeralSSHAgent.lifetimeSeconds
     ) {
         self.environment = environment
         self.resolver = resolver
         self.refuseTestHost = refuseTestHost
         self.localUser = localUser
+        self.client = client
+        self.keySource = keySource
+        self.identityLifetime = identityLifetime
     }
 
     func open(_ config: SSHTunnelConfig) async throws -> SSHSession {
         try ensureLive()
         let watchdog = try preparedWatchdog()
-        let localPort = try Self.freeLocalPort()
-        let ssh: Child
         do {
-            ssh = try Spawn.start(
-                "/usr/bin/ssh",
-                config.arguments(localPort: localPort),
-                environment: SSHChildEnvironment.make(environment),
-                joining: watchdog.pid
-            )
-        } catch {
-            throw SSHFailure.unreachable("ssh ne démarre pas")
-        }
-        // ssh -N ne dit rien quand il est prêt : le port local s'ouvre après l'authentification
-        let deadline = ContinuousClock.now + .seconds(20)
-        while ContinuousClock.now < deadline {
-            try ensureLive()
-            if ssh.hasExited { throw SSHFailure.classify(stderr: await ssh.finished().stderr) }
-            if Self.accepts(port: localPort) {
-                return SSHSession(localPort: localPort) {
-                    let output = await ssh.finished()
-                    return SSHExit(status: output.status, stderr: output.stderr)
-                }
+            try await prepareIdentity(joining: watchdog.pid)
+            try await revalidate(config, invocation: .tunnel)
+            let localPort = try Self.freeLocalPort()
+            let ssh: Child
+            do {
+                ssh = try Spawn.start(
+                    sshBinary,
+                    launchArguments(config.arguments(localPort: localPort)),
+                    environment: sshEnvironment,
+                    joining: watchdog.pid
+                )
+            } catch {
+                throw SSHFailure.unreachable("ssh ne démarre pas")
             }
-            try? await Task.sleep(for: .milliseconds(100))
+            // ssh -N ne dit rien quand il est prêt : le port local s'ouvre après l'authentification
+            let deadline = ContinuousClock.now + .seconds(20)
+            while ContinuousClock.now < deadline {
+                try ensureLive()
+                if ssh.hasExited { throw SSHFailure.classify(stderr: await ssh.finished().stderr) }
+                if Self.accepts(port: localPort) {
+                    return SSHSession(localPort: localPort) {
+                        let output = await ssh.finished()
+                        return SSHExit(status: output.status, stderr: output.stderr)
+                    }
+                }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            kill(ssh.pid, SIGKILL)
+            _ = await ssh.waitForExit()
+            throw SSHFailure.unreachable("délai dépassé")
+        } catch {
+            await teardownEphemeral(keepingWatchdog: true)
+            throw error
         }
-        kill(ssh.pid, SIGKILL)
-        _ = await ssh.waitForExit()
-        throw SSHFailure.unreachable("délai dépassé")
     }
 
     /// Lit `hermes profile list` sur l'hôte par un second ssh (décision S6) et rend sa sortie
     func readProfileList(_ config: SSHTunnelConfig) async throws -> String {
         try ensureLive()
         guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
+        try await revalidate(config, invocation: .profileList)
+        try await renewIdentityIfDue(joining: watchdog.pid)
         let output: Spawn.Output
         do {
             output = try await Spawn.run(
-                "/usr/bin/ssh",
-                config.profileListArguments(),
-                environment: SSHChildEnvironment.make(environment),
+                sshBinary,
+                launchArguments(config.profileListArguments()),
+                environment: sshEnvironment,
                 joining: watchdog.pid,
                 timeout: .seconds(15)
             )
@@ -708,15 +770,16 @@ actor SystemSSHBackend: SSHBackend {
     func readAPIKey(_ config: SSHTunnelConfig, profile: String) async throws -> String? {
         try ensureLive()
         guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
-        let dump = try await resolver.dumpAPIKey(alias: config.alias, profile: profile)
-        let preview = SSHConfig.parse(dump, alias: config.alias, localUser: localUser)
-        _ = try SSHConnectionPlanner.config(from: preview, refuseTestHost: refuseTestHost, matching: config)
+        let dump = try await resolver.dumpAPIKey(alias: config.alias, profile: profile, agentSocket: try launchSocket())
+        try check(dump, against: config)
+        try ensureLive()
+        try await renewIdentityIfDue(joining: watchdog.pid)
         let output: Spawn.Output
         do {
             output = try await Spawn.run(
-                "/usr/bin/ssh",
-                try config.apiKeyArguments(profile: profile),
-                environment: SSHChildEnvironment.make(environment),
+                sshBinary,
+                launchArguments(try config.apiKeyArguments(profile: profile)),
+                environment: sshEnvironment,
                 joining: watchdog.pid,
                 timeout: .seconds(15)
             )
@@ -735,9 +798,11 @@ actor SystemSSHBackend: SSHBackend {
     func readProfileLocks(_ config: SSHTunnelConfig) async throws -> Data {
         try ensureLive()
         guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
+        try await revalidate(config, invocation: .profileLocks)
+        try await renewIdentityIfDue(joining: watchdog.pid)
         let output = try await Spawn.run(
-            "/usr/bin/ssh", config.profileLocksArguments(),
-            environment: SSHChildEnvironment.make(environment),
+            sshBinary, launchArguments(config.profileLocksArguments()),
+            environment: sshEnvironment,
             joining: watchdog.pid, timeout: .seconds(3)
         )
         guard output.status == 0 else { throw SSHFailure.unreachable("détection Desktop indisponible") }
@@ -746,6 +811,7 @@ actor SystemSSHBackend: SSHBackend {
 
     func close() async {
         closed = true
+        await teardownEphemeral(keepingWatchdog: false)
         if let preparing {
             self.preparing = nil
             await release(preparing, grace: .seconds(1))
@@ -753,6 +819,112 @@ actor SystemSSHBackend: SSHBackend {
         guard let watchdog else { return }
         self.watchdog = nil
         await release(watchdog, grace: .seconds(2))
+    }
+
+    func temporaryAgentSocketPath() -> String? { ephemeral?.socketPath }
+
+    func temporaryAgentPID() -> pid_t? { ephemeral?.child.pid }
+
+    private var sshBinary: String {
+        client.authMode == .wrapper ? client.wrapperPath : client.sshBinary
+    }
+
+    private var sshEnvironment: [String: String] {
+        if client.authMode == .wrapper {
+            return SSHChildEnvironment.forUserTool(environment)
+        }
+        return SSHChildEnvironment.make(environment, agentSocket: ephemeral?.socketPath)
+    }
+
+    private func launchArguments(_ arguments: [String]) -> [String] {
+        guard client.authMode == .ephemeralAgent, let socket = ephemeral?.socketPath else { return arguments }
+        return SSHTunnelConfig.withIdentityAgent(arguments, socket: socket)
+    }
+
+    /// Le socket de l'agent temporaire, que ssh recevra ; nil hors de ce mode
+    /// Sans agent dans ce mode, ssh prendrait l'agent de la session : l'identité manquante est nommée avant tout lancement
+    private func launchSocket() throws -> String? {
+        guard client.authMode == .ephemeralAgent else { return nil }
+        guard let socket = ephemeral?.socketPath else { throw SSHFailure.missingAgent }
+        return socket
+    }
+
+    /// Relit la config avec l'environnement et les options du lancement : un `Match exec` voit `SSH_AUTH_SOCK`, que l'agent temporaire remplace
+    /// La résolution du connecteur a vu l'agent de la session ; elle ne dit pas ce que ce ssh va faire
+    private func revalidate(_ config: SSHTunnelConfig, invocation: SSHInvocation) async throws {
+        guard let socket = try launchSocket() else { return }
+        let dump = try await resolver.dump(alias: config.alias, invocation: invocation, agentSocket: socket)
+        try check(dump, against: config)
+        try ensureLive()
+    }
+
+    private func check(_ dump: SSHConfigDump, against config: SSHTunnelConfig) throws {
+        let preview = SSHConfig.parse(dump, alias: config.alias, localUser: localUser)
+        _ = try SSHConnectionPlanner.config(from: preview, refuseTestHost: refuseTestHost, matching: config)
+    }
+
+    private func prepareIdentity(joining leader: pid_t) async throws {
+        switch client.authMode {
+        case .sessionAgent:
+            return
+        case .wrapper:
+            guard SSHLaunchPath.isExecutable(client.wrapperPath) else { throw SSHFailure.missingWrapper }
+        case .ephemeralAgent:
+            try await startEphemeralAgent(joining: leader)
+        }
+    }
+
+    private func startEphemeralAgent(joining leader: pid_t) async throws {
+        if let ephemeral {
+            try await renewIdentityIfDue(joining: leader)
+            try await ephemeral.verifyHasIdentity(joining: leader)
+            return
+        }
+        guard let directory = agentDirectory else { throw SSHFailure.missingAgent }
+        let loadedAt = ContinuousClock.now
+        let key = try await privateKeySource.load()
+        let agent = try await EphemeralSSHAgent.start(joining: leader, directory: directory)
+        do {
+            try await agent.addKey(key, joining: leader, lifetime: identityLifetime)
+        } catch {
+            kill(agent.child.pid, SIGKILL)
+            _ = await agent.child.waitForExit()
+            try? FileManager.default.removeItem(atPath: agent.socketPath)
+            throw error
+        }
+        ephemeral = agent
+        identityLoadedAt = loadedAt
+    }
+
+    private var privateKeySource: any SSHPrivateKeySource {
+        keySource ?? CommandPrivateKeySource(path: client.keyCommandPath, environment: environment)
+    }
+
+    /// `ssh-add -t` retire la clé de l'agent à la fin de sa durée : un nouveau `ssh-add` la repousse
+    /// Rechargée avant chaque lancement de ssh quand il reste moins de 30 s (la moitié de la durée si elle est plus courte)
+    private func renewIdentityIfDue(joining leader: pid_t) async throws {
+        // shortcut: deux lectures concurrentes au moment du rechargement relancent chacune la commande de clé, sans effet de bord, à verrouiller si la commande devient coûteuse
+        guard client.authMode == .ephemeralAgent, let agent = ephemeral, let previous = identityLoadedAt else { return }
+        let margin = Duration.seconds(min(30, identityLifetime / 2))
+        guard ContinuousClock.now - previous >= .seconds(identityLifetime) - margin else { return }
+        let loadedAt = ContinuousClock.now
+        let key = try await privateKeySource.load()
+        try await agent.addKey(key, joining: leader, lifetime: identityLifetime)
+        identityLoadedAt = loadedAt
+    }
+
+    private func teardownEphemeral(keepingWatchdog: Bool) async {
+        if let agent = ephemeral {
+            ephemeral = nil
+            identityLoadedAt = nil
+            kill(agent.child.pid, SIGKILL)
+            _ = await agent.child.waitForExit()
+            try? FileManager.default.removeItem(atPath: agent.socketPath)
+        }
+        if !keepingWatchdog, let directory = agentDirectory {
+            agentDirectory = nil
+            try? FileManager.default.removeItem(at: directory)
+        }
     }
 
     /// Un `close()` ou une annulation de la tâche survenus pendant une attente : l'ouverture s'arrête
@@ -767,9 +939,20 @@ actor SystemSSHBackend: SSHBackend {
 
     private func preparedWatchdog() throws -> Child {
         if let watchdog { return watchdog }
+        let directory: URL?
+        if client.authMode == .ephemeralAgent {
+            do {
+                directory = try EphemeralSSHAgent.makeDirectory()
+                agentDirectory = directory
+            } catch {
+                throw SSHFailure.missingAgent
+            }
+        } else {
+            directory = nil
+        }
         let watchdog: Child
         do {
-            watchdog = try Spawn.startWatchdog()
+            watchdog = try Spawn.startWatchdog(cleaning: directory)
         } catch {
             throw SSHFailure.unreachable("ssh ne démarre pas")
         }

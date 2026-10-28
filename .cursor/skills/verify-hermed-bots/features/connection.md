@@ -6,7 +6,10 @@
 
 | Contrôle | Identifiant | Rôle |
 | --- | --- | --- |
-| Alias SSH | `hd.connection.host` | Seul champ éditable du tunnel. Persisté sous `ssh.host`. |
+| Alias SSH | `hd.connection.host` | Alias de l'hôte. Persisté sous `ssh.host`. |
+| Mode SSH | `hd.connection.auth-mode` | Agent de session, agent temporaire, ou exécutable. Persisté sous `ssh.authMode`. |
+| Commande de clé | `hd.connection.key-command` | Visible en mode agent temporaire. Persisté sous `ssh.keyCommandPath`. Jamais une valeur de clé. |
+| Exécutable SSH | `hd.connection.wrapper` | Visible en mode exécutable. Persisté sous `ssh.wrapperPath`. |
 | Connecter | `hd.connection.connect` | Résout l'alias puis ouvre le tunnel. |
 | Tester la connexion | `hd.connection.check` | Relit la version Hermes. |
 | Fermer | `hd.connection.close` | Ferme la fenêtre Réglages. |
@@ -49,7 +52,8 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 
 - Résolution : `/usr/bin/ssh -G` plus les arguments de chaque lancement (tunnel, liste des profils, détection, lecture de clé). `Include` et `Match` viennent d'OpenSSH. L'app lit hostname, user, port, identityfile et proxyjump sur stdout. Elle n'ouvre pas `~/.ssh/config` et n'ajoute pas `-vv`. Un `ssh -G` tourne sous un gardien : l'arrêt de l'app le tue, avec la commande d'un `Match exec`, et le délai de 8 s tue le groupe entier.
 - Tunnel : `/usr/bin/ssh` + alias, `-N -T`, `-L 127.0.0.1:<port libre>:127.0.0.1:<remotePort>`, `BatchMode=yes`, `ExitOnForwardFailure=yes`, `ForwardAgent=no`, `ControlMaster=no`, `ControlPath=none`, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, `ConnectTimeout`, `ServerAliveInterval`, `ServerAliveCountMax`.
-- `SSH_AUTH_SOCK` vient de la session. `IdentityAgent` de la config ssh a priorité. `IdentityAgent none` désactive l'agent, socket de la session comprise : l'identité affichée est un fichier.
+- `SSH_AUTH_SOCK` vient de la session. `IdentityAgent` de la config ssh a priorité, sauf en mode agent temporaire où le `-o IdentityAgent` de l'app passe avant. `IdentityAgent none` désactive l'agent, socket de la session comprise : l'identité affichée est un fichier.
+- Mode agent temporaire : `ssh-agent -D` sur un socket privé, `ssh-add -t 300` avec la clé sur stdin, puis `-o IdentityAgent` en tête des options. L'app recharge la clé avant une lecture auxiliaire ou une réouverture quand il reste moins de 30 s. La commande de clé tourne sous un gardien. La clé ne touche pas le disque. L'agent reste vivant tant que le tunnel est ouvert, y compris après une lecture auxiliaire refusée. Il est tué à la fermeture, quand le tunnel s'arrête sur une erreur fatale, à un `open` qui échoue, et par le gardien. `SSHChildEnvironment` ne pose pas `IdentityAgent` : la config ssh l'emporte encore sur `SSH_AUTH_SOCK` ; seul le `-o IdentityAgent` en tête des arguments l'emporte sur la config. En mode agent temporaire seulement, chaque lancement relance `ssh -G` avec l'environnement et les options effectifs (`SSH_AUTH_SOCK` et `-o IdentityAgent` de l'agent temporaire) avant de lancer ssh : relais, hôte factice et route du tunnel sont revérifiés. Mode exécutable : le binaire configuré remplace `/usr/bin/ssh`, sans cette revalidation. Un agent absent, une clé absente ou un exécutable introuvable affichent un bandeau dédié, jamais le publickey générique.
 - Liste des profils : second `/usr/bin/ssh` avec l'alias, commande `hermes profile list`.
 - Une nouvelle demande de connexion, y compris un refus local (alias vide ou invalide), invalide la génération en cours.
 - Clé API : `ssh -G` plus les arguments exacts de `hermes -p <profil> config get API_SERVER_KEY --raw`, puis le planificateur (relais, hôte factice `example-host` en mode test, et même hostname/user/port que le tunnel), puis le même `/usr/bin/ssh` avec cette commande. Une clé publique absente sur disque n'arrête pas la lecture. Une destination différente du tunnel refuse la lecture avant le spawn.
@@ -60,7 +64,10 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 | --- | --- |
 | Alias dont la forme n'est pas un nom SSH valide | L'alias SSH n'est pas valide. |
 | `ssh -G` sort en erreur (guillemet non fermé, option inconnue, argument manquant) | ssh ne lit pas cette config SSH. L'alias est refusé. |
-| Agent verrouillé ou vide | Dernière ligne stderr de ssh, ou « L'agent SSH est verrouillé ou vide. » si cette ligne est vide. |
+| Agent SSH absent (socket injoignable) | L'agent SSH est absent. La connexion s'arrête. |
+| Clé absente de l'agent | La clé SSH n'est pas chargée dans l'agent. La connexion s'arrête. |
+| Exécutable SSH configuré introuvable | L'exécutable SSH configuré est introuvable. |
+| Agent verrouillé | Dernière ligne stderr de ssh, ou « L'agent SSH est verrouillé ou vide. » si cette ligne est vide. |
 | Certificat expiré | Dernière ligne stderr de ssh, ou « Le certificat SSH a expiré. » si cette ligne est vide. |
 | Serveur refuse l'identité | Dernière ligne stderr de ssh, ou le bandeau français si cette ligne est vide. |
 | Clé d'hôte changée | Dernière ligne stderr de ssh, ou « La clé de l'hôte a changé. Le tunnel reste fermé. » si cette ligne est vide. |
@@ -78,9 +85,10 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 - `test/ssh-g-resolution.test.js` rejoue le fixture `Match` plus `Include` et échoue si le Swift de l'app lit `~/.ssh/config` ou nomme encore `matchBlockRefused`.
 - Arguments exacts de la résolution : `-G` plus ceux du lancement réel, pour les trois lancements. Jamais `-vv`. `-F` seulement dans un test.
 - Relais (`ProxyJump` ou `ProxyCommand`, valeurs de toute forme, y compris URI, `user@hop`, `none,none`, `NONE,NONE`) : refusé en mode test et hors mode test, y compris quand un seul lancement le voit. Seul `none` comme valeur entière n'est pas un relais.
-- Arguments exacts du tunnel : alias, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, pas de `-F`, `-i`, `-l`, `-p`, agent privé ni `known_hosts` temporaire.
+- Arguments exacts du tunnel en mode session : alias, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, pas de `-F`, `-i`, `-l`, `-p`, agent privé ni `known_hosts` temporaire. En mode agent temporaire : les mêmes arguments plus `-o IdentityAgent=<socket privé>` en tête des options, jamais de `-i` ni de `known_hosts` temporaire.
+- Mode agent temporaire, revalidation (`EphemeralSSHAgentTests`) : chaque lancement relance `ssh -G` avec le `SSH_AUTH_SOCK` et le `-o IdentityAgent` de ce lancement. Un `Match exec` qui lit `SSH_AUTH_SOCK` ne peut ni ajouter de relais (`relayRefused`) ni changer la destination (`routeMismatch`), à l'ouverture comme avant chaque lecture auxiliaire. Un agent détruit après un échec donne `missingAgent` avant tout lancement. `testResolutionCarriesTheTemporaryAgentOfTheLaunch` fixe les arguments et l'environnement de cette résolution.
 - UI HD-07 : `TunnelTests` saisit `example-host.invalid` et le lance aussi via `HV_SSH_HOST`. Mode test : bandeau « refusé en mode test », aucun ssh.
-- Recette HD-07 : `new_alias` (`docs/spike/hd07-instruments/lib.sh`) crée une clé éphémère et les alias `hv-hd07` (clé installée dans le conteneur) et `hv-hd07-refused` (clé jamais installée). Il les écrit dans un bloc `Include` marqué en tête de `~/.ssh/config` du compte qui lance la lane. `drop_alias` retire le bloc, puis les clés. Il réécrit la config à travers un lien symbolique et la laisse identique à l'octet près. Si le bloc ne part pas, il échoue avec un message et garde les clés. `new_alias` refuse un lien symbolique sans cible et une config illisible : il n'écrit rien et la config garde ses octets. Test : `test/hd07-alias-lib.test.js`. L'app n'a plus de variable de clé ni d'utilisateur.
+- Recette HD-07 : `new_alias` (`docs/spike/hd07-instruments/lib.sh`) crée une clé éphémère et les alias `hv-hd07` (clé installée dans le conteneur) et `hv-hd07-refused` (clé jamais installée). Il les écrit dans un bloc `Include` marqué en tête de `~/.ssh/config` du compte qui lance la lane. `drop_alias` retire le bloc, puis les clés. Il réécrit la config à travers un lien symbolique et la laisse identique à l'octet près. Si le bloc ne part pas, il échoue avec un message et garde les clés. `new_alias` refuse un lien symbolique sans cible et une config illisible : il n'écrit rien et la config garde ses octets. Test : `test/hd07-alias-lib.test.js`. L'app n'a plus de variable d'utilisateur. `HV_TEST_SSH_KEY` n'existe qu'en build Debug en mode test et ne sert qu'au mode agent temporaire ; ces lanes ne l'utilisent pas.
 - Arguments exacts de la commande de clé, profil invalide refusé, 401 → récupération du profil seulement, clé absente des messages.
 - Profil nommé sans clé : bandeau introuvable, Authorization absent, clé de `default` jamais envoyée.
 - Échec temporaire de la lecture SSH, puis « Réessayer » : la lecture repart et la clé est récupérée (`APIKeyFetches`).

@@ -21,6 +21,9 @@ final class AppModel {
     private var checkedBot: String?
     private(set) var version = Version.loading
     var host: String
+    var authMode: SSHAuthMode
+    var wrapperPath: String
+    var keyCommandPath: String
     private(set) var preview: SSHConnectionPreview?
     /// Port montré en réglages et dans le statut : `ssh -G`, ou 22 si cette lecture échoue
     private(set) var displayedPort: SSHDisplayedPort?
@@ -119,7 +122,12 @@ final class AppModel {
         guard !environment.isTestMode else { return }
         let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedHost.isEmpty else { return }
-        SSHEndpoint(host: trimmedHost).save(to: environment.defaults)
+        SSHEndpoint(
+            host: trimmedHost,
+            authMode: authMode,
+            wrapperPath: wrapperPath.trimmingCharacters(in: .whitespacesAndNewlines),
+            keyCommandPath: keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        ).save(to: environment.defaults)
     }
 
     init(
@@ -138,6 +146,9 @@ final class AppModel {
         self.sshResolver = sshResolver
         self.connector = SSHConnector(resolver: sshResolver)
         host = environment.ssh?.host ?? ""
+        authMode = environment.ssh?.authMode ?? .sessionAgent
+        wrapperPath = environment.ssh?.wrapperPath ?? ""
+        keyCommandPath = environment.ssh?.keyCommandPath ?? ""
         #if DEBUG
         if environment.isTestMode {
             let watch = MainThreadWatch()
@@ -295,7 +306,16 @@ final class AppModel {
     }
 
     private func openTunnel(_ config: SSHTunnelConfig) {
-        let backend = SystemSSHBackend(resolver: sshResolver, refuseTestHost: environment.refuseTestHost)
+        let backend = SystemSSHBackend(
+            resolver: sshResolver,
+            refuseTestHost: environment.refuseTestHost,
+            client: SSHClientSettings(
+                authMode: authMode,
+                wrapperPath: wrapperPath.trimmingCharacters(in: .whitespacesAndNewlines),
+                keyCommandPath: keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            ),
+            keySource: ephemeralKeySource()
+        )
         sshBackend = backend
         sshConfig = config
         tunnel.start(config, backend: backend)
@@ -447,6 +467,20 @@ final class AppModel {
         if case HermesError.apiKeyMissing = error { return true }
         if case HermesError.http(_, let status, _) = error, status == 401 || status == 403 { return true }
         return false
+    }
+
+    private func ephemeralKeySource() -> (any SSHPrivateKeySource)? {
+        guard authMode == .ephemeralAgent else { return nil }
+        #if DEBUG
+        if environment.isTestMode {
+            let material = ProcessInfo.processInfo.environment["HV_TEST_SSH_KEY"] ?? ""
+            if !material.isEmpty { return DataPrivateKeySource(data: Data(material.utf8)) }
+        }
+        #endif
+        return CommandPrivateKeySource(
+            path: keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines),
+            environment: ProcessInfo.processInfo.environment
+        )
     }
 
     private static func apiMessage(_ error: Error) -> String {

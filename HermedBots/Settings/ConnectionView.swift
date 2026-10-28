@@ -1,3 +1,4 @@
+import AppSettings
 import SwiftUI
 
 extension SSHTunnel.State {
@@ -34,6 +35,20 @@ struct ConnectionView: View {
         VStack(spacing: 0) {
             Form {
                 TextField("Alias SSH", text: $model.host).accessibilityID(.connectionHost)
+                Picker("Mode SSH", selection: $model.authMode) {
+                    ForEach(SSHAuthMode.allCases, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .accessibilityID(.connectionAuthMode)
+                if model.authMode == .ephemeralAgent {
+                    TextField("Commande de clé", text: $model.keyCommandPath)
+                        .accessibilityID(.connectionKeyCommand)
+                }
+                if model.authMode == .wrapper {
+                    TextField("Exécutable SSH", text: $model.wrapperPath)
+                        .accessibilityID(.connectionWrapper)
+                }
                 LabeledContent("Hôte") {
                     Text(verbatim: model.preview?.hostname ?? "—").accessibilityID(.connectionResolvedHost)
                 }
@@ -60,6 +75,9 @@ struct ConnectionView: View {
                 model.persistEndpoint()
                 model.refreshPreview()
             }
+            .onChange(of: model.authMode) { model.persistEndpoint() }
+            .onChange(of: model.wrapperPath) { model.persistEndpoint() }
+            .onChange(of: model.keyCommandPath) { model.persistEndpoint() }
             HStack {
                 Button("Tester la connexion") { Task { await model.refreshVersion() } }
                     .accessibilityID(.connectionCheck)
