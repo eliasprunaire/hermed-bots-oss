@@ -261,6 +261,27 @@ final class SSHConfigTests: XCTestCase {
         )
     }
 
+    func testResolutionCarriesTheTemporaryAgentOfTheLaunch() throws {
+        let socket = "/tmp/example-agent.invalid/a"
+        let config = try SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refuseTestHost: true)
+        let launched: [SSHInvocation: [String]] = [
+            .tunnel: config.arguments(localPort: 1),
+            .profileList: config.profileListArguments(),
+            .profileLocks: config.profileLocksArguments(),
+        ]
+        for invocation in SSHInvocation.allCases {
+            let args = SystemSSHConfigResolver.arguments(alias: "lab.invalid", invocation: invocation, agentSocket: socket)
+            XCTAssertEqual(args, ["-G"] + SSHTunnelConfig.withIdentityAgent(launched[invocation]!, socket: socket), "\(invocation)")
+        }
+        let key = try SystemSSHConfigResolver.apiKeyArguments(alias: "lab.invalid", profile: "hv-bot-a", agentSocket: socket)
+        XCTAssertEqual(key, ["-G"] + SSHTunnelConfig.withIdentityAgent(try config.apiKeyArguments(profile: "hv-bot-a"), socket: socket))
+        XCTAssertFalse(SystemSSHConfigResolver.arguments(alias: "lab.invalid", invocation: .tunnel).contains { $0.hasPrefix("IdentityAgent=") })
+        let session = ["HOME": "/tmp/example-home", "SSH_AUTH_SOCK": "/tmp/session.invalid/agent", "HV_TEST_SSH_KEY": "x"]
+        XCTAssertEqual(SSHChildEnvironment.make(session, agentSocket: socket)["SSH_AUTH_SOCK"], socket)
+        XCTAssertEqual(SSHChildEnvironment.make(session)["SSH_AUTH_SOCK"], "/tmp/session.invalid/agent")
+        XCTAssertNil(SSHChildEnvironment.make(session, agentSocket: socket)["HV_TEST_SSH_KEY"])
+    }
+
     func testAPIKeyResolutionArgumentsAreTheExactProfileCommand() throws {
         let args = try SystemSSHConfigResolver.apiKeyArguments(alias: "lab.invalid", profile: "hv-bot-a")
         XCTAssertEqual(args.first, "-G")
@@ -456,7 +477,7 @@ private actor GatedSSHResolver: SSHConfigResolving {
         self.dumps = dumps
     }
 
-    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
+    func dump(alias: String, invocation: SSHInvocation, agentSocket: String?) async throws -> SSHConfigDump {
         if invocation == .tunnel {
             started.append(alias)
             await withCheckedContinuation { gates[alias] = $0 }
@@ -464,7 +485,7 @@ private actor GatedSSHResolver: SSHConfigResolving {
         return dumps[alias] ?? SSHConfigDump(stdout: "")
     }
 
-    func dumpAPIKey(alias: String, profile: String) async throws -> SSHConfigDump {
+    func dumpAPIKey(alias: String, profile: String, agentSocket: String?) async throws -> SSHConfigDump {
         dumps[alias] ?? SSHConfigDump(stdout: "")
     }
 
@@ -475,11 +496,11 @@ private actor GatedSSHResolver: SSHConfigResolving {
 }
 
 private struct FailingSSHResolver: SSHConfigResolving {
-    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
+    func dump(alias: String, invocation: SSHInvocation, agentSocket: String?) async throws -> SSHConfigDump {
         throw SSHFailure.unreadableConfig
     }
 
-    func dumpAPIKey(alias: String, profile: String) async throws -> SSHConfigDump {
+    func dumpAPIKey(alias: String, profile: String, agentSocket: String?) async throws -> SSHConfigDump {
         throw SSHFailure.unreadableConfig
     }
 }
@@ -492,12 +513,12 @@ private actor ScriptedSSHResolver: SSHConfigResolving {
         self.dumps = dumps
     }
 
-    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
+    func dump(alias: String, invocation: SSHInvocation, agentSocket: String?) async throws -> SSHConfigDump {
         asked.append(invocation)
         return dumps[invocation] ?? SSHConfigDump(stdout: "")
     }
 
-    func dumpAPIKey(alias: String, profile: String) async throws -> SSHConfigDump {
+    func dumpAPIKey(alias: String, profile: String, agentSocket: String?) async throws -> SSHConfigDump {
         dumps[.profileList] ?? dumps[.tunnel] ?? SSHConfigDump(stdout: "")
     }
 }

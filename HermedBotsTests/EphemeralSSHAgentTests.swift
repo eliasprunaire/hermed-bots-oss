@@ -95,6 +95,7 @@ final class EphemeralSSHAgentTests: XCTestCase {
         let key = try OpenSSHFixture.ed25519()
         let backend = SystemSSHBackend(
             environment: ["PATH": "/usr/bin:/bin", "HOME": "/tmp/example-home", "USER": "user", "LOGNAME": "user"],
+            resolver: AgreeingSSHResolver(),
             client: SSHClientSettings(authMode: .ephemeralAgent, sshBinary: double),
             keySource: DataPrivateKeySource(data: key)
         )
@@ -114,6 +115,7 @@ final class EphemeralSSHAgentTests: XCTestCase {
         let keys = CountingKeySource(data: try OpenSSHFixture.ed25519())
         let backend = SystemSSHBackend(
             environment: ["PATH": "/usr/bin:/bin", "HOME": "/tmp/example-home", "USER": "user", "LOGNAME": "user"],
+            resolver: AgreeingSSHResolver(),
             client: SSHClientSettings(authMode: .ephemeralAgent, sshBinary: try installDouble()),
             keySource: keys,
             identityLifetime: lifetime
@@ -145,6 +147,83 @@ final class EphemeralSSHAgentTests: XCTestCase {
         XCTAssertTrue((1...65535).contains(session.localPort))
         XCTAssertEqual(keys.count, 2)
         await backend.close()
+    }
+
+    /// Un `Match exec` lit `SSH_AUTH_SOCK`, que l'agent temporaire remplace au lancement : `armed` fait entrer cette branche
+    private func socketSensitiveBackend(body: String) throws -> (SystemSSHBackend, SSHTunnelConfig, URL) {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hb-match-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let armed = directory.appendingPathComponent("armed")
+        let config = directory.appendingPathComponent("config")
+        try """
+        Match originalhost lab.invalid exec "test -e \(armed.path) && case $SSH_AUTH_SOCK in */a) true;; *) false;; esac"
+        \(body)
+        Host lab.invalid
+          Hostname example.invalid
+          User user
+          Port 2200
+        """.write(to: config, atomically: true, encoding: .utf8)
+        let environment = ["PATH": "/usr/bin:/bin", "HOME": "/tmp/example-home", "USER": "user", "LOGNAME": "user"]
+        let backend = SystemSSHBackend(
+            environment: environment,
+            resolver: SystemSSHConfigResolver(environment: environment, configFile: config.path),
+            client: SSHClientSettings(authMode: .ephemeralAgent, sshBinary: try installDouble()),
+            keySource: DataPrivateKeySource(data: try OpenSSHFixture.ed25519())
+        )
+        let tunnel = try SSHTunnelConfig(alias: "lab.invalid", hostname: "example.invalid", user: "user", sshPort: 2200, refuseTestHost: true)
+        addTeardownBlock { await backend.close() }
+        return (backend, tunnel, armed)
+    }
+
+    func testAMatchExecThatReadsTheAgentSocketCannotAddARelayToTheTunnelOpen() async throws {
+        let (backend, config, armed) = try socketSensitiveBackend(body: "  Hostname alternate.invalid\n  ProxyJump relay.invalid")
+        FileManager.default.createFile(atPath: armed.path, contents: nil)
+        do {
+            _ = try await backend.open(config)
+            XCTFail("open() a lancé ssh avec un relais que la résolution de la session ne voyait pas")
+        } catch let failure as SSHFailure {
+            XCTAssertEqual(failure, .relayRefused)
+        }
+        // l'agent est détruit après l'échec : une lecture ne doit pas retomber sur l'agent de la session
+        do {
+            _ = try await backend.readProfileList(config)
+            XCTFail("readProfileList a lancé ssh sans agent temporaire")
+        } catch let failure as SSHFailure {
+            XCTAssertEqual(failure, .missingAgent)
+        }
+    }
+
+    func testAMatchExecThatReadsTheAgentSocketCannotAddARelayToAnAuxiliaryRead() async throws {
+        let (backend, config, armed) = try socketSensitiveBackend(body: "  Hostname alternate.invalid\n  ProxyJump relay.invalid")
+        _ = try await backend.open(config)
+        FileManager.default.createFile(atPath: armed.path, contents: nil)
+        func refused(_ read: () async throws -> Void, _ name: String) async {
+            do {
+                try await read()
+                XCTFail("\(name) a lancé ssh avec un relais")
+            } catch let failure as SSHFailure {
+                XCTAssertEqual(failure, .relayRefused, name)
+            } catch {
+                XCTFail("\(name) : \(error)")
+            }
+        }
+        await refused({ _ = try await backend.readProfileList(config) }, "readProfileList")
+        await refused({ _ = try await backend.readProfileLocks(config) }, "readProfileLocks")
+        await refused({ _ = try await backend.readAPIKey(config, profile: "hv-bot-a") }, "readAPIKey")
+        try FileManager.default.removeItem(at: armed)
+        _ = try await backend.readProfileList(config)
+    }
+
+    func testAMatchExecThatReadsTheAgentSocketCannotChangeTheDestination() async throws {
+        let (backend, config, armed) = try socketSensitiveBackend(body: "  Hostname alternate.invalid")
+        FileManager.default.createFile(atPath: armed.path, contents: nil)
+        do {
+            _ = try await backend.open(config)
+            XCTFail("open() vise un hôte que la résolution de la session ne voyait pas")
+        } catch let failure as SSHFailure {
+            XCTAssertEqual(failure, .routeMismatch)
+        }
     }
 
     func testAMissingWrapperIsNamedBeforeAnySpawn() async throws {
@@ -179,6 +258,15 @@ final class EphemeralSSHAgentTests: XCTestCase {
         }
         await backend.close()
     }
+}
+
+/// `ssh -G` d'un alias qui reste sur la route du tunnel de ces tests
+private struct AgreeingSSHResolver: SSHConfigResolving {
+    private let dump = SSHConfigDump(stdout: "hostname example.invalid\nuser user\nport 2200\n")
+
+    func dump(alias: String, invocation: SSHInvocation, agentSocket: String?) async throws -> SSHConfigDump { dump }
+
+    func dumpAPIKey(alias: String, profile: String, agentSocket: String?) async throws -> SSHConfigDump { dump }
 }
 
 private final class CountingKeySource: SSHPrivateKeySource {

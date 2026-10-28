@@ -41,8 +41,19 @@ struct SSHConfigDump: Equatable, Sendable {
 }
 
 protocol SSHConfigResolving: Sendable {
-    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump
-    func dumpAPIKey(alias: String, profile: String) async throws -> SSHConfigDump
+    /// `agentSocket` : l'agent temporaire du lancement ; `ssh -G` le reçoit comme le lancement, par `SSH_AUTH_SOCK` et par `-o IdentityAgent`
+    func dump(alias: String, invocation: SSHInvocation, agentSocket: String?) async throws -> SSHConfigDump
+    func dumpAPIKey(alias: String, profile: String, agentSocket: String?) async throws -> SSHConfigDump
+}
+
+extension SSHConfigResolving {
+    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
+        try await dump(alias: alias, invocation: invocation, agentSocket: nil)
+    }
+
+    func dumpAPIKey(alias: String, profile: String) async throws -> SSHConfigDump {
+        try await dumpAPIKey(alias: alias, profile: profile, agentSocket: nil)
+    }
 }
 
 struct SystemSSHConfigResolver: SSHConfigResolving {
@@ -54,21 +65,25 @@ struct SystemSSHConfigResolver: SSHConfigResolving {
         self.configFile = configFile
     }
 
-    static func arguments(alias: String, invocation: SSHInvocation, configFile: String? = nil) -> [String] {
-        ["-G"] + (configFile.map { ["-F", $0] } ?? []) + SSHTunnelConfig.arguments(invocation, alias: alias)
+    static func arguments(alias: String, invocation: SSHInvocation, configFile: String? = nil, agentSocket: String? = nil) -> [String] {
+        ["-G"] + (configFile.map { ["-F", $0] } ?? []) + launch(SSHTunnelConfig.arguments(invocation, alias: alias), agentSocket: agentSocket)
     }
 
-    static func apiKeyArguments(alias: String, profile: String, configFile: String? = nil) throws -> [String] {
-        ["-G"] + (configFile.map { ["-F", $0] } ?? []) + (try SSHTunnelConfig.apiKeyLaunchArguments(alias: alias, profile: profile))
+    static func apiKeyArguments(alias: String, profile: String, configFile: String? = nil, agentSocket: String? = nil) throws -> [String] {
+        ["-G"] + (configFile.map { ["-F", $0] } ?? []) + launch(try SSHTunnelConfig.apiKeyLaunchArguments(alias: alias, profile: profile), agentSocket: agentSocket)
     }
 
-    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
+    private static func launch(_ arguments: [String], agentSocket: String?) -> [String] {
+        agentSocket.map { SSHTunnelConfig.withIdentityAgent(arguments, socket: $0) } ?? arguments
+    }
+
+    func dump(alias: String, invocation: SSHInvocation, agentSocket: String?) async throws -> SSHConfigDump {
         let output: Spawn.Output
         do {
             output = try await Spawn.runGuarded(
                 "/usr/bin/ssh",
-                Self.arguments(alias: alias, invocation: invocation, configFile: configFile),
-                environment: SSHChildEnvironment.make(environment),
+                Self.arguments(alias: alias, invocation: invocation, configFile: configFile, agentSocket: agentSocket),
+                environment: SSHChildEnvironment.make(environment, agentSocket: agentSocket),
                 timeout: .seconds(8)
             )
         } catch SpawnError.timedOut {
@@ -80,13 +95,13 @@ struct SystemSSHConfigResolver: SSHConfigResolving {
         return SSHConfigDump(stdout: output.stdout)
     }
 
-    func dumpAPIKey(alias: String, profile: String) async throws -> SSHConfigDump {
+    func dumpAPIKey(alias: String, profile: String, agentSocket: String?) async throws -> SSHConfigDump {
         let output: Spawn.Output
         do {
             output = try await Spawn.runGuarded(
                 "/usr/bin/ssh",
-                try Self.apiKeyArguments(alias: alias, profile: profile, configFile: configFile),
-                environment: SSHChildEnvironment.make(environment),
+                try Self.apiKeyArguments(alias: alias, profile: profile, configFile: configFile, agentSocket: agentSocket),
+                environment: SSHChildEnvironment.make(environment, agentSocket: agentSocket),
                 timeout: .seconds(8)
             )
         } catch SpawnError.timedOut {

@@ -1,6 +1,6 @@
 # S12: open the SSH tunnel from the app
 
-Status: observed. Feeds HD-07 (`HermedBots/Transport/SSHTunnel.swift`). Chosen option at the time: the system `/usr/bin/ssh`. The product uses the user's SSH alias and config, not a private key held by the app.
+Status: observed. Feeds HD-07 (`HermedBots/Transport/SSHTunnel.swift`). Chosen option at the time: the system `/usr/bin/ssh`. In the default session mode the product uses the user's SSH alias and config, not a private key held by the app. A later temporary-agent mode starts a private `ssh-agent` again (see "Current product").
 
 Observed on 2026-10-19 on macOS 27.0.1 with `/usr/bin/ssh` `OpenSSH_10.3p1, LibreSSL 3.3.6`. The target is `sshd` (Debian trixie `openssh-server`) inside `hv-hermes-test`, image `hv-hermes:hd07`, built from `docs/spike/hd07-instruments/Dockerfile` on `hv-hermes:spike`. Hermes is v0.22.2. Only `hvssh` may log in, by public key, and `PermitOpen` allows `127.0.0.1:8642` only. Every key in this note is a throwaway test key, generated for the run and deleted after it. No key value appears here.
 
@@ -25,7 +25,7 @@ Neither library was built or run. The comparison rests on their READMEs and rele
 
 ## Decision
 
-The app runs `/usr/bin/ssh` as a child process. The spike used a private `ssh-agent` for a throwaway test key. The product later dropped that path and uses the user's agent and config.
+The app runs `/usr/bin/ssh` as a child process. The spike used a private `ssh-agent` for a throwaway test key. The product later dropped that path as its default (session mode) and uses the user's agent and config. A temporary-agent mode brings a private agent back (see "Current product").
 
 - No new dependency. `ssh` already does the key types, `known_hosts`, keep-alive and the forward.
 - The cost is a process to supervise. HD-07 does it: one process group, one watchdog, one stderr classifier.
@@ -33,7 +33,7 @@ The app runs `/usr/bin/ssh` as a child process. The spike used a private `ssh-ag
 
 ## How the key reached `ssh` during the spike
 
-The spike used a throwaway test key and a private agent. That path is not the product.
+The spike used a throwaway test key and a private agent. That path is not the default session mode. The temporary-agent mode differs from it (see "Current product").
 
 1. The probe created a private directory (mode 0700) under the temporary directory and started `ssh-agent -D -a <dir>/a`.
 2. It ran `ssh-add -` and wrote the key on its standard input.
@@ -46,7 +46,9 @@ A key protected by a passphrase failed at step 2 in 0.01 s (`rc=1`, `Enter passp
 
 ## Current product
 
-The app launches `/usr/bin/ssh` with the user's alias and the default user config. It does not start `ssh-agent`, does not run `ssh-add`, does not write `key.pub`, and does not keep a temporary `known_hosts`. Identity comes from the session `SSH_AUTH_SOCK` and from `IdentityAgent` in the user's config. `IdentityAgent none` turns the agent off, the session socket included, and the connection view then shows a file identity. Arguments force `ForkAfterAuthentication=no` and `LogLevel=ERROR`.
+In session mode (the default), the app launches `/usr/bin/ssh` with the user's alias and the default user config. It does not start `ssh-agent`, does not run `ssh-add`, does not write `key.pub`, and does not keep a temporary `known_hosts`. Identity comes from the session `SSH_AUTH_SOCK` and from `IdentityAgent` in the user's config. `IdentityAgent none` turns the agent off, the session socket included, and the connection view then shows a file identity. Arguments force `ForkAfterAuthentication=no` and `LogLevel=ERROR`.
+
+In temporary-agent mode the app starts `ssh-agent -D -a <dir>/a` in the watchdog group, loads the key from a configured command with `ssh-add -t 300 -`, and puts `-o IdentityAgent=<dir>/a` first among the ssh options. It still writes no `key.pub`, no `known_hosts` and no `-i`. `ssh -G` runs again before each launch with the same `SSH_AUTH_SOCK` and the same option, because a `Match exec` can read `SSH_AUTH_SOCK` and resolve another host or a relay.
 
 Resolution runs `/usr/bin/ssh -G` plus the arguments of that launch. The four launches are the tunnel (`-N -T -L …`), the profile list (`hermes profile list`), the Desktop lock read (one fixed remote command), and the API key command (`hermes -p <profile> config get API_SERVER_KEY --raw`). There is no `-vv`. The app reads hostname, user, port, identityfile and proxyjump from stdout. It does not open `~/.ssh/config` and does not parse `Match` or `Include` itself.
 
@@ -81,7 +83,7 @@ A path with spaces in a `-o` value needs quotes. `-o "UserKnownHostsFile=/a b/kh
 ## No orphan
 
 - A first smoke run sent SIGTERM to the app. The app crashed (`Trace/BPT trap`) and left `ssh` and `ssh-agent` alive. The cause is inferred: the signal handler closure was isolated to the main actor and ran on a global queue. The handler is now not isolated, and the crash did not come back.
-- SIGKILL cannot be caught. The group leader is a `sh` that reads a pipe only the app holds open. When the app dies the kernel closes the pipe and the `sh` runs `kill -KILL 0`, which kills its whole group. With this watchdog, SIGTERM and SIGKILL on the app left no `ssh` or `sh` behind (smoke run), and the lanes of HD-07 show the same for Cmd-Q and `terminate()`. The spike also had a private `ssh-agent` in that group; the product does not.
+- SIGKILL cannot be caught. The group leader is a `sh` that reads a pipe only the app holds open. When the app dies the kernel closes the pipe and the `sh` runs `kill -KILL 0`, which kills its whole group. With this watchdog, SIGTERM and SIGKILL on the app left no `ssh` or `sh` behind (smoke run), and the lanes of HD-07 show the same for Cmd-Q and `terminate()`. The spike also had a private `ssh-agent` in that group. Session mode has none; temporary-agent mode starts its `ssh-agent` in the same group.
 - The watchdog and every `ssh` share one process group. A reopen starts a new `ssh` in the same group.
 - Each `ssh -G` runs under its own watchdog too. The call registers the group for the termination hooks, and kills the whole group at the timeout and at the end of the call. A `Match exec` command that sleeps keeps `ssh -G` alive: `killAll` ends both within 2 s (`testTerminatingTheAppLeavesNoSshDumpAlive`), and a timeout leaves no grandchild (`testATimedOutGuardedRunKillsEveryProcessOfItsGroup`). SIGKILL on the app uses the same watchdog as the tunnel. No test kills its own host, so that case follows from the watchdog tests and was not observed on `ssh -G`.
 
