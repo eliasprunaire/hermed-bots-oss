@@ -1,75 +1,77 @@
 # PR-0: Hermes API feasibility spike
 
-Status: step 1 (read-only inventory) done on 2026-10-28. Step 2 (the single write on a dedicated test session) is **not done**: it waits for an explicit GO from the user. No production system was touched or inventoried.
+Status: step 1 (read-only inventory) done on 2026-10-28. Step 2 (the single write on a test session) is **deferred to PR-1** by decision of the user on 2026-10-28. No write was made. No production system was touched or inventoried.
+
+Conclusion: the observed target is `hermes serve`, authenticated by the dashboard. It has no reachable OpenAI-compatible API with a bearer token, no native TLS and no per-device token. PR-1 is therefore a **facade** that adds authentication, per-device tokens, revocation and TLS.
 
 ## References
 
 | Item | Value |
 | --- | --- |
-| Public documentation | [API Server](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server), read on 2026-10-28 |
+| Public documentation | [API Server](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server), read on 2026-10-28. It describes the OpenAI-compatible API server, not `hermes serve`. |
 | Documented version | none. The page states no version number. It carries a "Breaking change (July 2026)" notice. |
-| Observed version | Hermes v0.22.2 (2026.9.24), upstream commit `d923a5eb`, on the local test container (`GET /health`, `hermes --version`) |
-| Code read | `gateway/platforms/api_server.py`, `gateway/platforms/tcp_site.py`, `gateway/platforms/base.py` at the observed version, read inside the test container, not modified |
+| Observed target | `hermes serve` 0.22.5, as recorded in the decision of the user on 2026-10-28 |
+| Version read by the author | Hermes v0.22.2 (2026.9.24), upstream commit `d923a5eb`, on a local test instance (`hermes --version`). The 0.22.5 build was not available to the author: the code reading below is at 0.22.2 and is not re-checked at 0.22.5. |
+| Code read | `hermes_cli/web_server.py`, `hermes_cli/dashboard_auth/` (`token_auth.py`, `base.py`, `registry.py`), `gateway/platforms/api_server_room_grants.py`, `hermes serve --help`. Read-only, nothing modified. |
 
-The documented page was read through a page-to-text tool. Lines quoted below come from its output. A statement "the page does not mention X" means the tool output did not contain X.
+A statement "the page does not mention X" means the page-to-text output did not contain X.
 
 ## Scope of the inventory
 
-- Allowed and done: `GET /health` (no key), `GET /v1/capabilities` without a key (expects 401), one HTTPS request to the plain port, and a code read.
-- Authenticated reads were not repeated in this session: the test key is not in the author environment, and the author does not read it from the container. The authenticated reads of S5 and S8 (`GET /api/sessions`, `GET /v1/capabilities`, `GET /health/detailed`) from 2026-10-18 stay the evidence for those routes, see [S5-sessions.md](S5-sessions.md) and [S8-version.md](S8-version.md).
-- Not done: any inventory of a production Hermes. The issue forbids a production change, and no read-only access to production is part of the repository.
+- Done: `hermes --version`, `hermes serve --help`, `hermes serve --status`, and a code read on a local test instance.
+- Not done: any write, any authenticated call, any inventory of a production Hermes. The issue forbids a production change, and no read-only access to production is part of the repository.
+- The earlier spikes [S5-sessions.md](S5-sessions.md) and [S8-version.md](S8-version.md) (2026-10-18) stay the evidence for the sessions and capabilities routes of the separate API server platform. They were not replayed.
 
 ## Table
 
-`ok` = proven by a tool result of this spike or by a cited earlier spike. `absent` = proven missing. `unknown` = not proven.
+`ok` = proven by a tool result of this spike or by a cited earlier spike. `absent` = proven missing in the code read. `unknown` = not proven.
 
 | Capability | Status | Evidence | Gap with the product needs |
 | --- | --- | --- | --- |
-| Read: health | ok | `GET /health` without key: 200, `{"status": "ok", "platform": "hermes-agent", "version": "0.22.2"}` (this session). The doc lists `GET /health`, `GET /v1/health`, authenticated `GET /health/detailed`. | none |
-| Read: capabilities | ok | `GET /v1/capabilities` without key: 401 (this session). With key: 200, features and endpoint table (S8, 2026-10-18). | none |
-| Read: sessions, messages, runs, models, jobs | ok (routes documented), observed for sessions and messages | Doc routes: `GET /api/sessions`, `/api/sessions/{id}`, `/api/sessions/{id}/messages`, `GET /v1/runs/{run_id}`, `/v1/runs/{run_id}/events` (SSE), `GET /v1/models`, `GET /api/jobs`. Observed: sessions and run events in S1 and S5. `GET /api/jobs` and `GET /v1/responses/{id}` were not observed. | Jobs list: `unknown` on the live API |
-| Write: runs, sessions, chat | ok on the test container (earlier spikes), not repeated here | Doc: `POST /v1/runs`, `POST /v1/runs/{id}/stop`, `POST /api/sessions`, `POST /api/sessions/{id}/chat`. Observed in S1, S3, S4 on 2026-10-18. | none |
-| Write: the single write of this spike | not done | Waits for the explicit GO of the user. See "Step 2". | none |
-| Write: jobs, PATCH and DELETE of sessions, `resolve-unknown`, `clarify` | unknown | Documented, never called. | Only relevant if API v1 needs them |
-| TLS (native) | absent | Doc does not mention TLS, HTTPS or certificates. Code: `ssl_context` appears nowhere in `gateway/` (`grep` returned no match). `web.TCPSite(runner, host, port, ...)` is created without it (`tcp_site.py:51`, `:62`). Observed: `https://` to the plain listener fails with `tlsv1 alert protocol version` (this session). | Any link that leaves the host needs a TLS terminator or an SSH tunnel outside Hermes |
-| TLS behind a reverse proxy | unknown | Doc gives no reverse-proxy guidance. Not tested. | Not proven either way |
-| Bind: loopback | ok | `API_SERVER_HOST` defaults to `127.0.0.1`, `API_SERVER_PORT` to `8642` (doc; `api_server.py:216`, `:227`). | matches the PRD (tunnel to `127.0.0.1:8642`) |
-| Bind: beyond loopback | ok in code, reachability beyond the test container unknown | Setting `API_SERVER_HOST` to a non-loopback address is accepted. `is_network_accessible(host)` (`base.py:253`) only drives a warning when the terminal backend is `local` (`api_server.py:4501`). The doc gives no requirement for this case. The test container listens on all its interfaces and answers through a loopback-published port (S8). | PRD risk "API server exposed beyond `127.0.0.1`" can move from `unknown` to "possible, warned by Hermes, plain HTTP". Network reach on a real host: `unknown` |
-| Auth: bearer | ok | One `Authorization: Bearer` check, `hmac.compare_digest` against one expected key (`api_server.py:1559` to `:1582`). Doc: "`API_SERVER_KEY` is required for every deployment, including the default loopback bind." Startup refuses a missing or weak key (`:4422`). | matches the PRD (key required) |
-| Auth: per-profile key | ok | Doc: `/p/<profile>/v1/...` needs that profile's own key; a named profile without key fails closed. Code: `_check_auth` returns 401 for it (`:1565` to `:1572`). Observed in S7. | One key per profile to provision |
-| Auth: beyond one bearer per profile (per-user keys, scopes, roles, OAuth/OIDC, mTLS) | absent on the user routes | `_check_auth` compares one value. The doc lists no other method. The only other mechanism found is the JWT verifier of `POST /api/cron/fire` (`api_server.py:3985`), for a hosted cron service, not for users. | A single shared secret per profile gives no per-user identity and no revocation of one client |
-| Browser CORS | ok, off by default | Doc: not enabled by default; allowlist in `API_SERVER_CORS_ORIGINS`. Not tested. | none for a native app |
+| Service on the target | ok | `hermes serve --help`: "the JSON-RPC/WebSocket gateway the desktop app and remote clients connect to", default host `127.0.0.1`, default port 9119. | The product speaks HTTP and SSE to the API server surface, not JSON-RPC over WebSocket |
+| OpenAI-compatible API with bearer token on the target | absent | Not reachable on the observed target (decision of 2026-10-28). The API server is a separate gateway platform (`gateway/platforms/api_server.py`) and is not started by `hermes serve`. | The product routes (`/v1/runs`, `/api/sessions`) are not served by the target |
+| Read: sessions, messages, runs, models, jobs | unknown on the target | Documented and observed on the API server platform only (S1, S5, S8). Not tried on `hermes serve`. | Reads have to be re-proven behind the facade |
+| Write: runs, sessions, chat | unknown on the target | Same as above. Observed on the API server platform only (S1, S3, S4). | Writes have to be re-proven behind the facade |
+| The single write of this spike | deferred | Deferred to PR-1 by decision of the user on 2026-10-28. | none |
+| TLS (native) | absent | `uvicorn.Config(...)` in `_build_uvicorn_server` (`web_server.py`) sets no `ssl_keyfile` or `ssl_certfile`; `grep ssl_keyfile\|ssl_certfile web_server.py` returns 0 match. The code expects a TLS terminator in front (`proxy_headers` for gated mode, comment "runs behind a TLS terminator"). | A link that leaves the host has no encryption from Hermes. The facade has to provide TLS |
+| Bind: loopback | ok | `hermes serve --host` defaults to `127.0.0.1`. | Matches the PRD: SSH tunnel to loopback |
+| Bind: beyond loopback | ok in code, reachability unknown | `hermes serve --help`: `--insecure` is a no-op since the June 2026 hardening; "a public bind always requires an auth provider (password or OAuth)"; advice: "Bind 127.0.0.1 + tunnel to keep it local". Real reach from another host: not tested. | The PRD risk "server exposed beyond loopback" stays gated by an auth provider, in plain HTTP |
+| Auth: native method | ok, dashboard providers | `dashboard_auth/base.py`: interactive `Session` (user id, e-mail, org, access and refresh tokens) from a password or OAuth provider, kept in a cookie. Providers register through `dashboard_auth/registry.py`. | Interactive login for a person, not a credential a native app stores |
+| Auth: bearer token | absent for the product routes | `dashboard_auth/token_auth.py`: a bearer token is accepted only on exact paths registered with `register_token_route`. The only registration found is the drain route of a plugin (`plugins/dashboard_auth/drain`). | No bearer token reaches a session or run route |
+| Auth: per-device token | absent | `TokenPrincipal` carries one opaque `principal` and optional `scopes` per provider. No device concept appears in `dashboard_auth/` (`grep` finds "device" only in `login_page.py`). | The facade has to issue one token per device |
+| Auth: revocation of one client | absent as an operator action | `dashboard_auth/base.py` defines `revoke_session(refresh_token)`, called "on logout (best-effort, must not raise)". It ends the session of the holder of the refresh token. No operator route that revokes a chosen device or token appears in `dashboard_auth/`. | The facade has to let an operator revoke one device without touching the others |
+| Room grants (`HermesRoom`) | ok on the API server platform, unknown for the product | `gateway/platforms/api_server_room_grants.py`: short-lived signed grants with a permission check and a revocation lookup (`room_grant_is_revoked`, `peer_room_grant_is_current`). Routes `/v1/room-members/invitations`, `/capabilities`, `/grants/refresh`, `/grants/revoke`. The grant is minted through an endpoint that already requires the general API key, for a room member of a trusted home gateway. | These grants are not the general user keys and not per-device tokens. They are not served by `hermes serve`. Their fit for the client is not verified |
+| Browser CORS | unknown | Not read for `hermes serve`. | none for a native app |
 
 ## Gap with the product needs
 
-The product needs (PRD): one transport, an SSH tunnel to `127.0.0.1:8642`, a key per profile, no connection outside the tunnel.
+The product needs (PRD): one transport, an SSH tunnel to a loopback port, one credential the app can store, no connection outside the tunnel.
 
-1. Needs met today: loopback bind by default, bearer key mandatory, key per profile, health and capabilities readable.
+1. Met today: loopback bind by default, an authentication gate on any non-loopback bind.
 2. Native TLS is absent. A path that does not go through the SSH tunnel has no encryption from Hermes.
-3. Auth is one shared bearer per profile. No per-client identity, scope or revocation exists on the user routes.
-4. The doc warns that the API gives full access to the toolset, including terminal commands. Hermes warns at startup when the bind is network-accessible and the terminal backend is `local`.
-5. A version number exists only at runtime (`/health`). The doc has none, so "documented version" stays empty until the page carries one.
+3. Authentication is interactive (dashboard login). No bearer token reaches the product routes, and no per-device token exists.
+4. On the dashboard path, a session ends only when its holder logs out (`revoke_session`). An operator cannot revoke one device. `HermesRoom` grants revoke, but they serve another purpose and another surface.
+5. The version of the target (0.22.5) comes from the decision of the user. The author read 0.22.2.
 
-## Step 2: the single write (not done)
+## Decision for PR-1
 
-Waiting for the explicit GO of the user. The write must target a dedicated test session on the local test container. It is not run in this PR. Production is out of scope.
+PR-1 builds a facade in front of the target. The facade provides:
 
-Proposed target, to confirm with the GO:
+1. authentication of the client;
+2. one token per device;
+3. revocation of one device;
+4. TLS.
 
-| Field | Value |
-| --- | --- |
-| Request | `POST /api/sessions` with an empty JSON body `{}` |
-| Where | the local test container, profile `hv-bot-a`, key from the environment |
-| Expected | 200 or 201 with a session id; `GET /api/sessions` lists it once more |
-| Cleanup | none requested; the container is thrown away by `down orb` |
+The facade is the place where the reads and writes of the product are proven again.
 
-This request is a proposal. The user can name another write.
+## Step 2: the single write (deferred)
+
+The user deferred the write to PR-1 on 2026-10-28. The write targets a dedicated test session, never production. The request and the target are chosen in PR-1, against the facade, with the explicit GO of the user.
 
 ## Reproduce
 
 ```
-curl -sS http://127.0.0.1:<published-port>/health
-curl -sS -o /dev/null -w '%{http_code}\n' http://127.0.0.1:<published-port>/v1/capabilities
-curl -sS https://127.0.0.1:<published-port>/health
-docker exec hv-hermes-test hermes --version
+hermes --version
+hermes serve --help
+hermes serve --status
 ```
