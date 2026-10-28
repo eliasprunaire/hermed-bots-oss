@@ -14,7 +14,7 @@ final class EphemeralSSHAgentTests: XCTestCase {
         return false
     }
 
-    private func installDouble() throws -> String {
+    private func installDouble(exitFatallyAfterAccept: Bool = false) throws -> String {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hb-ssh-double-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let path = dir.appendingPathComponent("ssh-double").path
@@ -50,7 +50,9 @@ final class EphemeralSSHAgentTests: XCTestCase {
         if [ -z "$localport" ]; then
           exit 0
         fi
-        exec /usr/bin/python3 -c 'import socket,sys,time; p=int(sys.argv[1]); s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("127.0.0.1",p)); s.listen(1); s.settimeout(30); c,_=s.accept(); time.sleep(2)' "$localport"
+        \(exitFatallyAfterAccept
+            ? #"exec /usr/bin/python3 -c 'import socket,sys,time; p=int(sys.argv[1]); s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("127.0.0.1",p)); s.listen(1); s.settimeout(30); c,_=s.accept(); time.sleep(0.4); sys.stderr.write("user@example.invalid: Permission denied (publickey).\n"); sys.exit(255)' "$localport""#
+            : #"exec /usr/bin/python3 -c 'import socket,sys,time; p=int(sys.argv[1]); s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("127.0.0.1",p)); s.listen(1); s.settimeout(30); c,_=s.accept(); time.sleep(2)' "$localport""#)
         """
         try script.write(toFile: path, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
@@ -109,6 +111,57 @@ final class EphemeralSSHAgentTests: XCTestCase {
         let session = try await backend.open(config)
         XCTAssertTrue((1...65535).contains(session.localPort))
         await backend.close()
+    }
+
+    @MainActor
+    func testAFatalErrorAfterAnOpenTunnelDestroysTheTemporaryAgent() async throws {
+        let backend = SystemSSHBackend(
+            environment: ["PATH": "/usr/bin:/bin", "HOME": "/tmp/example-home", "USER": "user", "LOGNAME": "user"],
+            resolver: AgreeingSSHResolver(),
+            client: SSHClientSettings(authMode: .ephemeralAgent, sshBinary: try installDouble(exitFatallyAfterAccept: true)),
+            keySource: DataPrivateKeySource(data: try OpenSSHFixture.ed25519())
+        )
+        let config = try SSHTunnelConfig(alias: "lab.invalid", hostname: "example.invalid", user: "user", sshPort: 2200, refuseTestHost: true)
+        addTeardownBlock { await backend.close() }
+        let tunnel = SSHTunnel(delays: [.milliseconds(10)])
+        tunnel.start(config, backend: backend)
+        let opened = await wait(until: { if case .open = tunnel.state { true } else { false } })
+        XCTAssertTrue(opened, "\(tunnel.state)")
+        let socket = await backend.temporaryAgentSocketPath()
+        let pid = await backend.temporaryAgentPID()
+        XCTAssertNotNil(socket)
+        XCTAssertNotNil(pid)
+        let listed = try await Spawn.run(
+            "/usr/bin/ssh-add",
+            ["-l"],
+            environment: SSHChildEnvironment.make(["SSH_AUTH_SOCK": socket!]),
+            timeout: .seconds(5)
+        )
+        XCTAssertEqual(listed.status, 0)
+        let failed = await wait(until: { if case .failed = tunnel.state { true } else { false } })
+        XCTAssertTrue(failed, "\(tunnel.state)")
+        guard case .failed(let failure) = tunnel.state else { return }
+        XCTAssertFalse(failure.retries)
+        XCTAssertEqual(failure, .wrongKey("user@example.invalid: Permission denied (publickey)."))
+        XCTAssertTrue(await gone(pid!))
+        let after = try await Spawn.run(
+            "/usr/bin/ssh-add",
+            ["-l"],
+            environment: SSHChildEnvironment.make(["SSH_AUTH_SOCK": socket!]),
+            timeout: .seconds(5)
+        )
+        XCTAssertEqual(after.status, 2)
+        XCTAssertEqual(SSHFailure.classify(stderr: after.stderr), .missingAgent)
+        XCTAssertFalse(SSHFailure.missingAgent.message.contains("publickey"))
+    }
+
+    private func wait(until condition: () -> Bool, timeout: TimeInterval = 5) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        return false
     }
 
     private func expiringBackend(lifetime: Int) throws -> (SystemSSHBackend, CountingKeySource, SSHTunnelConfig) {

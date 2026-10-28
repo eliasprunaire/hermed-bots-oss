@@ -279,6 +279,7 @@ final class SSHConfigTests: XCTestCase {
         let session = ["HOME": "/tmp/example-home", "SSH_AUTH_SOCK": "/tmp/session.invalid/agent", "HV_TEST_SSH_KEY": "x"]
         XCTAssertEqual(SSHChildEnvironment.make(session, agentSocket: socket)["SSH_AUTH_SOCK"], socket)
         XCTAssertEqual(SSHChildEnvironment.make(session)["SSH_AUTH_SOCK"], "/tmp/session.invalid/agent")
+        XCTAssertNil(SSHChildEnvironment.make(session, agentSocket: socket)["IdentityAgent"])
         XCTAssertNil(SSHChildEnvironment.make(session, agentSocket: socket)["HV_TEST_SSH_KEY"])
     }
 

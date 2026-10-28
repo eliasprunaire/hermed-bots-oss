@@ -551,6 +551,7 @@ final class SSHTunnelSupervisorTests: XCTestCase {
         await eventually("open") { tunnel.state == .open(localPort: 40005) }
         await backend.drop(stderr: "hvssh@h: Permission denied (publickey).")
         await eventually("failed(wrongKey)") { tunnel.state == .failed(.wrongKey("hvssh@h: Permission denied (publickey).")) }
+        await eventually("backend closed") { await backend.closes == 1 }
     }
 
     func testStopClosesTheBackendAndNothingReopens() async {

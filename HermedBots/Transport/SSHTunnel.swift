@@ -198,8 +198,9 @@ struct SSHTunnelConfig: Equatable, Sendable {
 }
 
 /// L'environnement des processus ssh est construit à la main : l'app peut porter des variables de test
-/// `SSH_AUTH_SOCK` vient de la session, ou de `agentSocket` quand le lancement utilise l'agent temporaire
-/// `IdentityAgent` de la config ssh a priorité, ssh l'applique lui-même
+/// `SSH_AUTH_SOCK` vient de la session ; `agentSocket` le remplace pour l'agent temporaire
+/// Cette fonction ne pose pas `IdentityAgent` : ssh le lit dans la config, qui l'emporte sur `SSH_AUTH_SOCK`
+/// Le mode agent temporaire passe aussi `-o IdentityAgent` en tête des arguments, qui l'emporte sur la config
 enum SSHChildEnvironment {
     static func make(_ session: [String: String] = ProcessInfo.processInfo.environment, agentSocket: String? = nil) -> [String: String] {
         var environment = ["PATH": "/usr/bin:/bin", "LC_ALL": "C"]
@@ -645,6 +646,7 @@ final class SSHTunnel {
             }
             guard failure.retries else {
                 state = .failed(failure)
+                await backend.close()
                 return
             }
             let delay = delays[min(failures, delays.count - 1)]
@@ -659,7 +661,7 @@ final class SSHTunnel {
 
 /// Ouvre le tunnel avec `/usr/bin/ssh` (chemin absolu : le `ssh` du PATH d'un shell peut être un alias)
 /// Mode session : config et agent de l'utilisateur, pas de `-F`, pas de `-i`
-/// Mode agent temporaire : `ssh-agent` privé, clé par `ssh-add -`, `-o IdentityAgent`, destruction à la fermeture
+/// Mode agent temporaire : `ssh-agent` privé, clé par `ssh-add -`, `-o IdentityAgent` ; destruction à la fermeture, sur erreur fatale du tunnel, et par le gardien
 /// Mode exécutable : binaire configuré à la place de `/usr/bin/ssh`
 /// Les ssh sont dans un seul groupe de processus, tué d'un coup à la fermeture
 actor SystemSSHBackend: SSHBackend {
@@ -818,6 +820,10 @@ actor SystemSSHBackend: SSHBackend {
         self.watchdog = nil
         await release(watchdog, grace: .seconds(2))
     }
+
+    func temporaryAgentSocketPath() -> String? { ephemeral?.socketPath }
+
+    func temporaryAgentPID() -> pid_t? { ephemeral?.child.pid }
 
     private var sshBinary: String {
         client.authMode == .wrapper ? client.wrapperPath : client.sshBinary
