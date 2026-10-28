@@ -1,10 +1,10 @@
 # PRD : app macOS native pour piloter les bots Hermes
 
 > Statut : PRD consolidé, 18/10/2026 (heure de Paris). Il remplace `prd.md` et la version finale v2 du 17/10, amendements A1 à A12 intégrés au corps du texte. `prd.md` reste inchangé comme archive.
-> Ce document ne demande ni d'écrire du code, ni d'ouvrir SSH, ni de modifier perso-hermes. Aucune route d'API n'est affirmée : toute route citée est **« à vérifier »** jusqu'au spike de faisabilité, qui ouvre le plan.
+> Ce document ne demande ni d'écrire du code, ni d'ouvrir SSH, ni de modifier example-host. Aucune route d'API n'est affirmée : toute route citée est **« à vérifier »** jusqu'au spike de faisabilité, qui ouvre le plan.
 
 ## Résultats attendus (Outcomes)
-- Depuis le Mac, l'utilisateur voit la liste de ses bots. Chaque bot correspond à un profil Hermes actif sur la VM perso-hermes.
+- Depuis le Mac, l'utilisateur voit la liste de ses bots. Chaque bot correspond à un profil Hermes actif sur la VM example-host.
 - Il ouvre un bot, discute avec lui et change le modèle de la session en cours, sans passer par Hermes Desktop.
 - Quand le bot attend une approbation, la demande s'affiche (outil, paramètres) et l'utilisateur répond oui ou non. L'écran ne semble jamais figé sans raison.
 - Un tour lancé avant la mise en veille du Mac se termine sur la VM, puis s'affiche au réveil.
@@ -57,19 +57,19 @@ Forme visée : celle de Grok Bot et d'OpenBot (agents nommés, conversation, sé
 - Affichage des profils décommissionnés : `lead-x`, `lead-x-analyst`, `lead-x-dm-manager`, `lead-x-growth-desk`, `lead-x-hook-writer`, `lead-x-ideator`, `lead-x-planner`, `buzz`.
 - Tout transport autre que le tunnel SSH vers le serveur API.
 - `session.compress` : la v1 n'utilise que `/new`.
-- Toute action d'un bot du roster sur la production perso-hermes.
+- Toute action d'un bot du roster sur la production example-host.
 
 ## Sources de vérité (Sources of truth)
 - **Profils actifs**, d'après `hermes profile list` le 14/10/2026 : `default`, `cyber`, `gaming`, `ia`, `perso`, `recherches`, `sport`, `tiny`, `wikilibriste`. L'app lit la liste dans Hermes (source `unknown`, spike S6) ; un changement de liste n'est affiché qu'après validation par l'utilisateur.
 - **Documentation Hermes**, à respecter sans la contredire : [Programmatic Integration](https://hermes-agent.nousresearch.com/docs/developer-guide/programmatic-integration), [Profiles](https://hermes-agent.nousresearch.com/docs/user-guide/profiles), [API Server](https://hermes-agent.nousresearch.com/docs/user-guide/features/api-server).
 - **Code de la version de Hermes testée**, lu en lecture seule pendant le spike.
-- **Sessions** : enregistrées sur perso-hermes. L'app ne garde localement que les identifiants de session et de tour nécessaires à la reprise.
+- **Sessions** : enregistrées sur example-host. L'app ne garde localement que les identifiants de session et de tour nécessaires à la reprise.
 - **Fixtures de contrat** : une par version de Hermes prise en charge (au minimum l'actuelle et la précédente). Elles font foi pour la couche d'adaptation.
 
 ## Décisions prises
 
 ### Transport
-- L'app ouvre un **tunnel SSH** vers perso-hermes. De l'autre côté, le **serveur API Hermes** écoute seulement sur `127.0.0.1:8642`. Rien sur le réseau local, rien depuis Internet.
+- L'app ouvre un **tunnel SSH** vers example-host. De l'autre côté, le **serveur API Hermes** écoute seulement sur `127.0.0.1:8642`. Rien sur le réseau local, rien depuis Internet.
 - Le serveur API n'est pas le TUI, mais c'est le même agent et le même profil.
 - Le serveur API est aujourd'hui désactivé (`API_SERVER_ENABLED=false`). D'après la doc, l'activer demande `API_SERVER_ENABLED=true` et une clé `API_SERVER_KEY`, obligatoire même en local. Activation : voir « Points ouverts traités », A.
 - Secrets (clé(s) `API_SERVER_KEY`) dans le **Trousseau macOS**, jamais en clair sur le disque, jamais dans le chat ni dans un fichier du dépôt. L'identité SSH vient de la config OpenSSH de l'utilisateur (alias, agent ou certificat).
@@ -106,14 +106,14 @@ Forme visée : celle de Grok Bot et d'OpenBot (agents nommés, conversation, sé
 - **CI GitHub** : runner Linux par défaut ; runner macOS possible.
   - Testable sous Linux : la couche d'adaptation (paquet Swift sans dépendance UI), le décodage tolérant, les fixtures de contrat, le garde-fou de boucle (logique pure), les tests contre un faux serveur ou contre une instance Hermes en conteneur.
   - Demande macOS : l'interface SwiftUI/AppKit, XCUITest, les captures de référence, le Trousseau, le tunnel SSH réel, la veille réelle.
-- **Tests sur le MacBook de l'utilisateur**, contre un **Hermes propre dans un conteneur OrbStack**, sans montage sur `~/.hermes/hermes-agent` ni `~/.local/bin/hermes`. Jamais rien à ces chemins sur macOS. **Jamais de test sur la production perso-hermes.**
+- **Tests sur le MacBook de l'utilisateur**, contre un **Hermes propre dans un conteneur OrbStack**, sans montage sur `~/.hermes/hermes-agent` ni `~/.local/bin/hermes`. Jamais rien à ces chemins sur macOS. **Jamais de test sur la production example-host.**
 - **Recette et test quotidien** : exécutés par **Engineer**, à **13 h 00, heure de Paris**, quand l'utilisateur est présent pour approuver chaque commande. Rapport à Dev Lead. **Validation finale : l'utilisateur.**
-- **Exception Mac d'Engineer**, validée par écrit par l'utilisateur le 17/10/2026 à 12 h 05 (heure de Paris) : conteneur OrbStack dédié et dossier de travail dédié ; recette et test en lecture seule, avec rapport ; interdit d'écrire dans `~/.hermes/hermes-agent`, `~/.local/bin/hermes` et sur perso-hermes, toute autre action sur le Mac, tout push sur main ; chemins protégés vérifiés avant et après chaque passe, arrêt immédiat si l'un change ; chaque commande approuvée par l'utilisateur ; durée du projet Hermes v1, révocable. La CHARTE (§ Roster Dev) la mentionne déjà.
+- **Exception Mac d'Engineer**, validée par écrit par l'utilisateur le 17/10/2026 à 12 h 05 (heure de Paris) : conteneur OrbStack dédié et dossier de travail dédié ; recette et test en lecture seule, avec rapport ; interdit d'écrire dans `~/.hermes/hermes-agent`, `~/.local/bin/hermes` et sur example-host, toute autre action sur le Mac, tout push sur main ; chemins protégés vérifiés avant et après chaque passe, arrêt immédiat si l'un change ; chaque commande approuvée par l'utilisateur ; durée du projet Hermes v1, révocable. La CHARTE (§ Roster Dev) la mentionne déjà.
 
 ## Spike de faisabilité (première étape du plan)
 - Avant tout code de l'app. Il constate, il ne tranche pas. Critère de sortie par point : réponse documentée (route, format, comportement observé) ou constat d'impossibilité.
-- Ordre : (1) documentation et code de Hermes en lecture seule ; (2) instance Hermes propre dans OrbStack sur le MacBook. **Jamais contre perso-hermes.**
-- L'accès à la VM perso-hermes, même en lecture, demande l'accord écrit de l'utilisateur ; le spike recommandé n'en a pas besoin (voir A).
+- Ordre : (1) documentation et code de Hermes en lecture seule ; (2) instance Hermes propre dans OrbStack sur le MacBook. **Jamais contre example-host.**
+- L'accès à la VM example-host, même en lecture, demande l'accord écrit de l'utilisateur ; le spike recommandé n'en a pas besoin (voir A).
 - Points à constater (tout est `unknown` aujourd'hui) :
 
 | Id | Point | Ce qu'il faut rendre |
@@ -143,9 +143,9 @@ Forme visée : celle de Grok Bot et d'OpenBot (agents nommés, conversation, sé
 - **Recommandation** : K1 comme premier niveau si S3 le confirme, et K3 comme recours garanti, procédure écrite dans le runbook. Choix final : Q2.
 
 ### A. Serveur API : activation
-- A-a. Spike et recette entièrement sur l'instance OrbStack, serveur API activé seulement là (par Engineer, dans le conteneur). Activation sur perso-hermes plus tard, **par l'utilisateur lui-même**, après la recette.
-- A-b. Activation sur perso-hermes dès le spike. Rejetée : contredit « ne jamais toucher à la production perso-hermes ».
-- **Recommandation** : A-a. Aucun bot n'active rien sur perso-hermes. Q3 couvre aussi le routage (S7).
+- A-a. Spike et recette entièrement sur l'instance OrbStack, serveur API activé seulement là (par Engineer, dans le conteneur). Activation sur example-host plus tard, **par l'utilisateur lui-même**, après la recette.
+- A-b. Activation sur example-host dès le spike. Rejetée : contredit « ne jamais toucher à la production example-host ».
+- **Recommandation** : A-a. Aucun bot n'active rien sur example-host. Q3 couvre aussi le routage (S7).
 
 ### M. Version minimale de macOS et distribution
 - Version du MacBook : `unknown`.
@@ -154,14 +154,14 @@ Forme visée : celle de Grok Bot et d'OpenBot (agents nommés, conversation, sé
 - **Recommandation** : d1 pour la v1. Q4.
 
 ### S. Secrets de test
-- Les clés de l'instance OrbStack sont générées pour le test seulement ; elles ne servent jamais pour perso-hermes.
+- Les clés de l'instance OrbStack sont générées pour le test seulement ; elles ne servent jamais pour example-host.
 - Stockage : sur le Mac, Trousseau (trousseau de test dédié ou mode de test sans Trousseau réel) ; en CI, secrets GitHub chiffrés. Jamais dans le chat, le dépôt ou un fichier du dossier SkeinBot.
 - Modèle pour la recette : (s1) faux fournisseur de modèle ou rejeu de réponses enregistrées, aucun coût ; (s2) modèle local gratuit dans le conteneur, coût nul, ressources du Mac ; (s3) abonnement ou quota déjà payé, sans dépense nouvelle ; (s4) API payante nouvelle, interdite sans accord écrit.
 - **Recommandation** : s1 pour la CI et la majorité des tests, s2 ou s3 pour les tests de bout en bout. Q6.
 
 ### B. Seuils de boucle
 - Valeurs A2 ci-dessus : propositions de Dev Lead, non mesurées.
-- Options de calibrage : (b1) garder les valeurs proposées et le démarrage à froid, recalibrer après 20 tours réels par profil ; (b2) calibrer sur l'instance de test pendant le spike (données peu représentatives) ; (b3) lire l'historique de perso-hermes en lecture seule (demande l'accord de l'utilisateur, déconseillé).
+- Options de calibrage : (b1) garder les valeurs proposées et le démarrage à froid, recalibrer après 20 tours réels par profil ; (b2) calibrer sur l'instance de test pendant le spike (données peu représentatives) ; (b3) lire l'historique de example-host en lecture seule (demande l'accord de l'utilisateur, déconseillé).
 - **Recommandation** : b1 + b2. X minutes reste `unknown` ; Dev Lead propose une valeur au spike. Q7.
 
 ### Ci. CI macOS
@@ -198,7 +198,7 @@ Le producteur du code (Claude Code, Codex) ne vérifie jamais seul. Engineer ex�
 | Action | Qui peut | Qui doit approuver |
 |---|---|---|
 | Approuver ou refuser un outil demandé par un bot | L'utilisateur, dans l'app, après avoir vu outil et paramètres | L'utilisateur, à chaque demande |
-| Activer le serveur API sur perso-hermes | L'utilisateur lui-même, hors roster | L'utilisateur (Ayo décide) |
+| Activer le serveur API sur example-host | L'utilisateur lui-même, hors roster | L'utilisateur (Ayo décide) |
 | Toute commande sur le Mac (conteneur, tests) | Engineer, dans le périmètre de son exception | L'utilisateur, commande par commande |
 | Ajouter ou retirer une version prise en charge (fixtures) | Dev Lead via PR | Verdict indépendant + l'utilisateur |
 | Dépense payante nouvelle (API, runner macOS, compte Apple) | Personne sans accord | L'utilisateur, par écrit |
@@ -236,7 +236,7 @@ Le relevé de tokens par run est automatique (source `unknown`, S10) et nourrit 
 ## Contraintes (Constraints)
 - macOS natif. Un seul transport : tunnel SSH vers le serveur API sur `127.0.0.1:8642` (sous réserve de S7).
 - Aucun runtime ni CLI Hermes sur macOS ; rien dans `~/.hermes/hermes-agent` ni `~/.local/bin/hermes`.
-- Aucune modification ni test sur la production perso-hermes par un bot.
+- Aucune modification ni test sur la production example-host par un bot.
 - Six actions client seulement ; une seule couche d'adaptation versionnée.
 - Secrets dans le Trousseau macOS (ou secrets CI chiffrés) ; jamais en clair, jamais dans le chat.
 - Aucune route d'API affirmée avant le spike.
@@ -249,7 +249,7 @@ Le relevé de tokens par run est automatique (source `unknown`, S10) et nourrit 
 | Une mise à jour de Hermes casse une fonction | `unknown` | Moyen (mode dégradé) | Couche d'adaptation unique, fixtures par version, test quotidien | Engineer |
 | Le test quotidien est bloqué faute d'approbation (utilisateur absent à 13 h 00) | `unknown` | Moyen | Créneau fixe choisi par l'utilisateur ; rapport « non exécuté » visible | Engineer |
 | Une passe de test écrit dans `~/.hermes/hermes-agent` ou `~/.local/bin/hermes` et bloque l'updater de Desktop | `unknown` | Élevé | Conteneur sans montage, contrôle avant/après, arrêt immédiat | Engineer |
-| Un test ou une commande touche perso-hermes | `unknown` | Élevé | Cible unique OrbStack ; aucun secret de prod dans l'environnement de test | Engineer |
+| Un test ou une commande touche example-host | `unknown` | Élevé | Cible unique OrbStack ; aucun secret de prod dans l'environnement de test | Engineer |
 | L'annulation côté serveur n'arrête pas un outil déjà lancé (kill switch incomplet) | `unknown` | Élevé | S3 vérifie l'effet réel ; recours K3 | Ayo |
 | Les seuils de boucle, non mesurés, mettent en pause trop souvent ou trop tard | `unknown` | Moyen | Démarrage à froid, calibrage au spike puis après 20 tours | Dev Lead |
 | Pas de source de tokens par run : un signal du garde-fou manque | `unknown` | Moyen | Signal désactivé et signalé ; autres signaux actifs | Dev Lead |
@@ -261,7 +261,7 @@ Le relevé de tokens par run est automatique (source `unknown`, S10) et nourrit 
 
 ## Décideur humain (Human executive)
 - **Ayo** : kill switch, et les deux questions ci-dessous.
-- **L'utilisateur** : validation finale, toute dépense, activation du serveur API sur perso-hermes, approbation de chaque commande sur le Mac, suite à donner si le spike constate une impossibilité, questions de la dernière section.
+- **L'utilisateur** : validation finale, toute dépense, activation du serveur API sur example-host, approbation de chaque commande sur le Mac, suite à donner si le spike constate une impossibilité, questions de la dernière section.
 
 ## Questions ouvertes (Open questions)
 **À trancher par Ayo, recopiées telles quelles :**
@@ -289,14 +289,14 @@ Le relevé de tokens par run est automatique (source `unknown`, S10) et nourrit 
 ## Questions pour validation finale
 1. **Où s'écrit le code ?** La CHARTE interdit tout clone sur le Mac. Options : (a) code sur le Mac par Claude Code et Codex, usage humain conduit par l'utilisateur, CHARTE mise à jour par Manager ; (b) code sur cloud agents Cursor, Mac réservé aux tests d'Engineer. **Recommandé : (a), avec mise à jour écrite de la CHARTE avant tout code.**
 2. **Kill switch, moyen technique.** **Recommandé : bouton « Tout arrêter » (annulation API, si S3 la confirme) + arrêt du processus Hermes sur la VM par Ayo en recours garanti.**
-3. **Serveur API et routage.** **Recommandé : activé seulement dans l'instance OrbStack pour le spike et la recette ; sur perso-hermes, activé plus tard par l'utilisateur lui-même ; routage multi-profils sur 8642 si S7 le confirme, sinon décision d'amender le port unique.**
+3. **Serveur API et routage.** **Recommandé : activé seulement dans l'instance OrbStack pour le spike et la recette ; sur example-host, activé plus tard par l'utilisateur lui-même ; routage multi-profils sur 8642 si S7 le confirme, sinon décision d'amender le port unique.**
 4. **macOS et distribution.** **Recommandé : version minimale = celle du MacBook (au moins macOS 14) ; build local signé ad hoc, sans compte Apple payant.**
 5. **CI macOS.** **Recommandé : CI Linux pour la couche d'adaptation et les fixtures ; tests macOS par Engineer sur le MacBook ; runner macOS GitHub seulement dans le quota gratuit ou après accord écrit.**
 6. **Modèle et secrets de test.** **Recommandé : faux fournisseur ou rejeu en CI ; modèle local gratuit ou quota déjà payé pour le bout en bout ; clés de test générées pour OrbStack, au Trousseau et dans les secrets CI.**
 7. **Seuils de boucle et X minutes.** **Recommandé : valeurs A2 de Dev Lead + démarrage à froid, calibrage au spike puis après 20 tours ; X proposé par Dev Lead au spike, non mesuré.**
 8. **Forme de la notification de pause.** Options : bannière dans l'app seulement, ou notification macOS en plus. **Recommandé : les deux (seule exception au hors-périmètre « Notifications »).**
 9. **Test quotidien manqué.** **Recommandé : rapport « non exécuté », pas de rattrapage automatique ; l'utilisateur peut le relancer à la main.**
-10. **Spike contre la VM.** **Recommandé : aucun accès à perso-hermes pendant le spike ; documentation, code et OrbStack suffisent.**
-11. **Version de Hermes pour l'instance de test.** **Recommandé : la même que perso-hermes (relevée par l'utilisateur, pas par un bot) et la précédente, pour les fixtures.**
+10. **Spike contre la VM.** **Recommandé : aucun accès à example-host pendant le spike ; documentation, code et OrbStack suffisent.**
+11. **Version de Hermes pour l'instance de test.** **Recommandé : la même que example-host (relevée par l'utilisateur, pas par un bot) et la précédente, pour les fixtures.**
 12. **Critère de stabilité du test quotidien.** **Recommandé : 5 jours ouvrés consécutifs avec rapport complet avant livraison.**
 13. **Questions d'Ayo** (liste tous profils ou épinglée ; libellé du bouton). **Recommandé : Ayo les tranche avant la recette ; ce PRD ne les tranche pas.**

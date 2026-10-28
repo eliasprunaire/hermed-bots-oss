@@ -28,9 +28,7 @@ say "tête de code $(git -C "$REPO" rev-parse --short HEAD), trunk $(git -C "$HV
 say "lane 10, début : snapshot des chemins protégés, contrôle des cibles, échantillonnage réseau"
 "$SK/hv-guard.sh" snapshot "$EVD/guard-before.txt"; g=$?
 [ "$g" = 0 ] || { echo "RESULT FAIL : hv-guard.sh snapshot code $g, aucune lane lancée"; exit "$g"; }
-"$SK/hv-guard.sh" target perso-hermes.invalid; g=$?
-echo "hv-guard.sh target perso-hermes.invalid : code $g (22 attendu)"
-[ "$g" = 22 ] || { echo "RESULT FAIL : target perso-hermes.invalid code $g, 22 attendu, aucune lane lancée"; exit 1; }
+require_forbidden_target
 "$SK/hv-guard.sh" target "$SSH_HOST"; g=$?
 echo "hv-guard.sh target $SSH_HOST : code $g (0 attendu)"
 [ "$g" = 0 ] || { echo "RESULT FAIL : target $SSH_HOST code $g, 0 attendu, aucune lane lancée"; exit 1; }

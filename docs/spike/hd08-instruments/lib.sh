@@ -9,11 +9,50 @@ FIXDIR=$HVW/hd08-fixtures
 PORT=18642
 URL=http://127.0.0.1:$PORT
 CT=hv-hermes-test
-SSH_HOST=$host.example
+SSH_HOST=host.example
 export SSH_HOST
 export PATH="$PATH:/usr/sbin"
 
 say() { printf '[%s Paris] %s\n' "$(TZ=Europe/Paris date +%H:%M:%S)" "$*"; }
+
+discover_forbidden_probe() {
+  if [ -n "${HV_FORBIDDEN_HOST:-}" ]; then
+    printf '%s' "$HV_FORBIDDEN_HOST"
+    return 0
+  fi
+  python3 - "$SK/hv-guard.sh" <<'PY'
+import re, sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    text = path.read_text(encoding="utf-8")
+except OSError:
+    sys.exit(1)
+skip = {"example-host", "example-host.invalid", "host.example", "forbidden", "forbidden.invalid"}
+for match in re.finditer(r"\*([A-Za-z0-9._-]+)\*\)", text):
+    pat = match.group(1)
+    after = text[match.end() : match.end() + 160]
+    if not re.search(r"\b22\b", after):
+        continue
+    if pat.lower() in skip:
+        continue
+    sys.stdout.write(pat if "." in pat else f"{pat}.invalid")
+    sys.exit(0)
+sys.exit(1)
+PY
+}
+
+require_forbidden_target() {
+  probe=$(discover_forbidden_probe) || {
+    echo "RESULT FAIL : no forbidden probe from hv-guard.sh, aucune lane lancée"
+    exit 1
+  }
+  g=0
+  "$SK/hv-guard.sh" target "$probe" || g=$?
+  echo "hv-guard.sh target forbidden-probe : code $g (22 attendu)"
+  [ "$g" = 22 ] || { echo "RESULT FAIL : hv-guard.sh target forbidden-probe code $g, 22 attendu, aucune lane lancée"; exit 1; }
+}
 cmd() { printf '$ %s\n' "$*"; "$@"; local rc=$?; printf 'rc=%s\n' "$rc"; return 0; }
 
 xctestrun() { ls "$HVW/${1:-dd}"/Build/Products/*.xctestrun | head -1; }

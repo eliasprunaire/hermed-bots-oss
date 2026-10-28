@@ -1,0 +1,8 @@
+# gitignore-style; last match wins; ! rejects any letter-case of the path
+/*.md
+docs/**
+LICENSE
+!docs/spike/**
+!docs/plans/**
+!docs/perf-probes.md
+!AGENTS.md
