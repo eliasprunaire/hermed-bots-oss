@@ -6,7 +6,7 @@ import os
 import XCTest
 
 final class EphemeralSSHAgentTests: XCTestCase {
-    private func gone(_ pid: pid_t) async -> Bool {
+    @MainActor private func gone(_ pid: pid_t) async -> Bool {
         for _ in 0..<80 {
             if kill(pid, 0) == -1, errno == ESRCH { return true }
             try? await Task.sleep(for: .milliseconds(25))
@@ -156,7 +156,7 @@ final class EphemeralSSHAgentTests: XCTestCase {
         XCTAssertFalse(SSHFailure.missingAgent.message.contains("publickey"))
     }
 
-    private func wait(until condition: () -> Bool, timeout: TimeInterval = 5) async -> Bool {
+    @MainActor private func wait(until condition: @MainActor () -> Bool, timeout: TimeInterval = 5) async -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if condition() { return true }
