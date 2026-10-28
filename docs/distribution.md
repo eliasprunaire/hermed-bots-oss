@@ -218,8 +218,8 @@ Aucune commande de cette PR ne se connecte à la production.
 4. Cliquer sur **Connecter**.
 5. Contrôler la liste des bots et la version Hermes affichée. L'app lit `API_SERVER_KEY` toute seule par SSH ; il n'y a aucune saisie de clé API.
 
-L'app lance `/usr/bin/ssh` avec l'alias et la config de l'utilisateur, sans `-F /dev/null`, sans `-i` et sans agent privé.
-ssh choisit les clés (agent, `IdentityFile`, config). Connect ne lit pas le Trousseau.
+L'app lance `/usr/bin/ssh` avec l'alias et la config de l'utilisateur, sans `-F /dev/null` et sans `-i`.
+Le mode par défaut utilise l'agent de session. Un mode agent temporaire démarre `ssh-agent`, charge la clé par `ssh-add -` sur l'entrée standard (durée limitée, jamais un fichier), passe `-o IdentityAgent`, puis détruit l'agent. Un mode exécutable délègue au binaire configuré. Connect ne lit pas le Trousseau. La clé privée n'est ni écrite ni journalisée. Un agent ou une clé absents affichent une cause explicite, pas le refus publickey générique.
 Si ssh échoue, l'app affiche la dernière ligne de sa sortie d'erreur.
 Seul l'alias SSH persiste dans les réglages.
 Le tunnel expose l'API distante uniquement sur la boucle locale.

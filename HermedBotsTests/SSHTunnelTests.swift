@@ -21,6 +21,9 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertFalse(args.contains { $0.hasPrefix("IdentityAgent=") })
         XCTAssertFalse(args.contains { $0.hasPrefix("UserKnownHostsFile=") })
         XCTAssertFalse(args.contains("IdentitiesOnly=yes"))
+        let ephemeral = SSHTunnelConfig.withIdentityAgent(args, socket: "/tmp/example-agent.invalid")
+        XCTAssertEqual(ephemeral.indices.filter { ephemeral[$0] == "-o" }.map { ephemeral[$0 + 1] }.first, "IdentityAgent=/tmp/example-agent.invalid")
+        XCTAssertEqual(ephemeral.last, "lab.invalid")
     }
 
     func testANonDefaultResolvedPortIsNotPassedAsDashP() throws {
@@ -199,7 +202,9 @@ final class SSHTunnelConfigTests: XCTestCase {
     func testOnlyAnUnreachableHostIsRetried() {
         XCTAssertEqual(SSHFailure.classify(stderr: "operator@gateway.invalid: Permission denied (publickey)."), .wrongKey("operator@gateway.invalid: Permission denied (publickey)."))
         XCTAssertEqual(SSHFailure.classify(stderr: "sign_and_send_pubkey: signing failed for ed25519 from agent: agent refused operation"), .agentLockedOrEmpty("sign_and_send_pubkey: signing failed for ed25519 from agent: agent refused operation"))
-        XCTAssertEqual(SSHFailure.classify(stderr: "Could not open a connection to your authentication agent"), .agentLockedOrEmpty("Could not open a connection to your authentication agent"))
+        XCTAssertEqual(SSHFailure.classify(stderr: "Could not open a connection to your authentication agent"), .missingAgent)
+        XCTAssertEqual(SSHFailure.classify(stderr: "Error connecting to agent: No such file or directory"), .missingAgent)
+        XCTAssertEqual(SSHFailure.classify(stderr: "The agent has no identities."), .missingKey)
         XCTAssertEqual(SSHFailure.classify(stderr: "Certificate invalid: expired"), .certificateExpired("Certificate invalid: expired"))
         XCTAssertEqual(SSHFailure.classify(stderr: "Host key verification failed."), .hostKeyChanged("Host key verification failed."))
         XCTAssertEqual(SSHFailure.classify(stderr: "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@"), .hostKeyChanged("@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@"))
@@ -207,7 +212,7 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(SSHFailure.classify(stderr: ""), .unreachable(""))
         let retried = [SSHFailure.unreachable("x")].filter(\.retries)
         XCTAssertEqual(retried.count, 1)
-        for terminal in [SSHFailure.wrongKey(""), .hostKeyChanged(""), .unknownAlias, .unreadableConfig, .agentLockedOrEmpty(""), .certificateExpired(""), .forbiddenHost, .relayRefused, .routeMismatch, .invalidHost, .invalidPort] {
+        for terminal in [SSHFailure.wrongKey(""), .hostKeyChanged(""), .unknownAlias, .unreadableConfig, .missingAgent, .missingKey, .missingWrapper, .agentLockedOrEmpty(""), .certificateExpired(""), .forbiddenHost, .relayRefused, .routeMismatch, .invalidHost, .invalidPort] {
             XCTAssertFalse(terminal.retries, "\(terminal)")
         }
     }
@@ -239,7 +244,12 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(text, "Cet hôte est refusé en mode test.")
         XCTAssertFalse(text.contains("docs/"))
         XCTAssertEqual(SSHFailure.unknownAlias.message, "Cet alias SSH est inconnu.")
+        XCTAssertEqual(SSHFailure.missingAgent.message, "L'agent SSH est absent. La connexion s'arrête.")
+        XCTAssertEqual(SSHFailure.missingKey.message, "La clé SSH n'est pas chargée dans l'agent. La connexion s'arrête.")
+        XCTAssertEqual(SSHFailure.missingWrapper.message, "L'exécutable SSH configuré est introuvable.")
         XCTAssertEqual(SSHFailure.agentLockedOrEmpty("").message, "L'agent SSH est verrouillé ou vide.")
+        XCTAssertFalse(SSHFailure.missingAgent.message.contains("publickey"))
+        XCTAssertFalse(SSHFailure.missingKey.message.contains("publickey"))
         XCTAssertEqual(SSHFailure.certificateExpired("").message, "Le certificat SSH a expiré.")
         XCTAssertTrue(SSHFailure.wrongKey("").message.contains("refuse l'identité"))
         XCTAssertFalse(SSHFailure.wrongKey("").message.contains("Trousseau"))
@@ -260,6 +270,15 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(environment["SSH_AUTH_SOCK"], "/tmp/example-agent.invalid")
         XCTAssertEqual(environment["HOME"], "/tmp/example-home")
         XCTAssertNil(environment["HV_TEST_SSH_KEY"])
+        let tool = SSHChildEnvironment.forUserTool([
+            "HV_TEST_SSH_KEY": "SECRETMATERIAL0123456789",
+            "HV_API_URL": "http://127.0.0.1:1",
+            "HOME": "/tmp/example-home",
+            "PATH": "/usr/bin:/bin",
+        ])
+        XCTAssertNil(tool["HV_TEST_SSH_KEY"])
+        XCTAssertNil(tool["HV_API_URL"])
+        XCTAssertEqual(tool["HOME"], "/tmp/example-home")
         let result = try await Spawn.run("/usr/bin/env", [], environment: ["ONLY": "this"], timeout: .seconds(5))
         XCTAssertEqual(result.stdout, "ONLY=this\n")
         XCTAssertFalse(result.stdout.contains("SECRETMATERIAL"))
