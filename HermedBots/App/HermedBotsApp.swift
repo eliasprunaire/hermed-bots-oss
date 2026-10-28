@@ -35,6 +35,9 @@ struct ContentView: View {
                         HStack(spacing: 4) {
                             Text("Version de Hermes")
                             model.version.text.accessibilityID(.statusVersion)
+                            if let port = model.displayedPort {
+                                Text(verbatim: port.statusText).accessibilityID(.statusPort)
+                            }
                             Spacer()
                             SettingsLink {
                                 Label("Réglages", systemImage: "gearshape").labelStyle(.iconOnly)

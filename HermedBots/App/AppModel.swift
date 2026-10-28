@@ -22,6 +22,8 @@ final class AppModel {
     private(set) var version = Version.loading
     var host: String
     private(set) var preview: SSHConnectionPreview?
+    /// Port montré en réglages et dans le statut : `ssh -G`, ou 22 si cette lecture échoue
+    private(set) var displayedPort: SSHDisplayedPort?
     let tunnel = SSHTunnel()
     // paresseux : ses lectures appellent des méthodes de ce modèle, qui doit être construit en entier avant
     @ObservationIgnored lazy var bots = BotsModel(
@@ -233,10 +235,12 @@ final class AppModel {
         let alias = host.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !alias.isEmpty else {
             preview = nil
+            displayedPort = nil
             return
         }
         if environment.refuseTestHost, SSHTunnelConfig.isForbiddenTestHost(alias) {
             preview = nil
+            displayedPort = nil
             return
         }
         Task { await resolvePreview(alias: alias, id: id) }
@@ -248,10 +252,21 @@ final class AppModel {
         persistEndpoint()
         connector.begin(alias: host, refuseTestHost: environment.refuseTestHost, opened: { [weak self] config, preview in
             self?.preview = preview
+            self?.displayedPort = .readOnly(resolvedPort: preview.port)
             self?.openTunnel(config)
         }, refused: { [weak self] failure, preview in
-            if let preview { self?.preview = preview }
-            self?.tunnel.refuse(failure)
+            guard let self else { return }
+            if let preview {
+                self.preview = preview
+                self.displayedPort = .readOnly(resolvedPort: preview.port)
+            } else {
+                let alias = self.host.trimmingCharacters(in: .whitespacesAndNewlines)
+                let forbidden = self.environment.refuseTestHost && SSHTunnelConfig.isForbiddenTestHost(alias)
+                if !alias.isEmpty, !forbidden {
+                    self.displayedPort = .readOnly(resolvedPort: nil)
+                }
+            }
+            self.tunnel.refuse(failure)
         })
     }
 
@@ -271,9 +286,11 @@ final class AppModel {
             )
             guard id == previewGeneration else { return }
             preview = next
+            displayedPort = .readOnly(resolvedPort: next.port)
         } catch {
             guard id == previewGeneration else { return }
             preview = nil
+            displayedPort = .readOnly(resolvedPort: nil)
         }
     }
 

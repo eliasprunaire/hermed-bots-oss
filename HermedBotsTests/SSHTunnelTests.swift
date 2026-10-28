@@ -23,6 +23,20 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertFalse(args.contains("IdentitiesOnly=yes"))
     }
 
+    func testANonDefaultResolvedPortIsNotPassedAsDashP() throws {
+        let config = try SSHTunnelConfig(
+            alias: "example.invalid",
+            hostname: "example.invalid",
+            user: "operator",
+            sshPort: 2200,
+            refuseTestHost: true
+        )
+        let args = config.arguments(localPort: 1)
+        XCTAssertEqual(config.sshPort, 2200)
+        XCTAssertEqual(args.last, "example.invalid")
+        XCTAssertNil(args.firstIndex(of: "-p"))
+    }
+
     func testTheProfileListReadRunsOnlyHermesProfileListWithNoForward() throws {
         let args = try config().profileListArguments()
         XCTAssertEqual(Array(args.suffix(4)), ["lab.invalid", "hermes", "profile", "list"])

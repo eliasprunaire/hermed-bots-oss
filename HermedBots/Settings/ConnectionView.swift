@@ -40,8 +40,8 @@ struct ConnectionView: View {
                 LabeledContent("Utilisateur") {
                     Text(verbatim: model.preview?.user ?? "—").accessibilityID(.connectionUser)
                 }
-                LabeledContent("Port") {
-                    Text(verbatim: model.preview.map { String($0.port) } ?? "—").accessibilityID(.connectionPort)
+                LabeledContent(model.displayedPort?.settingsTitle ?? String(localized: "Port")) {
+                    Text(verbatim: model.displayedPort?.settingsValue ?? "—").accessibilityID(.connectionPort)
                 }
                 LabeledContent("Identité") {
                     Text(verbatim: model.preview?.identity.label ?? "—").accessibilityID(.connectionIdentity)

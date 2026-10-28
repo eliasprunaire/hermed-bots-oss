@@ -1,3 +1,4 @@
+import AppSettings
 import HermesAdapter
 import XCTest
 
@@ -57,6 +58,35 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertFalse(preview.identityPresentLabel.contains("/tmp"))
         XCTAssertFalse(preview.identity.label.contains("/tmp"))
         XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refuseTestHost: true))
+    }
+
+    func testParseReadsANonDefaultPortFromSshG() {
+        let preview = parse(
+            """
+            user operator
+            hostname example.invalid
+            port 2200
+            identityfile /tmp/fake-id.invalid
+            proxyjump none
+            """,
+            alias: "example.invalid"
+        )
+        XCTAssertEqual(preview.port, 2200)
+        XCTAssertEqual(preview.hostname, "example.invalid")
+    }
+
+    func testParseTreatsAMissingPortLineAsTheOpenSSHDefault() {
+        let preview = parse(
+            """
+            user operator
+            hostname example.invalid
+            identityfile /tmp/fake-id.invalid
+            proxyjump none
+            """,
+            alias: "example.invalid"
+        )
+        XCTAssertEqual(preview.port, 22)
+        XCTAssertEqual(preview.hostname, "example.invalid")
     }
 
     func testSshGStdoutIsAcceptedEvenWhenOnlyDefaultIdentitiesAppear() {
@@ -444,6 +474,16 @@ private actor GatedSSHResolver: SSHConfigResolving {
     }
 }
 
+private struct FailingSSHResolver: SSHConfigResolving {
+    func dump(alias: String, invocation: SSHInvocation) async throws -> SSHConfigDump {
+        throw SSHFailure.unreadableConfig
+    }
+
+    func dumpAPIKey(alias: String, profile: String) async throws -> SSHConfigDump {
+        throw SSHFailure.unreadableConfig
+    }
+}
+
 private actor ScriptedSSHResolver: SSHConfigResolving {
     private let dumps: [SSHInvocation: SSHConfigDump]
     private(set) var asked: [SSHInvocation] = []
@@ -745,6 +785,61 @@ final class AppModelConnectTests: XCTestCase {
         } else {
             XCTFail("\(model.tunnel.state)")
         }
+    }
+
+    func testAnAliasWithANonDefaultPortShowsTheResolvedPortFromSSHConfig() async {
+        let dump = SSHConfigDump(
+            stdout: """
+            user operator
+            hostname example.invalid
+            port 2200
+            identityfile /tmp/fake-id.invalid
+            proxyjump none
+            """
+        )
+        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump])
+        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], defaults: isolatedDefaults(), keychain: { InMemorySecretStore(apiKey: nil) })
+        let model = AppModel(environment: environment, sshResolver: resolver)
+        model.host = "example.invalid"
+        model.refreshPreview()
+        await eventually { model.displayedPort?.number == 2200 }
+        XCTAssertEqual(model.displayedPort, SSHDisplayedPort.readOnly(resolvedPort: 2200))
+        XCTAssertEqual(model.displayedPort?.settingsTitle, "Port (config SSH)")
+        XCTAssertEqual(model.displayedPort?.statusText, "Port SSH 2200 (config SSH)")
+        XCTAssertNil(try! SSHTunnelConfig(alias: "example.invalid", hostname: "example.invalid", user: "operator", sshPort: 2200, refuseTestHost: true).arguments(localPort: 1).firstIndex(of: "-p"))
+    }
+
+    func testAnAliasWithoutAPortShowsTheDumpDefaultFromSSHConfig() async {
+        let dump = SSHConfigDump(
+            stdout: """
+            user operator
+            hostname example.invalid
+            identityfile /tmp/fake-id.invalid
+            proxyjump none
+            """
+        )
+        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump])
+        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], defaults: isolatedDefaults(), keychain: { InMemorySecretStore(apiKey: nil) })
+        let model = AppModel(environment: environment, sshResolver: resolver)
+        model.host = "example.invalid"
+        model.refreshPreview()
+        await eventually { model.displayedPort?.fromSSHConfig == true }
+        XCTAssertEqual(model.displayedPort, SSHDisplayedPort.readOnly(resolvedPort: SSHDisplayedPort.fallback))
+        XCTAssertEqual(model.preview?.port, SSHDisplayedPort.fallback)
+        XCTAssertEqual(model.displayedPort?.settingsTitle, "Port (config SSH)")
+    }
+
+    func testAFailedPortResolutionKeepsTheDefaultPortSetting() async {
+        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], defaults: isolatedDefaults(), keychain: { InMemorySecretStore(apiKey: nil) })
+        let model = AppModel(environment: environment, sshResolver: FailingSSHResolver())
+        model.host = "example.invalid"
+        model.refreshPreview()
+        await eventually { model.displayedPort?.fromSSHConfig == false }
+        XCTAssertEqual(model.displayedPort, SSHDisplayedPort.readOnly(resolvedPort: nil))
+        XCTAssertNil(model.preview)
+        XCTAssertEqual(model.displayedPort?.number, SSHDisplayedPort.fallback)
+        XCTAssertEqual(model.displayedPort?.settingsTitle, "Port")
+        XCTAssertEqual(model.displayedPort?.statusText, "Port SSH \(SSHDisplayedPort.fallback)")
     }
 
     func testConnectNeverReadsTheKeychainAndOpensWithTheAlias() async {

@@ -16,6 +16,7 @@ final class AccessibilityIDTests: XCTestCase {
     func testTheShellIdsAreTheOnesTheVerifySkillNames() {
         XCTAssertEqual(AccessibilityID.botsList.rawValue, "hd.bots.list")
         XCTAssertEqual(AccessibilityID.statusVersion.rawValue, "hd.status.version")
+        XCTAssertEqual(AccessibilityID.statusPort.rawValue, "hd.status.port")
     }
 
     func testTheConnectionViewIdsAreStable() {
