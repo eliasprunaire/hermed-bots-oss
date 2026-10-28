@@ -143,7 +143,8 @@ final class EphemeralSSHAgentTests: XCTestCase {
         guard case .failed(let failure) = tunnel.state else { return }
         XCTAssertFalse(failure.retries)
         XCTAssertEqual(failure, .wrongKey("user@example.invalid: Permission denied (publickey)."))
-        XCTAssertTrue(await gone(pid!))
+        let agentGone = await gone(pid!)
+        XCTAssertTrue(agentGone)
         let after = try await Spawn.run(
             "/usr/bin/ssh-add",
             ["-l"],
