@@ -19,12 +19,14 @@ Le champ Utilisateur n'est plus éditable. Aucune saisie de clé API.
 | --- | --- | --- |
 | Hôte résolu | `hd.connection.resolved-host` | `hostname` de `ssh -G` |
 | Utilisateur | `hd.connection.user` | `user` de `ssh -G` |
-| Port | `hd.connection.port` | `port` de `ssh -G` |
+| Port | `hd.connection.port` | `port` de `ssh -G`, libellé « Port (config SSH) ». Si `ssh -G` échoue : 22, libellé « Port ». |
 | Identité | `hd.connection.identity` | agent, certificat ou fichier |
 | Clé publique / certificat | `hd.connection.identity-present` | présent ou absent ; jamais une valeur de clé |
 | Tunnel | `hd.connection.tunnel-state` | fermé, ouverture, ouvert, réouverture, en échec |
 | Version | `hd.connection.version` | version Hermes |
 | Message | `hd.connection.message` | échec classé |
+
+Le statut de la fenêtre principale reprend le même port (`hd.status.port`).
 
 Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché. Aucun `hd.connection.api-*`.
 
@@ -71,7 +73,7 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 
 ## Vérification unitaire
 
-- Parser `ssh -G` simulé : cas `Include` (alias `lab` → `gateway.invalid`) et sortie par défaut (`unknown-alias.invalid`, port 22) acceptée. Une clé publique absente sur disque n'empêche pas le planificateur.
+- Parser `ssh -G` simulé : cas `Include` (alias `lab` → `gateway.invalid`) et sortie par défaut (`unknown-alias.invalid`, port 22) acceptée. Une clé publique absente sur disque n'empêche pas le planificateur. Port 2200 affiché comme config SSH ; alias sans `port` : valeur du dump, toujours config SSH ; dump en échec : 22 sans ce libellé. Les arguments de ssh restent sans `-p`.
 - `RealSshConfigTests` lance le vrai `/usr/bin/ssh -G -F` : un `Match` avec `Include` résout et accepte `lab.invalid`, les formes `Match` que ssh lit sont acceptées, une config que ssh refuse reste refusée. `dumpAPIKey` du même ssh refuse un relais, `example-host`, ou une destination différente du tunnel, vus seulement par `Match command` (saut si ssh ne connaît pas cet attribut).
 - `test/ssh-g-resolution.test.js` rejoue le fixture `Match` plus `Include` et échoue si le Swift de l'app lit `~/.ssh/config` ou nomme encore `matchBlockRefused`.
 - Arguments exacts de la résolution : `-G` plus ceux du lancement réel, pour les trois lancements. Jamais `-vv`. `-F` seulement dans un test.

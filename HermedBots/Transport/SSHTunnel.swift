@@ -84,7 +84,7 @@ enum SSHInvocation: CaseIterable, Sendable {
 }
 
 /// Là où le tunnel se connecte et ce qu'il redirige : un port local vers `127.0.0.1:remotePort` de l'hôte
-/// `alias` est le seul argument d'hôte passé à ssh ; `hostname` et `user` viennent de `ssh -G`
+/// `alias` est le seul argument d'hôte passé à ssh ; `hostname`, `user` et le port affiché viennent de `ssh -G`, sans `-p`
 struct SSHTunnelConfig: Equatable, Sendable {
     let alias: String
     let hostname: String

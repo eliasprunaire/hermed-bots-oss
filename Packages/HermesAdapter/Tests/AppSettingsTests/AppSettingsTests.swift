@@ -56,4 +56,30 @@ final class AppSettingsTests: XCTestCase {
             XCTAssertEqual(SSHEndpoint.stored(in: defaults)?.host, "lab.invalid")
         }
     }
+
+    func testAnAliasWithANonDefaultPortShowsTheResolvedPortFromSSHConfig() {
+        let port = SSHDisplayedPort.readOnly(resolvedPort: 2200)
+        XCTAssertEqual(port.number, 2200)
+        XCTAssertTrue(port.fromSSHConfig)
+        XCTAssertEqual(port.settingsTitle, "Port (config SSH)")
+        XCTAssertEqual(port.settingsValue, "2200")
+        XCTAssertEqual(port.statusText, "Port SSH 2200 (config SSH)")
+    }
+
+    func testAnAliasWithoutAPortKeepsTheDumpValueAsComingFromSSHConfig() {
+        let port = SSHDisplayedPort.readOnly(resolvedPort: SSHDisplayedPort.fallback)
+        XCTAssertEqual(port.number, SSHDisplayedPort.fallback)
+        XCTAssertTrue(port.fromSSHConfig)
+        XCTAssertEqual(port.settingsTitle, "Port (config SSH)")
+        XCTAssertEqual(port.statusText, "Port SSH \(SSHDisplayedPort.fallback) (config SSH)")
+    }
+
+    func testAFailedResolutionKeepsTheDefaultPortSetting() {
+        let port = SSHDisplayedPort.readOnly(resolvedPort: nil)
+        XCTAssertEqual(port.number, SSHDisplayedPort.fallback)
+        XCTAssertFalse(port.fromSSHConfig)
+        XCTAssertEqual(port.settingsTitle, "Port")
+        XCTAssertEqual(port.settingsValue, String(SSHDisplayedPort.fallback))
+        XCTAssertEqual(port.statusText, "Port SSH \(SSHDisplayedPort.fallback)")
+    }
 }

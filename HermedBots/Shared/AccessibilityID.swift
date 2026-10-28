@@ -55,6 +55,7 @@ enum AccessibilityID: String, CaseIterable {
     case bannerError = "hd.banner.error"
     case bannerErrorRetry = "hd.banner.error.retry"
     case statusVersion = "hd.status.version"
+    case statusPort = "hd.status.port"
     case connectionOpen = "hd.connection.open"
     case connectionHost = "hd.connection.host"
     case connectionUser = "hd.connection.user"
