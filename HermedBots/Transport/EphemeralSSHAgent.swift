@@ -26,6 +26,7 @@ struct DataPrivateKeySource: SSHPrivateKeySource {
 }
 
 /// Exécutable qui écrit la clé privée sur la sortie standard ; la valeur n'est ni journalisée ni écrite
+/// Il tourne sous un gardien : l'arrêt de l'app, même par SIGKILL, le tue avec ses descendants
 struct CommandPrivateKeySource: SSHPrivateKeySource {
     let path: String
     let environment: [String: String]
@@ -34,7 +35,7 @@ struct CommandPrivateKeySource: SSHPrivateKeySource {
         guard SSHLaunchPath.isExecutable(path) else { throw SSHFailure.missingKey }
         let output: Spawn.Output
         do {
-            output = try await Spawn.run(
+            output = try await Spawn.runGuarded(
                 path,
                 [],
                 environment: SSHChildEnvironment.forUserTool(environment),
@@ -102,13 +103,13 @@ struct EphemeralSSHAgent: Sendable {
         return EphemeralSSHAgent(directory: directory, socketPath: socketPath, child: child)
     }
 
-    func addKey(_ data: Data, joining leader: pid_t) async throws {
+    func addKey(_ data: Data, joining leader: pid_t, lifetime: Int = EphemeralSSHAgent.lifetimeSeconds) async throws {
         if data.isEmpty { throw SSHFailure.missingKey }
         let output: Spawn.Output
         do {
             output = try await Spawn.run(
                 "/usr/bin/ssh-add",
-                ["-t", "\(Self.lifetimeSeconds)", "-"],
+                ["-t", "\(lifetime)", "-"],
                 environment: SSHChildEnvironment.make(["SSH_AUTH_SOCK": socketPath]),
                 joining: leader,
                 stdin: data,

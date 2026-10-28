@@ -442,6 +442,32 @@ final class GuardedSpawnTests: XCTestCase {
         XCTAssertTrue(wasGone, "le petit-enfant a survécu au délai")
     }
 
+    private func keyCommand(_ body: String) throws -> String {
+        let path = try temporaryDirectory().appendingPathComponent("key-command").path
+        try "#!/bin/sh\n\(body)\n".write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+        return path
+    }
+
+    func testTheKeyCommandOutputIsTheKey() async throws {
+        let path = try keyCommand("printf 'KEY-LINE\\n'")
+        let key = try await CommandPrivateKeySource(path: path, environment: ["PATH": "/usr/bin:/bin"]).load()
+        XCTAssertEqual(String(decoding: key, as: UTF8.self), "KEY-LINE\n")
+    }
+
+    func testTerminatingTheAppLeavesNoKeyCommandAlive() async throws {
+        let pidFile = try temporaryDirectory().appendingPathComponent("pid")
+        let path = try keyCommand("echo $$ > \(pidFile.path)\nexec sleep 30")
+        let load = Task { try await CommandPrivateKeySource(path: path, environment: ["PATH": "/usr/bin:/bin"]).load() }
+        let command = try await processID(in: pidFile)
+        XCTAssertEqual(kill(command, 0), 0, "la commande de clé doit vivre avant l'arrêt")
+        ProcessGroups.killAll()
+        // avant d'attendre `load` : son délai de 8 s tuerait la commande même sans gardien
+        let wasGone = await gone(command)
+        XCTAssertTrue(wasGone, "la commande de clé a survécu à l'arrêt")
+        _ = await load.result
+    }
+
     func testAGuardedRunLeavesNoProcessGroupBehind() async throws {
         let output = try await Spawn.runGuarded("/bin/sh", ["-c", "ps -o pgid= -p $$"], environment: ["PATH": "/usr/bin:/bin"], timeout: .seconds(5))
         let group = try XCTUnwrap(pid_t(output.stdout.trimmingCharacters(in: .whitespacesAndNewlines)))

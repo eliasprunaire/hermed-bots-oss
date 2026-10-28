@@ -2,6 +2,7 @@ import AppSettings
 import CryptoKit
 import Darwin
 import Foundation
+import os
 import XCTest
 
 final class EphemeralSSHAgentTests: XCTestCase {
@@ -72,7 +73,8 @@ final class EphemeralSSHAgentTests: XCTestCase {
         try await agent.verifyHasIdentity(joining: watchdog.pid)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [EphemeralSSHAgent.socketName])
         kill(agent.child.pid, SIGKILL)
-        XCTAssertTrue(await gone(agent.child.pid))
+        let agentGone = await gone(agent.child.pid)
+        XCTAssertTrue(agentGone)
         do {
             try await agent.verifyHasIdentity(joining: watchdog.pid)
             XCTFail("l'agent tué a encore une identité")
@@ -90,10 +92,11 @@ final class EphemeralSSHAgentTests: XCTestCase {
 
     func testTheTunnelOpensWhenTheTemporaryAgentHoldsTheKey() async throws {
         let double = try installDouble()
+        let key = try OpenSSHFixture.ed25519()
         let backend = SystemSSHBackend(
             environment: ["PATH": "/usr/bin:/bin", "HOME": "/tmp/example-home", "USER": "user", "LOGNAME": "user"],
             client: SSHClientSettings(authMode: .ephemeralAgent, sshBinary: double),
-            keySource: DataPrivateKeySource(data: OpenSSHFixture.ed25519())
+            keySource: DataPrivateKeySource(data: key)
         )
         let config = try SSHTunnelConfig(
             alias: "lab.invalid",
@@ -104,6 +107,43 @@ final class EphemeralSSHAgentTests: XCTestCase {
         )
         let session = try await backend.open(config)
         XCTAssertTrue((1...65535).contains(session.localPort))
+        await backend.close()
+    }
+
+    private func expiringBackend(lifetime: Int) throws -> (SystemSSHBackend, CountingKeySource, SSHTunnelConfig) {
+        let keys = CountingKeySource(data: try OpenSSHFixture.ed25519())
+        let backend = SystemSSHBackend(
+            environment: ["PATH": "/usr/bin:/bin", "HOME": "/tmp/example-home", "USER": "user", "LOGNAME": "user"],
+            client: SSHClientSettings(authMode: .ephemeralAgent, sshBinary: try installDouble()),
+            keySource: keys,
+            identityLifetime: lifetime
+        )
+        let config = try SSHTunnelConfig(alias: "lab.invalid", hostname: "example.invalid", user: "user", sshPort: 2200, refuseTestHost: true)
+        addTeardownBlock { await backend.close() }
+        return (backend, keys, config)
+    }
+
+    func testAnExpiredTemporaryIdentityIsReloadedBeforeAnAuxiliaryRead() async throws {
+        let (backend, keys, config) = try expiringBackend(lifetime: 4)
+        _ = try await backend.open(config)
+        _ = try await backend.readProfileList(config)
+        XCTAssertEqual(keys.count, 1, "la clé est rechargée alors qu'il lui reste plus de la marge")
+        try await Task.sleep(for: .seconds(5))
+        // `ssh-add -t 4` a retiré l'identité : sans rechargement, le double répond « The agent has no identities »
+        _ = try await backend.readProfileList(config)
+        XCTAssertEqual(keys.count, 2)
+        _ = try await backend.readProfileLocks(config)
+        XCTAssertEqual(keys.count, 2, "la clé est rechargée deux fois de suite")
+        await backend.close()
+    }
+
+    func testAnExpiredTemporaryIdentityIsReloadedBeforeTheTunnelReopens() async throws {
+        let (backend, keys, config) = try expiringBackend(lifetime: 2)
+        _ = try await backend.open(config)
+        try await Task.sleep(for: .seconds(3))
+        let session = try await backend.open(config)
+        XCTAssertTrue((1...65535).contains(session.localPort))
+        XCTAssertEqual(keys.count, 2)
         await backend.close()
     }
 
@@ -138,6 +178,20 @@ final class EphemeralSSHAgentTests: XCTestCase {
             XCTAssertFalse(failure.message.contains("publickey"))
         }
         await backend.close()
+    }
+}
+
+private final class CountingKeySource: SSHPrivateKeySource {
+    private let data: Data
+    private let loads = OSAllocatedUnfairLock(initialState: 0)
+
+    init(data: Data) { self.data = data }
+
+    var count: Int { loads.withLock { $0 } }
+
+    func load() async throws -> Data {
+        loads.withLock { $0 += 1 }
+        return data
     }
 }
 

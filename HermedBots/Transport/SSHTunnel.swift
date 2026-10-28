@@ -667,12 +667,14 @@ actor SystemSSHBackend: SSHBackend {
     private let localUser: String
     private let client: SSHClientSettings
     private let keySource: (any SSHPrivateKeySource)?
+    private let identityLifetime: Int
     private var watchdog: Child?
     /// le gardien en préparation, que `close()` arrête sans attendre la fin de l'ouverture
     private var preparing: Child?
     private var closed = false
     private var agentDirectory: URL?
     private var ephemeral: EphemeralSSHAgent?
+    private var identityLoadedAt: ContinuousClock.Instant?
 
     init(
         environment: [String: String] = ProcessInfo.processInfo.environment,
@@ -680,7 +682,8 @@ actor SystemSSHBackend: SSHBackend {
         refuseTestHost: Bool = false,
         localUser: String = NSUserName(),
         client: SSHClientSettings = SSHClientSettings(),
-        keySource: (any SSHPrivateKeySource)? = nil
+        keySource: (any SSHPrivateKeySource)? = nil,
+        identityLifetime: Int = EphemeralSSHAgent.lifetimeSeconds
     ) {
         self.environment = environment
         self.resolver = resolver
@@ -688,6 +691,7 @@ actor SystemSSHBackend: SSHBackend {
         self.localUser = localUser
         self.client = client
         self.keySource = keySource
+        self.identityLifetime = identityLifetime
     }
 
     func open(_ config: SSHTunnelConfig) async throws -> SSHSession {
@@ -733,6 +737,7 @@ actor SystemSSHBackend: SSHBackend {
     func readProfileList(_ config: SSHTunnelConfig) async throws -> String {
         try ensureLive()
         guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
+        try await renewIdentityIfDue(joining: watchdog.pid)
         let output: Spawn.Output
         do {
             output = try await Spawn.run(
@@ -762,6 +767,7 @@ actor SystemSSHBackend: SSHBackend {
         let dump = try await resolver.dumpAPIKey(alias: config.alias, profile: profile)
         let preview = SSHConfig.parse(dump, alias: config.alias, localUser: localUser)
         _ = try SSHConnectionPlanner.config(from: preview, refuseTestHost: refuseTestHost, matching: config)
+        try await renewIdentityIfDue(joining: watchdog.pid)
         let output: Spawn.Output
         do {
             output = try await Spawn.run(
@@ -786,6 +792,7 @@ actor SystemSSHBackend: SSHBackend {
     func readProfileLocks(_ config: SSHTunnelConfig) async throws -> Data {
         try ensureLive()
         guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
+        try await renewIdentityIfDue(joining: watchdog.pid)
         let output = try await Spawn.run(
             sshBinary, launchArguments(config.profileLocksArguments()),
             environment: sshEnvironment,
@@ -840,15 +847,16 @@ actor SystemSSHBackend: SSHBackend {
 
     private func startEphemeralAgent(joining leader: pid_t) async throws {
         if let ephemeral {
+            try await renewIdentityIfDue(joining: leader)
             try await ephemeral.verifyHasIdentity(joining: leader)
             return
         }
         guard let directory = agentDirectory else { throw SSHFailure.missingAgent }
-        let source = keySource ?? CommandPrivateKeySource(path: client.keyCommandPath, environment: environment)
-        let key = try await source.load()
+        let loadedAt = ContinuousClock.now
+        let key = try await privateKeySource.load()
         let agent = try await EphemeralSSHAgent.start(joining: leader, directory: directory)
         do {
-            try await agent.addKey(key, joining: leader)
+            try await agent.addKey(key, joining: leader, lifetime: identityLifetime)
         } catch {
             kill(agent.child.pid, SIGKILL)
             _ = await agent.child.waitForExit()
@@ -856,11 +864,30 @@ actor SystemSSHBackend: SSHBackend {
             throw error
         }
         ephemeral = agent
+        identityLoadedAt = loadedAt
+    }
+
+    private var privateKeySource: any SSHPrivateKeySource {
+        keySource ?? CommandPrivateKeySource(path: client.keyCommandPath, environment: environment)
+    }
+
+    /// `ssh-add -t` retire la clé de l'agent à la fin de sa durée : un nouveau `ssh-add` la repousse
+    /// Rechargée avant chaque lancement de ssh quand il reste moins de 30 s (la moitié de la durée si elle est plus courte)
+    private func renewIdentityIfDue(joining leader: pid_t) async throws {
+        // shortcut: deux lectures concurrentes au moment du rechargement relancent chacune la commande de clé, sans effet de bord, à verrouiller si la commande devient coûteuse
+        guard client.authMode == .ephemeralAgent, let agent = ephemeral, let previous = identityLoadedAt else { return }
+        let margin = Duration.seconds(min(30, identityLifetime / 2))
+        guard ContinuousClock.now - previous >= .seconds(identityLifetime) - margin else { return }
+        let loadedAt = ContinuousClock.now
+        let key = try await privateKeySource.load()
+        try await agent.addKey(key, joining: leader, lifetime: identityLifetime)
+        identityLoadedAt = loadedAt
     }
 
     private func teardownEphemeral(keepingWatchdog: Bool) async {
         if let agent = ephemeral {
             ephemeral = nil
+            identityLoadedAt = nil
             kill(agent.child.pid, SIGKILL)
             _ = await agent.child.waitForExit()
             try? FileManager.default.removeItem(atPath: agent.socketPath)

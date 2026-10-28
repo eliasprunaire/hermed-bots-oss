@@ -6,7 +6,7 @@
 
 | Contrôle | Identifiant | Rôle |
 | --- | --- | --- |
-| Alias SSH | `hd.connection.host` | Seul champ éditable du tunnel. Persisté sous `ssh.host`. |
+| Alias SSH | `hd.connection.host` | Alias de l'hôte. Persisté sous `ssh.host`. |
 | Mode SSH | `hd.connection.auth-mode` | Agent de session, agent temporaire, ou exécutable. Persisté sous `ssh.authMode`. |
 | Commande de clé | `hd.connection.key-command` | Visible en mode agent temporaire. Persisté sous `ssh.keyCommandPath`. Jamais une valeur de clé. |
 | Exécutable SSH | `hd.connection.wrapper` | Visible en mode exécutable. Persisté sous `ssh.wrapperPath`. |
@@ -52,8 +52,8 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 
 - Résolution : `/usr/bin/ssh -G` plus les arguments de chaque lancement (tunnel, liste des profils, détection, lecture de clé). `Include` et `Match` viennent d'OpenSSH. L'app lit hostname, user, port, identityfile et proxyjump sur stdout. Elle n'ouvre pas `~/.ssh/config` et n'ajoute pas `-vv`. Un `ssh -G` tourne sous un gardien : l'arrêt de l'app le tue, avec la commande d'un `Match exec`, et le délai de 8 s tue le groupe entier.
 - Tunnel : `/usr/bin/ssh` + alias, `-N -T`, `-L 127.0.0.1:<port libre>:127.0.0.1:<remotePort>`, `BatchMode=yes`, `ExitOnForwardFailure=yes`, `ForwardAgent=no`, `ControlMaster=no`, `ControlPath=none`, `ForkAfterAuthentication=no`, `LogLevel=ERROR`, `ConnectTimeout`, `ServerAliveInterval`, `ServerAliveCountMax`.
-- `SSH_AUTH_SOCK` vient de la session. `IdentityAgent` de la config ssh a priorité. `IdentityAgent none` désactive l'agent, socket de la session comprise : l'identité affichée est un fichier.
-- Mode agent temporaire : `ssh-agent -D` sur un socket privé, `ssh-add -t` avec la clé sur stdin, puis `-o IdentityAgent` en tête des options. La clé ne touche pas le disque. L'agent est tué à la fermeture, sur échec, et par le gardien. Mode exécutable : le binaire configuré remplace `/usr/bin/ssh`. Un agent absent, une clé absente ou un exécutable introuvable affichent un bandeau dédié, jamais le publickey générique.
+- `SSH_AUTH_SOCK` vient de la session. `IdentityAgent` de la config ssh a priorité, sauf en mode agent temporaire où le `-o IdentityAgent` de l'app passe avant. `IdentityAgent none` désactive l'agent, socket de la session comprise : l'identité affichée est un fichier.
+- Mode agent temporaire : `ssh-agent -D` sur un socket privé, `ssh-add -t 300` avec la clé sur stdin, puis `-o IdentityAgent` en tête des options. L'app recharge la clé avant une lecture auxiliaire ou une réouverture quand il reste moins de 30 s. La commande de clé tourne sous un gardien. La clé ne touche pas le disque. L'agent est tué à la fermeture, sur échec, et par le gardien. Mode exécutable : le binaire configuré remplace `/usr/bin/ssh`. Un agent absent, une clé absente ou un exécutable introuvable affichent un bandeau dédié, jamais le publickey générique.
 - Liste des profils : second `/usr/bin/ssh` avec l'alias, commande `hermes profile list`.
 - Une nouvelle demande de connexion, y compris un refus local (alias vide ou invalide), invalide la génération en cours.
 - Clé API : `ssh -G` plus les arguments exacts de `hermes -p <profil> config get API_SERVER_KEY --raw`, puis le planificateur (relais, hôte factice `example-host` en mode test, et même hostname/user/port que le tunnel), puis le même `/usr/bin/ssh` avec cette commande. Une clé publique absente sur disque n'arrête pas la lecture. Une destination différente du tunnel refuse la lecture avant le spawn.
