@@ -6,7 +6,7 @@ import os
 import XCTest
 
 final class EphemeralSSHAgentTests: XCTestCase {
-    @MainActor private func gone(_ pid: pid_t) async -> Bool {
+    private static func gone(_ pid: pid_t) async -> Bool {
         for _ in 0..<80 {
             if kill(pid, 0) == -1, errno == ESRCH { return true }
             try? await Task.sleep(for: .milliseconds(25))
@@ -75,7 +75,7 @@ final class EphemeralSSHAgentTests: XCTestCase {
         try await agent.verifyHasIdentity(joining: watchdog.pid)
         XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path), [EphemeralSSHAgent.socketName])
         kill(agent.child.pid, SIGKILL)
-        let agentGone = await gone(agent.child.pid)
+        let agentGone = await Self.gone(agent.child.pid)
         XCTAssertTrue(agentGone)
         do {
             try await agent.verifyHasIdentity(joining: watchdog.pid)
@@ -143,7 +143,7 @@ final class EphemeralSSHAgentTests: XCTestCase {
         guard case .failed(let failure) = tunnel.state else { return }
         XCTAssertFalse(failure.retries)
         XCTAssertEqual(failure, .wrongKey("user@example.invalid: Permission denied (publickey)."))
-        let agentGone = await gone(pid!)
+        let agentGone = await Self.gone(pid!)
         XCTAssertTrue(agentGone)
         let after = try await Spawn.run(
             "/usr/bin/ssh-add",
