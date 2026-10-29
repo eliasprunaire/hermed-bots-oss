@@ -1,6 +1,9 @@
 {
   "name": "hermed-bots",
   "private": true,
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "prepare": "node scripts/install-git-hooks.js",
     "lint": "node scripts/lint.js",
