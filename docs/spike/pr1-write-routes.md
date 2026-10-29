@@ -43,7 +43,7 @@ Reads that the product needs are `session.list`, `session.most_recent`, `session
 - A real turn with a model provider, so the tool-approval round trip (`approval.respond` with a live `request_id`) was not run end to end. The route and its error path are proven, the successful `resolved` reply is not.
 - The gated mode (non-loopback bind, provider login). The facade targets the loopback mode.
 - `/model` and `/new` from the product, which map to methods this note does not allow yet (`config.set`, `slash.exec`).
-- Behaviour across a Hermes restart. The facade marks an in-flight write as unknown when Hermes drops the socket, and never replays it.
+- Behaviour across a Hermes restart. The facade marks an in-flight write as unknown when Hermes drops the socket, and never runs it again.
 
 ## Reproduce
 

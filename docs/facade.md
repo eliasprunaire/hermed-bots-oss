@@ -13,10 +13,10 @@ Background and decisions are in `docs/spike/pr0-api-feasibility.md`. The write r
 | TLS with a pinned anchor | A dedicated internal CA signs the server certificate. Clients trust that CA alone and check the SHA-256 of the server public key (SPKI) against a pin. TLS 1.3 only. |
 | Hermes never seen over HTTP | The facade has no plain HTTP listener. Hermes is reached on the loopback only. Replies carry a short list of headers, no cookie, no redirect. The facade refuses to start when the Hermes port answers on a non-loopback interface. |
 | One-use enrollment | A code is valid 5 minutes, works once, and an expired, reused or unknown code gets the same `401 enrollment_invalid`. |
-| Roles | `admin` and `normal`. Only an admin creates codes, lists devices, revokes, reads the audit. |
-| Audit | One JSON line per event, timestamps in UTC. Tokens and codes are never written. |
+| Roles | `admin` and `normal`. Only an admin creates codes, lists devices, revokes, reads the audit. Up to 200 active devices. A revoked device no longer counts. |
+| Audit | One JSON line per event, timestamps in UTC. A value a device controls (method name, device name, path) is never written raw: methods are logged as a short digest, device names not at all, paths of unknown routes as `[unlisted]`. Every value is also masked when it has the shape of a credential, or equals the Hermes credential, and a field named like a secret is always masked. |
 | Rate limit | 120 calls a minute per device by default, 10 enrollment attempts per 5 minutes per source, and a source is blocked after 30 failed authentications in a minute. |
-| Idempotent writes | A write carries `params.idempotency_key`. It runs once per device and key, and a retry gets the first answer. |
+| Idempotent writes | A write carries `params.idempotency_key`. It runs once per device and key, and a retry gets the first answer, also after a restart or a crash of the facade. |
 
 ## Routes
 
@@ -42,7 +42,7 @@ Default deny. A device reaches these methods and no other.
 - Writes, both roles: `session.create`, `session.close`, `prompt.submit`, `approval.respond`, `session.interrupt`.
 - Writes, admin only: `session.delete`, `session.archive`, `session.title`.
 
-A refused method gets JSON-RPC error `4003`. Hermes exposes shell, configuration, vault and connector methods on the same socket. None of them is reachable.
+A refused method gets JSON-RPC error `4003`. A request target that cannot be parsed gets `400` before any authentication. Hermes exposes shell, configuration, vault and connector methods on the same socket. None of them is reachable.
 
 ### Writes and idempotency
 
@@ -55,10 +55,11 @@ A write needs a string or number `id` and `params.idempotency_key` (8 to 128 cha
 | Same key, call still running | The caller waits and gets the same result. |
 | Same key, different request | Error `4009`. |
 | First call failed | The key is freed. Retry with the same key. |
+| Facade stopped or crashed while the call ran | Error `4010` for that key, as below. |
 | Outcome lost (Hermes dropped the socket) | Error `4010` for that key. It is never run again. Check the session, then use a new key. |
 | No key | Error `4004`. Nothing reaches Hermes. |
 
-Keys are kept in memory. A restart of the facade forgets them.
+The keys live in a journal, `idempotency.jsonl` in the state directory (mode 600). Each change is appended and synced before the facade goes on, and `begin` is on disk before a write is forwarded to Hermes. At start the journal is replayed, a write that was still running becomes "unknown" (error `4010`, never run again), expired entries are dropped, and the file is rewritten through a temporary file, a sync and a rename. A torn last line left by a crash is ignored. A result over 64 KiB is not kept, and its key answers "unknown". If the journal cannot be written, the write is refused with error `4012` and nothing reaches Hermes. The journal holds results, so keep the state directory private.
 
 ## Set up on the host
 

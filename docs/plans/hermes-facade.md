@@ -60,7 +60,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] `git fetch origin <head-branch> && git checkout <head SHA>`.
 - [ ] Install Node 22 with `npm ci`. The facade tests need `openssl` on the path.
 - [ ] Deliver input only through `npm test`, `npm run lint`, `node scripts/infra-guard-ci.js` and the files under `facade/testkit/`. The read-only diagnostics are `git diff origin/main --stat` and `rg` over the facade files.
-- [ ] Save every artifact to `/tmp/swarm-fa-01/worker-<n>/<slug>.txt` and return the paths with the report.
+- [ ] Save every artifact to `<scratch dir>/worker-<n>/<slug>.txt` and return the paths with the report.
 
 ## Put an authentication and TLS facade in front of Hermes (FA-01)
 
@@ -71,8 +71,8 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [x] Create `facade/src/config.js`, `facade/src/store.js`, `facade/src/audit.js`, `facade/src/ratelimit.js`, `facade/src/idempotency.js` and `facade/src/policy.js`.
 - [x] Create `facade/src/tls.js`, `facade/src/websocket.js`, `facade/src/bridge.js`, `facade/src/proxy.js`, `facade/src/exposure.js` and `facade/src/server.js`.
 - [x] Create `facade/bin/hermes-facade.js`.
-- [x] Create `facade/testkit/fake-hermes.js`, `client.js`, `stack.js`, `live-smoke.js` and `perf-probe.js`.
-- [x] Create `test/facade/acceptance.test.js` and `test/facade/behaviour.test.js`.
+- [x] Create `facade/testkit/fake-hermes.js`, `client.js`, `stack.js`, `child.js`, `live-smoke.js` and `perf-probe.js`.
+- [x] Create `test/facade/acceptance.test.js`, `test/facade/behaviour.test.js` and `test/facade/hardening.test.js`.
 - [x] Create `docs/facade.md` and `docs/spike/pr1-write-routes.md`.
 - [x] Create `docs/plans/hermes-facade.md`.
 - [x] Edit `README.md` to point at `docs/facade.md` and `package.json` to require Node 22.
@@ -83,12 +83,12 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [x] Issue opaque device tokens (`hbf_` and 256 random bits), keep SHA-256 hashes only, and reload the state file when it changes so a revocation made on the host applies on the next call. Close the open sockets of a revoked device.
 - [x] Mint one-use enrollment codes (100 random bits, 5 minutes) from the host CLI or from an admin device. Answer an unknown, expired or reused code with the same `401`.
 - [x] Give each device the role `admin` or `normal`. Serve admin routes to admins only.
-- [x] Write an audit line in UTC for every enrollment, denial, revocation, write and request. Mask any secret-looking key.
+- [x] Write an audit line in UTC for every enrollment, denial, revocation, write and request. Never write a device-controlled value raw, and mask by field name, by credential shape and by known secret.
 - [x] Limit each device per minute, each source on enrollment, and each source on failed authentication.
 - [x] Talk to Hermes on the loopback only. Refuse a non-loopback Hermes host, refuse to start when a non-loopback interface reaches the Hermes port, and expose `check-exposure`.
 - [x] Serve a read allowlist over HTTP, project the Hermes status to four fields, drop every Hermes response header except five, and refuse a redirect.
 - [x] Bridge the JSON-RPC socket message by message with a default-deny method list. Strip `idempotency_key` before Hermes sees the call.
-- [x] Make writes idempotent per device and key, replay a success, free a failed key, and refuse a key whose outcome is unknown.
+- [x] Make writes idempotent per device and key, replay a success, free a failed key, and refuse a key whose outcome is unknown. Keep the keys in a synced journal that survives a restart or a crash.
 - [x] Identify the write routes on a Hermes test instance and record them in `docs/spike/pr1-write-routes.md`.
 - [x] Target Node 22 and the TLS 1.3 stack only. Add no fallback for older versions.
 
@@ -102,6 +102,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
 - [x] `test/facade/acceptance.test.js` holds the six acceptance tests, numbered 1 to 6 in their titles. Run `node --test test/facade/acceptance.test.js`.
+- [x] `test/facade/hardening.test.js` covers the malformed upgrade target, the journal across a restart and a SIGKILL, audit masking by value and the device limit.
 - [x] `test/facade/behaviour.test.js` covers roles, rate limits, the socket codec, the store, the audit file, the policy, the configuration, the pin and the CLI.
 - [x] Run `npm test` and `npm run lint`.
 
@@ -161,7 +162,7 @@ Unproven. A real model turn with a tool approval, the gated mode of Hermes, and 
 | Risk | PR | What the owner watches |
 | --- | --- | --- |
 | The Hermes root page exposes the process token to anyone who reaches the port | FA-01 | The start check and `check-exposure` fail closed. The host stays single-purpose. |
-| Idempotency keys live in memory | FA-01 | A restart forgets them. A later PR may persist them. |
+| The idempotency journal holds results and grows with traffic | FA-01 | It is private to the state directory, compacts at start and every 5000 records, and drops entries after 24 hours. |
 | The method allowlist drifts from Hermes | FA-01 | Lane 5 compares it with the Hermes source at each Hermes version. |
 | The pin changes when the server key changes | FA-01 | `init-tls` keeps the key on renewal. A new key means a new pin for every client. |
 | The approval round trip is not proven with a model provider | FA-01 | Appendix A names it. A later run on a test instance with a provider closes it. |
