@@ -1,6 +1,6 @@
 # PR-1: Hermes authentication and TLS facade
 
-Status: implemented in `scripts/hermes-facade.js`, tested by `test/hermes-facade.test.js` (20 tests) and by a live pass on the dedicated test instance on 2026-10-29. Step 2 of the PR-0 spike (the write routes) is done here, on the test instance only. No production Hermes was touched.
+Status: implemented in `scripts/hermes-facade.js`, tested by `test/hermes-facade.test.js` (28 tests) and by a live pass on the dedicated test instance on 2026-10-29. Step 2 of the PR-0 spike (the write routes) is done here, on the test instance only. No production Hermes was touched.
 
 The facade is the answer of PR-0 to a target with no TLS, no per-device token and no operator revocation. It terminates TLS, authenticates one token per device, and talks to Hermes over the host loopback only. The Hermes credentials never leave the facade process.
 
@@ -25,9 +25,9 @@ The facade is the answer of PR-0 to a target with no TLS, no per-device token an
 | TLS | 1.3 only. ECDSA P-256. Server certificate 365 days, CA 10 years. The server key is kept at renewal, so the pin stays |
 | Pin | base64 SHA-256 of the server public key (SPKI) |
 | Rate limits | per device 20 requests per second with a burst of 60. Writes 5 per second with a burst of 20. Failed authentication 10 per minute per address, enrolment 5 per minute per address and 30 per minute in total. Answer 429 with `Retry-After` |
-| Idempotency | a write needs `Idempotency-Key` (1 to 128 visible ASCII characters). Kept 24 hours, at most 2000 keys |
+| Idempotency | a write needs `Idempotency-Key` (1 to 128 visible ASCII characters). One file per key in the journal (`<data>/idempotency`), kept 24 hours, at most 10 000 keys. A full journal refuses a new key (503 `idempotency_journal_full`) and never forgets a live one. See "Idempotency journal" |
 | Limits | request body 1 MiB, upstream timeout 30 s |
-| Audit | one JSON line per event in `audit.log`, time in UTC (`Z`). It holds device ids, roles, routes and statuses. It holds no token, code or Hermes key. A failed authentication is written until its address reaches the limit. The 429 answers given before authentication are not written, so a flood of bad tokens cannot fill the disk |
+| Audit | one JSON line per event in `audit.log`, time in UTC (`Z`). It holds device ids, roles, routes and statuses. It holds no token, code or Hermes key. A failed authentication is written until its address reaches the limit. The 429 answers given before authentication are not written, so a flood of bad tokens cannot fill the disk. The CLI commands `revoke` and `enrol-code` append their own line (`source: "cli"`) to the same file |
 
 ## How it works
 
@@ -43,7 +43,7 @@ The facade is the answer of PR-0 to a target with no TLS, no per-device token an
 4. The facade checks the role and the limits, matches the route against the allowlist, replaces the authorization with the Hermes key of the profile, and forwards. The answer keeps only `content-type`, `cache-control`, `retry-after`, `idempotency-replayed` and the `content-length` of a buffered answer.
 5. An upstream 401 or redirect becomes 502 (`upstream_rejected`, `upstream_redirect`): a device never reads a Hermes credential error or a Hermes address.
 
-The device and the Hermes key: `FACADE_UPSTREAM_KEY` is the key of the unprefixed routes. `FACADE_UPSTREAM_KEYS` (JSON) gives one key per `/p/<profile>/` prefix. A profile with no key fails closed (502 `upstream_key_missing`).
+The device and the Hermes key: `FACADE_UPSTREAM_KEY` is the key of the unprefixed routes **and the fallback of every profile that `FACADE_UPSTREAM_KEYS` does not list**. `FACADE_UPSTREAM_KEYS` (JSON) gives one key per `/p/<profile>/` prefix. The facade fails closed (502 `upstream_key_missing`) only when no key applies: no `FACADE_UPSTREAM_KEY` and no entry for the profile. To give each profile its own key and nothing else, set `FACADE_UPSTREAM_KEYS` alone. The key goes to Hermes on the loopback and never to a device.
 
 ## Routes behind the facade (step 2 of the spike)
 
@@ -66,6 +66,29 @@ Not forwarded on purpose: `POST /api/sessions/{id}/chat/stream` (a streamed answ
 
 The `hermes serve` 0.22.5 target of PR-0 serves the dashboard routes, not `/v1/*`. The facade is the same there, but its write routes are **not proven**: the allowlist would need the routes of that target, and a test instance of 0.22.5 was not available.
 
+## Idempotency journal
+
+The facade keeps one record per write key in `<data>/idempotency/<sha256 of device, method, path, key>.json` (mode 0600, the key itself is not stored). The record is written **before** the request leaves for Hermes, so a restart or a lost answer leaves a trace.
+
+| State of the record | Meaning | Answer to the same key and body |
+| --- | --- | --- |
+| `pending` | written, no answer yet. After a restart, nothing finishes it | 502 `write_outcome_unknown`, Hermes is not called |
+| `done` | Hermes answered. Status, `content-type`, `cache-control`, `retry-after` and the body (up to 16 KiB) are kept | the kept answer with `Idempotency-Replayed: true`. A body over 16 KiB: 409 `idempotency_replay_unavailable` |
+| `unknown` | the connection broke, timed out or was reset after the request was sent, or the answer could not be read completely | 502 `write_outcome_unknown`, Hermes is not called |
+| no file, or the record expired (24 hours) | new write | sent to Hermes |
+
+A file that cannot be read or parsed counts as `unknown`. The same key with another body gives 409 `idempotency_key_conflict` in every state.
+
+What frees the key (the next send reaches Hermes):
+
+- Hermes certainly did not run the write: the connection was refused, Hermes answered 401 (`upstream_rejected`) or a redirect (`upstream_redirect`).
+- Hermes refused for a later retry: 408 or 429. The answer reaches the device with its `Retry-After`, and the record is not kept.
+- Hermes answered 5xx. This is a decision: a 5xx is an answer, not a lost one. A retry reaches Hermes again. Hermes deduplicates `/v1/runs` with its own key. For approval, stop, model and chat a retry after a 5xx can run the write twice if Hermes failed after it started.
+
+Every other failure keeps the key in `unknown`. A device that gets `write_outcome_unknown` does not retry with the same key: it reads the state on Hermes (`GET /v1/runs/{id}`, `GET /api/sessions/{id}/messages`), then sends a new write with a new key if the first did not happen. The doubt ends with the 24 hours of the key.
+
+Two requests with the same key at the same time share one Hermes call.
+
 ## Failure modes and the test that covers each
 
 | Failure mode | Result | Test |
@@ -79,17 +102,25 @@ The `hermes serve` 0.22.5 target of PR-0 serves the dashboard routes, not `/v1/*
 | Device credentials, cookies or forwarding headers sent to Hermes | not forwarded. Hermes receives its own key | 4 |
 | Hermes `server`, `set-cookie`, `www-authenticate`, `location` in an answer | removed or replaced by 502 | 4, 4b |
 | Hermes down, redirect, or rejecting its own key | 502 `upstream_unavailable`, `upstream_redirect`, `upstream_rejected` | 4b |
-| Profile with no Hermes key | 502 `upstream_key_missing` | 4c |
+| No Hermes key for a profile and no global key | 502 `upstream_key_missing` | 4c |
+| Profile not listed in `FACADE_UPSTREAM_KEYS` while `FACADE_UPSTREAM_KEY` is set | the global key is used | 4c2 |
 | Hermes port reachable on a non-loopback address of the host | `check-local` exits 1 | 4d |
 | Code unknown, used, expired (to the millisecond), concurrent use | 403 `invalid_code`, one winner | 5 |
 | Code or token written in clear on disk | not stored in clear | 5b |
 | Code guessing | 429 | 5c |
 | Write with no key, with a bad key, same key with another body, concurrent same key, other device, after 24 hours | 400, 400, 409, one Hermes call, independent, new call | 6 |
 | Hermes 5xx on a write, body over the limit | not remembered, 413 | 6b |
+| Response lost after the request was sent (connection dropped) | 502 `write_outcome_unknown`. The same key never reaches Hermes again. Another body: 409. A new key: sent. After 24 hours: sent | 6c |
+| Hermes refused the connection or answered 401 | 502 `upstream_unavailable` or `upstream_rejected`. The same key is sent again | 6d |
+| Hermes answered 408 or 429 | the answer and its `Retry-After` reach the device. The key is not kept, the retry reaches Hermes | 6e |
+| Restart of the facade, with a finished write and with a write cut in flight | the finished write replays with `Idempotency-Replayed: true`, the cut write gives `write_outcome_unknown`. One Hermes call each | 6f |
+| Journal record damaged, empty, `null` or left `pending` | 502 `write_outcome_unknown`, Hermes is not called | 6g |
+| Journal full | 503 `idempotency_journal_full`, Hermes is not called. A live key still replays. Expired keys leave | 6h |
 | Route outside the allowlist, traversal, wrong method, bad query | 404, 404, 405, 400 | 7 |
 | Normal role on a management route | 403 | 8 |
 | Burst over the limit, failed authentication flood | 429. A valid token is never locked out by the failures of its address. The flood adds no audit line beyond the limit | 9 |
 | Audit time zone, content and secrets | UTC, complete, no secret | 10 |
+| `revoke` and `enrol-code` run from the CLI | a line with `source: "cli"`, in UTC, no secret | 10b |
 | Bad or missing configuration | the facade does not start | 11 |
 
 ## Not done, and risks
@@ -97,7 +128,8 @@ The `hermes serve` 0.22.5 target of PR-0 serves the dashboard routes, not `/v1/*
 1. The pinning rule exists as `pinnedTlsOptions` for Node and as the `curl` options below. The **app (Swift) does not use the facade yet**: pinning in the app is the next PR. Until then no client of the product speaks to the facade.
 2. A device has to trust the CA before it enrols, because TLS is validated before the code is sent. The CA certificate and the pin travel with the code, outside the facade. A device that gets a wrong CA from that channel is exposed.
 3. The CA key stays in the data folder of the host. Move it offline after the server certificate is issued.
-4. Idempotency keys, rate limit counters and the revocation sweep live in the process memory. After a restart the facade forgets its keys. Hermes keeps its own key for `/v1/runs`. A repeated approval or stop reaches Hermes again.
+4. The idempotency keys survive a restart (journal on disk). The rate limit counters and the revocation sweep live in the process memory. The journal is written without `fsync`: it survives the end of the process, not a power cut. It holds the answers of Hermes up to 16 KiB in clear (mode 0600), for 24 hours, in the data folder: protect that folder like the audit.
+   A 5xx answer of Hermes frees the key (see "Idempotency journal"). For approval, stop, model and chat, a retry after a 5xx can run the write twice.
 5. A token has no expiry and the audit file has no rotation.
 6. The facade reads and writes small files synchronously. It is sized for a few devices.
 7. The dashboard of the real target was not inspected: only the test instance was reachable. On the real host, run `check-local <hermes-port>` and `check-local <dashboard-port>` before opening the facade port.
