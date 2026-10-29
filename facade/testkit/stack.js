@@ -18,7 +18,7 @@ function pki() {
   return sharedPki;
 }
 
-// Fake Hermes + facade on the loopback, real TLS, real enrollment calls.
+// Fake Hermes + facade on the loopback, real TLS, real enrollment calls. Ports are ephemeral.
 async function startStack({ now, ratePerMinute = 1000, delayMs = 0, checkExposure = false } = {}) {
   const material = pki();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "facade-state-"));
@@ -27,6 +27,7 @@ async function startStack({ now, ratePerMinute = 1000, delayMs = 0, checkExposur
     stateDir: dir,
     stateFile: path.join(dir, "state.json"),
     auditFile: path.join(dir, "audit.jsonl"),
+    idempotencyFile: path.join(dir, "idempotency.jsonl"),
     listenHost: "127.0.0.1",
     listenPort: 0,
     upstreamHost: "127.0.0.1",
@@ -35,31 +36,31 @@ async function startStack({ now, ratePerMinute = 1000, delayMs = 0, checkExposur
     ratePerMinute,
     checkExposure,
   };
-  const facade = createFacade(config, { now, tls: { key: material.serverKey, cert: material.serverCert } });
-  const port = await facade.start();
   const trust = { ca: material.caCert, pin: material.pin };
+  const stack = { hermes, config, trust, dir };
 
-  const call = (options) => request({ port, ...trust, ...options });
-  const stack = {
-    port,
-    hermes,
-    facade,
-    config,
-    trust,
-    dir,
-    call,
-    ws: (options) => connectWs({ port, ...trust, ...options }),
-    async enroll(role = "normal", name = "test device") {
-      const { code } = facade.store.createEnrollment({ role });
-      const res = await call({ method: "POST", path: "/facade/enroll", body: { code, name } });
-      if (res.status !== 201) throw new Error(`enroll failed ${res.status}`);
-      return res.json;
-    },
-    async close() {
-      await facade.close();
-      await hermes.close();
-      fs.rmSync(dir, { recursive: true, force: true });
-    },
+  async function boot() {
+    stack.facade = createFacade(config, { now, tls: { key: material.serverKey, cert: material.serverCert } });
+    stack.port = await stack.facade.start();
+  }
+  await boot();
+
+  stack.call = (options) => request({ port: stack.port, ...trust, ...options });
+  stack.ws = (options) => connectWs({ port: stack.port, ...trust, ...options });
+  stack.enroll = async (role = "normal", name = "test device") => {
+    const { code } = stack.facade.store.createEnrollment({ role });
+    const res = await stack.call({ method: "POST", path: "/facade/enroll", body: { code, name } });
+    if (res.status !== 201) throw new Error(`enroll failed ${res.status}`);
+    return res.json;
+  };
+  stack.restart = async () => {
+    await stack.facade.close();
+    await boot();
+  };
+  stack.close = async () => {
+    await stack.facade.close();
+    await hermes.close();
+    fs.rmSync(dir, { recursive: true, force: true });
   };
   return stack;
 }

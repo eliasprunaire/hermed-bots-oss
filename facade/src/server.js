@@ -14,6 +14,7 @@ const { ROLES, Store } = require("./store");
 const { acceptUpgrade } = require("./websocket");
 
 const MINUTE = 60_000;
+const HTTP_METHODS = new Set(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 const MAX_SOCKETS_PER_DEVICE = 8;
 const NAME_PATTERN = /^[\p{L}\p{N} ._'()-]{1,64}$/u;
 
@@ -52,9 +53,9 @@ function readJson(req) {
 function createFacade(config, { now = Date.now, tls } = {}) {
   validate(config);
   const material = tls || { key: fs.readFileSync(config.tlsKey), cert: fs.readFileSync(config.tlsCert) };
-  const audit = new Audit({ file: config.auditFile || null, now });
+  const audit = new Audit({ file: config.auditFile || null, now, secrets: [config.upstreamToken] });
   const store = new Store({ file: config.stateFile, now });
-  const idempotency = new Idempotency({ now });
+  const idempotency = new Idempotency({ now, file: config.idempotencyFile || null });
   const deviceLimiter = new RateLimiter({ limit: config.ratePerMinute, windowMs: MINUTE, now });
   const enrollLimiter = new RateLimiter({ limit: 10, windowMs: 5 * MINUTE, now });
   const failureLimiter = new RateLimiter({ limit: 30, windowMs: MINUTE, now });
@@ -109,7 +110,7 @@ function createFacade(config, { now = Date.now, tls } = {}) {
       json(res, 401, { error: "enrollment_invalid" });
       return 401;
     }
-    audit.record("enroll", { device: redeemed.device.id, role: redeemed.device.role, name });
+    audit.record("enroll", { device: redeemed.device.id, role: redeemed.device.role });
     json(res, 201, { device_id: redeemed.device.id, role: redeemed.device.role, token: redeemed.token });
     return 201;
   }
@@ -166,8 +167,20 @@ function createFacade(config, { now = Date.now, tls } = {}) {
     return 404;
   }
 
+  function parseTarget(target) {
+    try {
+      return new URL(target, "https://localhost");
+    } catch {
+      return null;
+    }
+  }
+
   async function handle(req, res) {
-    const url = new URL(req.url, "https://facade.invalid");
+    const url = parseTarget(req.url);
+    if (!url) {
+      json(res, 400, { error: "bad_request" }, { connection: "close" });
+      return;
+    }
     if (req.method === "POST" && url.pathname === "/facade/enroll") {
       await enroll(req, res);
       return;
@@ -214,7 +227,8 @@ function createFacade(config, { now = Date.now, tls } = {}) {
       json(res, 404, { error: "not_found" });
       status = 404;
     }
-    audit.record("request", { device: device.id, method: req.method, path: url.pathname, status });
+    const listed = status !== 404 && !(status === 403 && url.pathname.startsWith("/api/"));
+    audit.record("request", { device: device.id, method: HTTP_METHODS.has(req.method) ? req.method : "other", path: listed ? url.pathname : "[unlisted]", status });
   }
 
   server.on("request", (req, res) => {
@@ -230,7 +244,19 @@ function createFacade(config, { now = Date.now, tls } = {}) {
 
   server.on("upgrade", (req, socket, head) => {
     socket.on("error", () => {});
-    const url = new URL(req.url, "https://facade.invalid");
+    try {
+      upgrade(req, socket, head);
+    } catch {
+      refuse(socket, 400, "Bad Request");
+    }
+  });
+
+  function upgrade(req, socket, head) {
+    const url = parseTarget(req.url);
+    if (!url) {
+      refuse(socket, 400, "Bad Request");
+      return;
+    }
     if (url.pathname !== "/api/ws") {
       refuse(socket, 404, "Not Found");
       return;
@@ -260,7 +286,7 @@ function createFacade(config, { now = Date.now, tls } = {}) {
       if (open.size === 0) sockets.delete(device.id);
       audit.record("ws_close", { device: device.id });
     });
-  });
+  }
 
   server.on("tlsClientError", () => {});
   server.on("clientError", (_err, socket) => socket.destroy());
@@ -298,6 +324,7 @@ function createFacade(config, { now = Date.now, tls } = {}) {
       for (const set of sockets.values()) for (const bridge of set) bridge.terminate("shutdown");
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
+      idempotency.close();
     },
   };
 }

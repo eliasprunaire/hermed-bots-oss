@@ -1,8 +1,9 @@
 "use strict";
 
+const crypto = require("node:crypto");
 const net = require("node:net");
 const { Idempotency, fingerprint } = require("./idempotency");
-const { rpcClass } = require("./policy");
+const { RPC_ADMIN_WRITES, RPC_WRITES, rpcClass } = require("./policy");
 
 const DRAIN_MS = 60_000;
 
@@ -15,6 +16,7 @@ const CODE = {
   keyReused: 4009,
   unknownOutcome: 4010,
   originalFailed: 4011,
+  journal: 4012,
   rateLimited: 4029,
   upstream: 4502,
 };
@@ -76,8 +78,12 @@ class Bridge {
     if (parsed && parsed.id !== undefined && this.inflight.has(parsed.id) && ("result" in parsed || "error" in parsed)) {
       const key = this.inflight.get(parsed.id);
       this.inflight.delete(parsed.id);
-      if ("error" in parsed) this.idempotency.release(this.device.id, key);
-      else this.idempotency.complete(this.device.id, key, parsed.result);
+      try {
+        if ("error" in parsed) this.idempotency.release(this.device.id, key);
+        else this.idempotency.complete(this.device.id, key, parsed.result);
+      } catch {
+        this.audit.record("journal_error", { device: this.device.id });
+      }
       if (this.deviceGone && this.inflight.size === 0) this.upstream.close();
     }
     this.ws.send(data);
@@ -87,8 +93,7 @@ class Bridge {
     if (this.upstreamDone) return;
     this.upstreamDone = true;
     this.ready = false;
-    for (const key of this.inflight.values()) this.idempotency.markUnknown(this.device.id, key);
-    this.inflight.clear();
+    this.forgetInflight();
     this.ws.close(1012, "upstream_closed");
   }
 
@@ -101,9 +106,19 @@ class Bridge {
     setTimeout(() => this.upstream.close(), DRAIN_MS).unref();
   }
 
-  terminate(reason) {
-    for (const key of this.inflight.values()) this.idempotency.markUnknown(this.device.id, key);
+  forgetInflight() {
+    for (const key of this.inflight.values()) {
+      try {
+        this.idempotency.markUnknown(this.device.id, key);
+      } catch {
+        this.audit.record("journal_error", { device: this.device.id });
+      }
+    }
     this.inflight.clear();
+  }
+
+  terminate(reason) {
+    this.forgetInflight();
     this.ws.close(1008, reason);
     this.upstream.close();
   }
@@ -133,7 +148,7 @@ class Bridge {
     }
     const kind = rpcClass(this.device.role, message.method);
     if (!kind) {
-      this.audit.record("rpc_denied", { device: this.device.id, method: message.method.slice(0, 64) });
+      this.audit.record("rpc_denied", { device: this.device.id, method_digest: crypto.createHash("sha256").update(message.method).digest("hex").slice(0, 12) });
       this.ws.send(rpcError(id, CODE.denied, "method not allowed"));
       return;
     }
@@ -163,9 +178,17 @@ class Bridge {
       this.ws.send(rpcError(id, CODE.badParams, "this id is already in flight"));
       return;
     }
-    const outcome = this.idempotency.begin(this.device.id, key, fingerprint(method, params));
+    let outcome;
+    try {
+      outcome = this.idempotency.begin(this.device.id, key, fingerprint(method, params));
+    } catch {
+      this.audit.record("journal_error", { device: this.device.id });
+      this.ws.send(rpcError(id, CODE.journal, "the idempotency journal is unavailable, nothing was sent to Hermes"));
+      return;
+    }
     const resolved = outcome.state === "pending" ? await outcome.wait : outcome;
-    const audit = (result) => this.audit.record("write", { device: this.device.id, method, result });
+    const known = [...RPC_WRITES, ...RPC_ADMIN_WRITES].find((name) => name === method) || "[unlisted]";
+    const audit = (result) => this.audit.record("write", { device: this.device.id, method: known, result });
     switch (resolved.state) {
       case "conflict":
         audit("key_reused");

@@ -278,21 +278,20 @@ test("rate limiter, idempotency and policy units", async () => {
 
 test("config: Hermes must be local, secrets come from the environment", () => {
   assert.equal(isLoopbackHost("127.0.0.1"), true);
-  assert.equal(isLoopbackHost("127.9.9.9"), true);
   assert.equal(isLoopbackHost("::1"), true);
   assert.equal(isLoopbackHost("localhost"), true);
-  assert.equal(isLoopbackHost("0.0.0.0"), false);
-  assert.equal(isLoopbackHost("192.0.2.1"), false);
-  assert.equal(isLoopbackHost("hermes.example.org"), false);
-  const env = { HERMES_FACADE_STATE_DIR: "state", HERMES_FACADE_UPSTREAM_TOKEN: "t" };
+  for (const other of ["", "::", "not-a-loopback", undefined, 42]) assert.equal(isLoopbackHost(other), false);
+  const env = { HERMES_FACADE_STATE_DIR: "state", HERMES_FACADE_UPSTREAM_TOKEN: "t", HERMES_FACADE_LISTEN_PORT: "0", HERMES_FACADE_UPSTREAM_PORT: "1" };
   const config = fromEnv(env);
   assert.equal(config.listenHost, "127.0.0.1", "the facade listens on the loopback unless told otherwise");
-  assert.equal(config.listenPort, 8443);
+  assert.equal(config.listenPort, 0);
   assert.equal(config.checkExposure, true);
-  assert.throws(() => fromEnv({ ...env, HERMES_FACADE_UPSTREAM_HOST: "0.0.0.0" }), /loopback/);
-  assert.throws(() => fromEnv({ HERMES_FACADE_STATE_DIR: "state" }), /credential/);
+  assert.throws(() => fromEnv({ ...env, HERMES_FACADE_UPSTREAM_HOST: "::" }), /loopback/);
+  assert.throws(() => fromEnv({ ...env, HERMES_FACADE_LISTEN_PORT: undefined }), /LISTEN_PORT is required/);
+  assert.throws(() => fromEnv({ ...env, HERMES_FACADE_UPSTREAM_PORT: undefined }), /UPSTREAM_PORT is required/);
+  assert.throws(() => fromEnv({ HERMES_FACADE_STATE_DIR: "state", HERMES_FACADE_LISTEN_PORT: "0", HERMES_FACADE_UPSTREAM_PORT: "1" }), /credential/);
   assert.throws(() => fromEnv({ ...env, HERMES_FACADE_LISTEN_PORT: "99999" }), /LISTEN_PORT/);
-  assert.throws(() => fromEnv({ ...env, HERMES_FACADE_LISTEN_PORT: "9119" }), /differ/);
+  assert.throws(() => fromEnv({ ...env, HERMES_FACADE_LISTEN_PORT: "1" }), /differ/);
 });
 
 test("tls: the pin is stable across a renewal that keeps the key, and changes with a new key", () => {

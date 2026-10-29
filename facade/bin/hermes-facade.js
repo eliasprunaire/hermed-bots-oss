@@ -2,7 +2,7 @@
 "use strict";
 
 const path = require("node:path");
-const { fromEnv } = require("../src/config");
+const { fromEnv, upstreamEndpoint } = require("../src/config");
 const { checkExposure } = require("../src/exposure");
 const { createFacade } = require("../src/server");
 const { Store } = require("../src/store");
@@ -18,8 +18,8 @@ const USAGE = `Usage: hermes-facade <command>
   check-exposure              fail when Hermes is reachable beyond the loopback
 
 Settings come from the environment: HERMES_FACADE_STATE_DIR (required), HERMES_FACADE_TLS_DIR,
-HERMES_FACADE_LISTEN_HOST, HERMES_FACADE_LISTEN_PORT, HERMES_FACADE_UPSTREAM_HOST,
-HERMES_FACADE_UPSTREAM_PORT, HERMES_FACADE_UPSTREAM_TOKEN or HERMES_FACADE_UPSTREAM_TOKEN_FILE,
+HERMES_FACADE_LISTEN_HOST, HERMES_FACADE_LISTEN_PORT (required), HERMES_FACADE_UPSTREAM_HOST,
+HERMES_FACADE_UPSTREAM_PORT (required), HERMES_FACADE_UPSTREAM_TOKEN or HERMES_FACADE_UPSTREAM_TOKEN_FILE,
 HERMES_FACADE_RATE_LIMIT_PER_MINUTE.
 `;
 
@@ -81,10 +81,7 @@ async function main(argv, env = process.env, out = process.stdout) {
       return done ? 0 : 1;
     }
     case "check-exposure": {
-      const result = await checkExposure({
-        host: env.HERMES_FACADE_UPSTREAM_HOST || "127.0.0.1",
-        port: Number(env.HERMES_FACADE_UPSTREAM_PORT || 9119),
-      });
+      const result = await checkExposure(upstreamEndpoint(env));
       print(result.ok ? "PASS the Hermes port is reachable on the loopback only" : `FAIL loopback host ${result.loopbackHost}, reachable on ${result.exposedOn} non-loopback interface(s)`);
       return result.ok ? 0 : 1;
     }

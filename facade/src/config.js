@@ -19,7 +19,10 @@ function isLoopbackHost(host) {
 }
 
 function integer(value, fallback, { min, max, name }) {
-  if (value === undefined || value === "") return fallback;
+  if (value === undefined || value === "") {
+    if (fallback === undefined) throw new Error(`${name} is required`);
+    return fallback;
+  }
   const n = Number(value);
   if (!Number.isInteger(n) || n < min || n > max) {
     throw new Error(`${name} must be an integer between ${min} and ${max}`);
@@ -48,6 +51,13 @@ function validate(config) {
   return config;
 }
 
+function upstreamEndpoint(env = process.env) {
+  return {
+    host: env.HERMES_FACADE_UPSTREAM_HOST || "127.0.0.1",
+    port: integer(env.HERMES_FACADE_UPSTREAM_PORT, undefined, { min: 1, max: 65535, name: "HERMES_FACADE_UPSTREAM_PORT" }),
+  };
+}
+
 function fromEnv(env = process.env) {
   const stateDir = env.HERMES_FACADE_STATE_DIR ? path.resolve(env.HERMES_FACADE_STATE_DIR) : "";
   const tlsDir = env.HERMES_FACADE_TLS_DIR ? path.resolve(env.HERMES_FACADE_TLS_DIR) : stateDir && path.join(stateDir, "tls");
@@ -55,12 +65,13 @@ function fromEnv(env = process.env) {
     stateDir,
     stateFile: stateDir && path.join(stateDir, "state.json"),
     auditFile: stateDir && path.join(stateDir, "audit.jsonl"),
+    idempotencyFile: stateDir && path.join(stateDir, "idempotency.jsonl"),
     tlsKey: tlsDir && path.join(tlsDir, "server.key"),
     tlsCert: tlsDir && path.join(tlsDir, "server.crt"),
     listenHost: env.HERMES_FACADE_LISTEN_HOST || "127.0.0.1",
-    listenPort: integer(env.HERMES_FACADE_LISTEN_PORT, 8443, { min: 0, max: 65535, name: "HERMES_FACADE_LISTEN_PORT" }),
+    listenPort: integer(env.HERMES_FACADE_LISTEN_PORT, undefined, { min: 0, max: 65535, name: "HERMES_FACADE_LISTEN_PORT" }),
     upstreamHost: env.HERMES_FACADE_UPSTREAM_HOST || "127.0.0.1",
-    upstreamPort: integer(env.HERMES_FACADE_UPSTREAM_PORT, 9119, { min: 1, max: 65535, name: "HERMES_FACADE_UPSTREAM_PORT" }),
+    upstreamPort: integer(env.HERMES_FACADE_UPSTREAM_PORT, undefined, { min: 1, max: 65535, name: "HERMES_FACADE_UPSTREAM_PORT" }),
     upstreamToken: upstreamToken(env),
     ratePerMinute: integer(env.HERMES_FACADE_RATE_LIMIT_PER_MINUTE, 120, { min: 1, max: 100000, name: "HERMES_FACADE_RATE_LIMIT_PER_MINUTE" }),
     checkExposure: true,
@@ -74,5 +85,6 @@ module.exports = {
   MAX_WS_MESSAGE_BYTES,
   fromEnv,
   isLoopbackHost,
+  upstreamEndpoint,
   validate,
 };

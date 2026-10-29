@@ -26,7 +26,7 @@ async function startFakeHermes({ host = "127.0.0.1", delayMs = 0 } = {}) {
       res.writeHead(status, { "content-type": "application/json", server: "uvicorn", ...headers });
       res.end(JSON.stringify(body));
     };
-    const url = new URL(req.url, "http://upstream.invalid");
+    const url = new URL(req.url, "http://localhost");
     if (url.pathname === "/api/sessions") {
       send(200, { sessions: [{ id: "s1", title: "first" }], total: 1 }, {
         "set-cookie": "hermes_session=leak; Path=/",
@@ -43,8 +43,8 @@ async function startFakeHermes({ host = "127.0.0.1", delayMs = 0 } = {}) {
         gateway_running: true,
         active_sessions: 2,
         overall: "ok",
-        hermes_home: "/data/example-home",
-        config_path: "/data/example-home/config.yaml",
+        hermes_home: "home-value",
+        config_path: "config-value",
         install_id: "0123456789abcdef",
       });
     } else {
@@ -53,7 +53,7 @@ async function startFakeHermes({ host = "127.0.0.1", delayMs = 0 } = {}) {
   });
 
   server.on("upgrade", (req, socket) => {
-    const url = new URL(req.url, "http://upstream.invalid");
+    const url = new URL(req.url, "http://localhost");
     if (url.pathname !== "/api/ws" || url.searchParams.get("token") !== TOKEN) {
       socket.end("HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n");
       return;

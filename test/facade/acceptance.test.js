@@ -28,6 +28,15 @@ function clock(start = T0) {
 
 const WRITE = { session_id: "s1", text: "hello" };
 
+function outsideAddress() {
+  for (const entries of Object.values(os.networkInterfaces())) {
+    for (const entry of entries || []) {
+      if (!entry.internal && entry.family === "IPv4") return entry.address;
+    }
+  }
+  return null;
+}
+
 test("1. no access without a valid token", async (t) => {
   const now = clock();
   const stack = await startStack({ now });
@@ -96,7 +105,7 @@ test("3. TLS is validated by the pinned anchor", async (t) => {
   assert.ok(wrongCa, "a certificate chain the client does not anchor is refused");
   const noAnchor = await stack.call({ path: "/facade/whoami", ca: undefined }).then(() => null, (err) => err);
   assert.ok(noAnchor, "the system roots are not a trust anchor for the facade");
-  const wrongName = await stack.call({ path: "/facade/whoami", servername: "other.example" }).then(() => null, (err) => err);
+  const wrongName = await stack.call({ path: "/facade/whoami", servername: "wrong-name" }).then(() => null, (err) => err);
   assert.ok(wrongName, "a certificate for another name is refused");
 
   const tls12 = await new Promise((resolve) => {
@@ -143,28 +152,31 @@ test("4. a device never sees Hermes over HTTP", async (t) => {
 
   const status = await stack.call({ path: "/facade/status", token: device.token });
   assert.deepEqual(status.json, { hermes_version: "0.22.5", gateway_running: true, active_sessions: 2, overall: "ok" });
-  assert.ok(!status.body.includes("example-home") && !status.body.includes("install_id"), "install details stay behind");
+  assert.ok(!status.body.includes("home-value") && !status.body.includes("install_id"), "install details stay behind");
   const raw = await stack.call({ path: "/api/status", token: device.token });
   assert.equal(raw.status, 403, "the raw Hermes status route is not served");
 
-  assert.throws(() => createFacade({ ...stack.config, upstreamHost: "192.0.2.10" }, { tls: pki() && { key: pki().serverKey, cert: pki().serverCert } }), /loopback/);
-  assert.throws(() => createFacade({ ...stack.config, upstreamHost: "example.org" }, { tls: { key: pki().serverKey, cert: pki().serverCert } }), /loopback/);
+  const tls = { key: pki().serverKey, cert: pki().serverCert };
+  const foreign = outsideAddress();
+  for (const host of ["::", "", "not-a-loopback", ...(foreign ? [foreign] : [])]) {
+    assert.throws(() => createFacade({ ...stack.config, upstreamHost: host }, { tls }), /loopback/, `host ${host ? "(an address or name)" : "(empty)"}`);
+  }
   assert.throws(() => createFacade({ ...stack.config, upstreamPort: stack.port, listenPort: stack.port }, { tls: { key: pki().serverKey, cert: pki().serverCert } }), /differ/);
 });
 
 test("4b. the facade refuses to start when Hermes is reachable beyond the loopback", async (t) => {
-  const anyInterface = Object.values(os.networkInterfaces()).flat().some((e) => e && !e.internal && e.family === "IPv4");
+  const outside = outsideAddress();
+  if (!outside) return t.skip("no non-loopback interface on this machine");
   const open = http.createServer((_req, res) => res.end("x"));
-  await new Promise((resolve) => open.listen(0, anyInterface ? "0.0.0.0" : "127.0.0.1", resolve));
+  await new Promise((resolve) => open.listen(0, outside, resolve));
   t.after(() => open.close());
   const port = open.address().port;
   const exposure = await checkExposure({ host: "127.0.0.1", port });
-  if (!anyInterface) return t.skip("no non-loopback interface on this machine");
   assert.equal(exposure.ok, false);
   assert.ok(exposure.exposedOn >= 1);
   const stack = await startStack();
   t.after(() => stack.close());
-  const refused = createFacade({ ...stack.config, upstreamPort: port, checkExposure: true, stateFile: path.join(stack.dir, "other.json"), auditFile: null }, { tls: { key: pki().serverKey, cert: pki().serverCert } });
+  const refused = createFacade({ ...stack.config, upstreamPort: port, checkExposure: true, stateFile: path.join(stack.dir, "other.json"), auditFile: null, idempotencyFile: null }, { tls: { key: pki().serverKey, cert: pki().serverCert } });
   await assert.rejects(refused.start(), /refusing to start/);
   return undefined;
 });

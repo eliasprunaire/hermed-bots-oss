@@ -11,7 +11,7 @@ const TOKEN_PREFIX = "hbf_";
 const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const LOCK_STALE_MS = 10_000;
 const KEEP_EXPIRED_MS = 24 * 60 * 60 * 1000;
-const MAX_DEVICES = 200;
+const DEFAULT_MAX_DEVICES = 200;
 
 function sha256(text) {
   return crypto.createHash("sha256").update(text).digest("hex");
@@ -42,8 +42,9 @@ function emptyState() {
 // Device and enrollment state, persisted as one JSON file that holds hashes only.
 // A second process (the host CLI) may edit the file, so every read re-checks it.
 class Store extends EventEmitter {
-  constructor({ file, now = Date.now }) {
+  constructor({ file, now = Date.now, maxDevices = DEFAULT_MAX_DEVICES }) {
     super();
+    this.maxDevices = maxDevices;
     this.file = file;
     this.now = now;
     this.state = emptyState();
@@ -137,7 +138,7 @@ class Store extends EventEmitter {
       if (!entry) return { ok: false, reason: "unknown" };
       if (entry.usedAt) return { ok: false, reason: "reused" };
       if (at >= entry.expiresAt) return { ok: false, reason: "expired" };
-      if (Object.keys(state.devices).length >= MAX_DEVICES) return { ok: false, reason: "device_limit" };
+      if (Object.values(state.devices).filter((d) => !d.revokedAt).length >= this.maxDevices) return { ok: false, reason: "device_limit" };
       entry.usedAt = at;
       const token = newToken();
       const id = `dev_${crypto.randomBytes(8).toString("hex")}`;

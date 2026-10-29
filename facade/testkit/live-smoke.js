@@ -32,6 +32,7 @@ async function main() {
     stateDir: dir,
     stateFile: path.join(dir, "state.json"),
     auditFile: path.join(dir, "audit.jsonl"),
+    idempotencyFile: path.join(dir, "idempotency.jsonl"),
     listenHost: "127.0.0.1",
     listenPort: 0,
     upstreamHost: "127.0.0.1",
