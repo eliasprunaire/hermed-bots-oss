@@ -2,6 +2,8 @@
 
 App macOS native pour piloter des bots Hermes. PRD et spec : `docs/prd/`. Règles agents : `AGENTS.md`.
 
+La façade d'authentification et de TLS de l'API Hermes est décrite dans `docs/facade.md`.
+
 La passe pull request exécute les tests fonctionnels. Les sondes de performance se lancent à part, voir `docs/perf-probes.md`.
 
 ## Installer
