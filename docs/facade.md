@@ -32,7 +32,7 @@ All routes are under TLS.
 | `DELETE /facade/devices/{id}` | admin | Revokes one device. |
 | `GET /facade/audit?limit=` | admin | Recent audit events. |
 | `GET /api/sessions...` | any device | The read routes named in `facade/src/policy.js`. Anything else under `/api/` is `403`. |
-| `GET /api/ws` (WebSocket) | any device | JSON-RPC bridge to the Hermes gateway, checked message by message. A message is at most 1 MiB and at most 64 fragments, empty ones included. A device that goes over either limit is closed with `1009`. |
+| `GET /api/ws` (WebSocket) | any device | JSON-RPC bridge to the Hermes gateway, checked message by message. A message is at most 1 MiB and at most 64 fragments, empty ones included. A device that goes over either limit is closed with `1009`. Each continuation frame, an empty one included, also costs one call of the device rate budget, and a device that spends it is closed with `1008`. |
 
 ### Socket methods
 

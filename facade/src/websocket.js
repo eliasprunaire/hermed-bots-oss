@@ -118,6 +118,7 @@ class WebSocketPeer extends EventEmitter {
     this.fragmentBytes += payload.length;
     // empty fragments add no bytes, so only their count bounds the memory and the work of one message
     if (this.fragmentBytes > this.maxMessageBytes || this.fragments.length >= this.maxFragments) return this.fail(1009);
+    if (opcode === OP.CONT) this.emit("fragment");
     this.fragments.push(payload);
     if (!fin) return undefined;
     const message = Buffer.concat(this.fragments);

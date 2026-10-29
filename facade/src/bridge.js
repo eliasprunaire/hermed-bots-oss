@@ -55,6 +55,7 @@ class Bridge {
     this.upstream.addEventListener("close", () => this.onUpstreamClose());
     this.upstream.addEventListener("error", () => this.onUpstreamClose());
     ws.on("message", (text) => this.onDeviceMessage(text));
+    ws.on("fragment", () => this.onFragment());
     ws.on("close", () => this.onDeviceClose());
   }
 
@@ -166,7 +167,19 @@ class Bridge {
     this.upstream.close();
   }
 
+  // A continuation frame is work too: it costs one call of the device budget, so a message cut in
+  // many pieces, empty ones included, cannot be sent faster than the limit allows.
+  onFragment() {
+    if (this.deviceGone || this.ws.closing) return;
+    const taken = this.limiter.take(`device:${this.device.id}`);
+    if (taken.ok) return;
+    this.audit.record("rate_limited", { device: this.device.id, surface: "ws_fragment" });
+    this.forgetInflight();
+    this.ws.close(1008, "rate_limited");
+  }
+
   async onDeviceMessage(text) {
+    if (this.ws.closing) return;
     let message;
     try {
       message = JSON.parse(text);

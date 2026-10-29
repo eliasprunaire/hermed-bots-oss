@@ -140,3 +140,46 @@ test("websocket: a device that never ends a message is closed by the facade", as
   socket.peer.write(Buffer.concat([first, ...Array.from({ length: 1000 }, () => more)]));
   assert.equal(await socket.closed(), 1009);
 });
+
+test("journal compaction at the real threshold: the 5000th record is kept and a restart runs the write once", (t) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "facade-compact-5000-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "j.jsonl");
+  let idem = new Idempotency({ file });
+  for (let i = 1; i <= 4999; i++) idem.begin("d", `filler-${String(i).padStart(6, "0")}`, PRINT);
+  const last = "the-5000th-key";
+  assert.equal(idem.begin("d", last, PRINT).state, "new", "the write behind the 5000th record goes to Hermes once");
+  idem.close();
+  assert.match(fs.readFileSync(file, "utf8"), /the-5000th-key/, "the compaction kept the 5000th begin");
+
+  idem = new Idempotency({ file });
+  assert.equal(idem.begin("d", last, PRINT).state, "unknown", "after a restart the same key does not run again");
+  assert.equal(idem.begin("d", "filler-000001", PRINT).state, "unknown");
+  idem.close();
+});
+
+test("websocket: continuation frames, empty ones included, spend the device rate budget and the socket closes", async (t) => {
+  const stack = await startStack({ ratePerMinute: 10 });
+  t.after(() => stack.close());
+  const device = await stack.enroll("normal");
+  const socket = await stack.ws({ token: device.token });
+  const frames = [raw(1, "", { fin: false }), ...Array.from({ length: 30 }, () => raw(0, "", { fin: false }))];
+  socket.peer.write(Buffer.concat(frames));
+  const code = await Promise.race([socket.closed(), new Promise((resolve) => setTimeout(() => resolve("still open"), 3000))]);
+  assert.equal(code, 1008, "well under the 64 fragment cap, the rate budget closed the socket");
+  assert.deepEqual(stack.hermes.calls, {}, "nothing reached Hermes");
+  const audit = stack.facade.audit.recent(200);
+  assert.ok(audit.some((e) => e.event === "rate_limited" && e.surface === "ws_fragment"));
+});
+
+test("websocket: a message in a few fragments still works inside the budget", async (t) => {
+  const stack = await startStack({ ratePerMinute: 10 });
+  t.after(() => stack.close());
+  const device = await stack.enroll("normal");
+  const socket = await stack.ws({ token: device.token });
+  const text = JSON.stringify({ jsonrpc: "2.0", id: "f1", method: "ping", params: {} });
+  const cut = Math.floor(text.length / 2);
+  socket.peer.write(Buffer.concat([raw(1, text.slice(0, cut), { fin: false }), raw(0, text.slice(cut))]));
+  const reply = await socket.wait((m) => m.id === "f1");
+  assert.equal(reply.result.pong, true);
+});
