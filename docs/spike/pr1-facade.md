@@ -158,11 +158,11 @@ Lane names: `accept-N` is the acceptance test N of the issue. `temps-2` is the i
 
 ```
 init-tls rc=0 ca_sha256=<hash> server_pin=<pin>
-enrol-code rc=0 code=**** role=normal expires_at=2026-10-29T14:29:50.240Z
+enrol-code rc=0 code=**** role=normal expires_at=2026-10-29T15:12:37.661Z
 serve: facade listening on 127.0.0.1:<facade-port>, upstream http://127.0.0.1:<test-port>
 PASS accept-1 no access without a valid token: statuses 401,401,401,401,401
 PASS accept-5 enrolment code single use: first 201 role=admin, reuse 403 invalid_code
-PASS roles admin creates a code, normal device enrols: code 201 enrol 201 role normal code_expires_at 2026-10-29T14:29:50.485Z
+PASS roles admin creates a code, normal device enrols: code 201 enrol 201 role normal code_expires_at 2026-10-29T15:12:37.789Z
 PASS roles normal device refused on management routes: admin 200 (4 devices), normal 403
 PASS accept-3 node client, pinned CA and SPKI pin: GET /health 200
 PASS accept-3 wrong pin, other CA, system roots, TLS 1.2 refused: wrong pin refused (server certificate pin mismatch); other CA refused (SELF_SIGNED_CERT_IN_CHAIN); system roots refused (SELF_SIGNED_CERT_IN_CHAIN); TLS 1.2 refused (EPROTO)
@@ -173,14 +173,14 @@ PASS temps-2 reads through the facade (default profile): /health 200, /v1/capabi
   default approval run tail: message.delta > reasoning.available > run.completed
   default stop: terminal run.cancelled; run status=cancelled; "sleep 300" left in container: false
   default POST /v1/runs (no key) -> 400 idempotency_key_required
-  default POST /v1/runs (key) -> 202 run_id=run_4e38e9c73ce049aba9e5349f92b07cea status=started
+  default POST /v1/runs (key) -> 202 run_id=run_7a9f3cd84c6d495990ec6d588ed33f78 status=started
   default POST /v1/runs (same key, same body) -> 202 replayed same run_id=true
   default POST /v1/runs (same key, other body) -> 409 idempotency_key_conflict
   default POST /v1/runs/{id}/approval -> 200 resolved=1 choice=deny
   default POST /v1/runs/{id}/approval (replay) -> 200 replayed same body=true
   default POST /v1/runs/{id}/stop -> 200 status=stopping
   default POST /v1/runs/{id}/stop (replay) -> 200 replayed same body=true
-  default POST /api/sessions -> 201 session=api_1793283891_e121786f
+  default POST /api/sessions -> 201 session=api_1793286458_f9932d10
   default POST /api/sessions (replay) -> 201 replayed same session=true
   default POST /api/sessions/{id}/model -> 200 model_lock=accepted
   default POST /api/sessions/{id}/chat -> 200 model=hv-fake-2 route_source=session_model_lock
@@ -195,14 +195,14 @@ PASS accept-6 default new session, model lock, chat: one execution per key
   hv-bot-a approval run tail: message.delta > reasoning.available > run.completed
   hv-bot-a stop: terminal run.cancelled; run status=cancelled; "sleep 300" left in container: false
   hv-bot-a POST /v1/runs (no key) -> 400 idempotency_key_required
-  hv-bot-a POST /v1/runs (key) -> 202 run_id=run_de715cc79841481d9ff6ab289a2f6ec6 status=started
+  hv-bot-a POST /v1/runs (key) -> 202 run_id=run_02e6e55282414e7f8d69f54b9d068561 status=started
   hv-bot-a POST /v1/runs (same key, same body) -> 202 replayed same run_id=true
   hv-bot-a POST /v1/runs (same key, other body) -> 409 idempotency_key_conflict
   hv-bot-a POST /v1/runs/{id}/approval -> 200 resolved=1 choice=deny
   hv-bot-a POST /v1/runs/{id}/approval (replay) -> 200 replayed same body=true
   hv-bot-a POST /v1/runs/{id}/stop -> 200 status=stopping
   hv-bot-a POST /v1/runs/{id}/stop (replay) -> 200 replayed same body=true
-  hv-bot-a POST /api/sessions -> 201 session=api_1793283897_6e12e77f
+  hv-bot-a POST /api/sessions -> 201 session=api_1793286464_27367094
   hv-bot-a POST /api/sessions (replay) -> 201 replayed same session=true
   hv-bot-a POST /api/sessions/{id}/model -> 200 model_lock=accepted
   hv-bot-a POST /api/sessions/{id}/chat -> 200 model=hv-fake-2 route_source=session_model_lock
@@ -213,12 +213,12 @@ PASS temps-2 hv-bot-a approval answer is idempotent
 PASS temps-2 hv-bot-a cancel is idempotent and stops the tool
 PASS accept-6 hv-bot-a new session, model lock, chat: one execution per key
 PASS allowlist routes outside the list never reach Hermes: POST /api/sessions/x/chat/stream 404 route_not_allowed; GET /api/config 404 route_not_allowed; GET /api/env 404 route_not_allowed; GET /auth/native/authorize 404 route_not_allowed; GET /p/hv-bot-a/v1/runs/../../api/env 404 route_not_allowed
-PASS accept-2 revoked token refused at once (CLI revoke, no restart): before 200, revoke rc=0 in 112 ms, next request 401 2 ms after
-PASS accept-2 revocation cuts the open event stream: stream closed 352 ms after revoke
+PASS accept-2 revoked token refused at once (CLI revoke, no restart): before 200, revoke rc=0 in 109 ms, next request 401 1 ms after
+PASS accept-2 revocation cuts the open event stream: stream closed 54 ms after revoke
 PASS accept-2 revoke through the admin API, other devices unaffected: revoke 200, revoked device 401, other device 200
-PASS rate limit per device answers 429 with Retry-After: 100 quick requests: {"200":65,"429":35,"retry":"1"}
-PASS audit is UTC and holds no key, token or code: 182 lines, events {"auth.fail":7,"enrol.ok":4,"enrol.fail":1,"code.create":3,"request":166,"revoke":1}
-  audit sample: ts=2026-10-29T14:24:51.172Z event=request route=run.stop status=200 role=normal
+PASS rate limit per device answers 429 with Retry-After: 100 quick requests: {"200":62,"429":38,"retry":"1"}
+PASS audit is UTC and holds no key, token or code: 185 lines, events {"code.create":5,"auth.fail":7,"enrol.ok":4,"enrol.fail":1,"request":166,"revoke":2}
+  audit sample: ts=2026-10-29T15:07:38.630Z event=request route=run.stop status=200 role=normal
   docker port: 8642/tcp -> 127.0.0.1:<test-port>
   listening sockets in the Hermes container: any:8642 loopback:<provider-port>
   host addresses outside the loopback checked: 23
@@ -236,9 +236,10 @@ guard rc=0
 
 Notes on this pass:
 
-1. It ran on the final code of the branch. The audit fix was not in the first pass (26 of 26 lanes then too). A second pass of the final code gave 25 of 26: the driver sent more than 20 writes in a few seconds with one device and the facade answered 429 on them, which is the write limit working. The driver now waits 5 seconds between the two profiles, and the pass above is the rerun.
-2. The `stop` lane checks the container process list: no `sleep 300` is left after the cancel.
-3. The test instance runs the API server platform and a fake model provider. It has no dashboard process (its listening sockets are the API port and the provider), so `check-local` proves that the published API port answers on the loopback only. It does not prove the dashboard of the real target. See item 7 of "Not done, and risks".
-4. Everything ran on the loopback of one machine. A device on a real network was not tested.
-5. The paths that must not change were measured before and after the pass.
-
+1. It ran on commit `ec49030` (the idempotency journal, the 408 and 429 rule, the CLI audit). Passes on the earlier head `2a30e85` gave 26 of 26, then 25 of 26 (the driver sent more than 20 writes in a few seconds with one device and got 429, which is the write limit working; the driver now waits 5 seconds between the two profiles), then 26 of 26 again.
+2. The lanes `temps-2` and `accept-6` exercise the journal path (record written before the request, replay, conflict) on the test instance. The restart, the lost response, the 408 and 429 answers and the full journal have no live lane: tests 6c to 6h cover them against a fake upstream.
+3. The `stop` lane checks the container process list: no `sleep 300` is left after the cancel.
+4. The test instance runs the API server platform and a fake model provider. It has no dashboard process (its listening sockets are the API port and the provider), so `check-local` proves that the published API port answers on the loopback only. It does not prove the dashboard of the real target. See item 7 of "Not done, and risks".
+5. Everything ran on the loopback of one machine. A device on a real network was not tested.
+6. The paths that must not change were measured before and after the pass.
+7. The audit of this pass has two `revoke` lines: one from the CLI (`source: "cli"`) and one from the admin API. The earlier pass had only the API line.
