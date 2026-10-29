@@ -25,7 +25,7 @@ process.on("exit", () => {
   rmSync(OTHER, { recursive: true, force: true });
 });
 
-function startUpstream(handler) {
+function startUpstream(handler, port = 0) {
   const calls = [];
   const sockets = new Set();
   const server = http.createServer((req, res) => {
@@ -38,7 +38,7 @@ function startUpstream(handler) {
     });
   });
   server.on("connection", (s) => { sockets.add(s); s.on("close", () => sockets.delete(s)); });
-  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve({
+  return new Promise((resolve) => server.listen(port, "127.0.0.1", () => resolve({
     port: server.address().port,
     calls,
     close: () => new Promise((r) => { for (const s of sockets) s.destroy(); server.close(r); }),
@@ -61,7 +61,7 @@ async function withFacade(opts, fn) {
   cpSync(join(MASTER, "tls"), join(dataDir, "tls"), { recursive: true });
   const upstream = opts.upstream || await startUpstream(opts.upstreamHandler);
   let now = T0;
-  const f = await facade.startFacade({
+  const start = () => facade.startFacade({
     dataDir,
     upstream: `http://127.0.0.1:${upstream.port}`,
     upstreamKey: UP_KEY,
@@ -71,13 +71,19 @@ async function withFacade(opts, fn) {
     sweepMs: 20,
     ...opts.config,
   });
+  let f = await start();
   const ctx = {
     dataDir,
     upstream,
-    port: f.port,
+    get port() { return f.port; },
     now: () => now,
     advance: (ms) => { now += ms; },
     call: (o) => call(f.port, o),
+    // a new process over the same data folder: what a restart of the facade does
+    restart: async () => {
+      await f.close();
+      f = await start();
+    },
   };
   try {
     await fn(ctx);
@@ -301,6 +307,15 @@ test("4c. one upstream key per profile, fail closed when none applies", async ()
   });
 });
 
+test("4c2. a profile with no key of its own uses the global key", async () => {
+  await withFacade({ config: { upstreamKeys: { "hv-bot-a": "cle-de-test-profile-a" } } }, async (ctx) => {
+    const dev = await enrol(ctx);
+    assert.equal((await ctx.call({ path: "/p/hv-bot-a/v1/capabilities", token: dev.token })).status, 200);
+    assert.equal((await ctx.call({ path: "/p/hv-bot-b/v1/capabilities", token: dev.token })).status, 200);
+    assert.deepEqual(ctx.upstream.calls.map((c) => c.headers.authorization), ["Bearer cle-de-test-profile-a", `Bearer ${UP_KEY}`]);
+  });
+});
+
 test("4d. the dashboard port is checked for exposure outside the loopback", async () => {
   const open = net.createServer().listen(0, "0.0.0.0");
   const closed = net.createServer().listen(0, "127.0.0.1");
@@ -453,6 +468,168 @@ test("6b. an upstream failure is not remembered, a body over the limit is refuse
   });
 });
 
+const postKey = (ctx, token) => (key, body = { input: "x" }, path = "/v1/runs") =>
+  ctx.call({ method: "POST", path, token, body, headers: writeHeaders(key) });
+
+test("6c. a lost response is not sent again with the same key", async () => {
+  // Hermes reads the request, then the connection drops: the write may have run
+  const upstreamHandler = (req, res, call, calls) => {
+    if (calls.length === 1) return req.socket.destroy();
+    res.writeHead(202, { "content-type": "application/json" });
+    return res.end("{}");
+  };
+  await withFacade({ upstreamHandler }, async (ctx) => {
+    const dev = await enrol(ctx);
+    const post = postKey(ctx, dev.token);
+    const lost = await post("k1");
+    assert.equal(lost.status, 502);
+    assert.deepEqual(lost.json, { error: "write_outcome_unknown" });
+    for (let i = 0; i < 3; i++) {
+      const again = await post("k1");
+      assert.equal(again.status, 502);
+      assert.deepEqual(again.json, { error: "write_outcome_unknown" });
+    }
+    assert.equal(ctx.upstream.calls.length, 1, "the same key never reaches Hermes twice");
+    assert.equal((await post("k1", { input: "autre" })).status, 409, "another body is still a conflict");
+    assert.equal((await post("k2")).status, 202, "the caller chooses a new key after checking Hermes");
+    assert.equal(ctx.upstream.calls.length, 2);
+    ctx.advance(24 * 60 * 60 * 1000);
+    assert.equal((await post("k1")).status, 202, "the doubt ends with the 24 hours of the key");
+  });
+});
+
+test("6d. a write that Hermes did not run is sent again with the same key", async () => {
+  const first = await startUpstream();
+  const port = first.port;
+  await first.close();
+  await withFacade({ upstream: { port, calls: [] } }, async (ctx) => {
+    const dev = await enrol(ctx);
+    const post = postKey(ctx, dev.token);
+    const down = await post("k1");
+    assert.deepEqual([down.status, down.json], [502, { error: "upstream_unavailable" }]);
+    const back = await startUpstream(undefined, port);
+    try {
+      const retry = await post("k1");
+      assert.equal(retry.status, 202);
+      assert.equal(retry.headers["idempotency-replayed"], undefined);
+      assert.equal(back.calls.length, 1);
+    } finally {
+      await back.close();
+    }
+  });
+  // Hermes answers 401: it did not run the write either
+  const upstreamHandler = (req, res, call, calls) => {
+    res.writeHead(calls.length === 1 ? 401 : 202, { "content-type": "application/json" });
+    res.end("{}");
+  };
+  await withFacade({ upstreamHandler }, async (ctx) => {
+    const dev = await enrol(ctx);
+    const post = postKey(ctx, dev.token);
+    assert.deepEqual((await post("k1")).json, { error: "upstream_rejected" });
+    assert.equal((await post("k1")).status, 202);
+    assert.equal(ctx.upstream.calls.length, 2);
+  });
+});
+
+test("6e. a transient refusal of Hermes is not remembered and keeps its headers", async () => {
+  for (const status of [408, 429]) {
+    const upstreamHandler = (req, res, call, calls) => {
+      if (calls.length === 1) {
+        res.writeHead(status, { "content-type": "application/json", "retry-after": "2", "cache-control": "no-store" });
+        return res.end('{"error":"busy"}');
+      }
+      res.writeHead(202, { "content-type": "application/json" });
+      return res.end("{}");
+    };
+    await withFacade({ upstreamHandler }, async (ctx) => {
+      const dev = await enrol(ctx);
+      const post = postKey(ctx, dev.token);
+      const refused = await post("k1");
+      assert.equal(refused.status, status);
+      assert.equal(refused.headers["retry-after"], "2");
+      assert.equal(refused.headers["cache-control"], "no-store");
+      const retry = await post("k1");
+      assert.equal(retry.status, 202, "the retry after Retry-After reaches Hermes");
+      assert.equal(retry.headers["idempotency-replayed"], undefined);
+      assert.equal(ctx.upstream.calls.length, 2);
+    });
+  }
+});
+
+test("6f. the keys survive a restart of the facade", async () => {
+  await withFacade({}, async (ctx) => {
+    const dev = await enrol(ctx);
+    const post = postKey(ctx, dev.token);
+    const first = await post("k1", { input: "bonjour" });
+    assert.equal(first.status, 202);
+    await ctx.restart();
+    const again = await post("k1", { input: "bonjour" });
+    assert.equal(again.status, 202);
+    assert.equal(again.headers["idempotency-replayed"], "true");
+    assert.equal(again.text, first.text);
+    assert.equal((await post("k1", { input: "autre" })).status, 409);
+    assert.equal(ctx.upstream.calls.length, 1, "one Hermes call across the restart");
+
+    assert.equal(readdirSync(join(ctx.dataDir, "idempotency")).length, 1);
+    ctx.advance(24 * 60 * 60 * 1000);
+    assert.equal((await post("k1", { input: "bonjour" })).headers["idempotency-replayed"], undefined, "a key is forgotten after 24 hours");
+    assert.equal(ctx.upstream.calls.length, 2);
+    assert.equal(readdirSync(join(ctx.dataDir, "idempotency")).length, 1, "the expired record was replaced, not kept");
+  });
+
+  // the facade stops while Hermes still holds the request: the outcome is unknown after the restart
+  const held = [];
+  const upstreamHandler = (req, res) => { held.push(res); };
+  await withFacade({ upstreamHandler }, async (ctx) => {
+    const dev = await enrol(ctx);
+    const post = postKey(ctx, dev.token);
+    const inFlight = post("k2").catch(() => null);
+    while (ctx.upstream.calls.length < 1) await new Promise((r) => setTimeout(r, 10));
+    await ctx.restart();
+    await inFlight;
+    const after = await post("k2");
+    assert.equal(after.status, 502);
+    assert.deepEqual(after.json, { error: "write_outcome_unknown" });
+    assert.equal(ctx.upstream.calls.length, 1, "a request cut by a restart is never sent again");
+    for (const res of held) res.destroy();
+  });
+});
+
+test("6g. a damaged or half-written record is an unknown outcome", async () => {
+  await withFacade({}, async (ctx) => {
+    const dev = await enrol(ctx);
+    const post = postKey(ctx, dev.token);
+    assert.equal((await post("k1")).status, 202);
+    const dir = join(ctx.dataDir, "idempotency");
+    const [name] = readdirSync(dir);
+    const file = join(dir, name);
+    const record = JSON.parse(readFileSync(file, "utf8"));
+    assert.ok(!readFileSync(file, "utf8").includes("k1"), "the key is stored hashed");
+    // the facade died after it wrote the record and before Hermes answered
+    for (const damaged of [JSON.stringify({ ...record, state: "pending", result: undefined }), "{broken", "", "null"]) {
+      writeFileSync(file, damaged);
+      const r = await post("k1");
+      assert.deepEqual([r.status, r.json], [502, { error: "write_outcome_unknown" }], damaged);
+    }
+    assert.equal(ctx.upstream.calls.length, 1);
+  });
+});
+
+test("6h. the journal refuses new keys when full, and never forgets a live one", async () => {
+  await withFacade({ config: { idempotencyMax: 3, limits: { write: { burst: 100, perSecond: 100 } } } }, async (ctx) => {
+    const dev = await enrol(ctx);
+    const post = postKey(ctx, dev.token);
+    for (const k of ["a", "b", "c"]) assert.equal((await post(k)).status, 202);
+    const full = await post("d");
+    assert.deepEqual([full.status, full.json], [503, { error: "idempotency_journal_full" }]);
+    assert.equal(ctx.upstream.calls.length, 3, "a refused write never reaches Hermes");
+    assert.equal((await post("a")).headers["idempotency-replayed"], "true", "a live key still replays");
+    ctx.advance(24 * 60 * 60 * 1000);
+    assert.equal((await post("d")).status, 202, "expired keys leave the journal");
+    assert.equal(ctx.upstream.calls.length, 4);
+  });
+});
+
 test("7. routes outside the allowlist never reach Hermes", async () => {
   await withFacade({}, async (ctx) => {
     const dev = await enrol(ctx);
@@ -583,6 +760,25 @@ test("10. the audit is UTC, complete, and holds no secret", async () => {
     for (const secret of [code.replaceAll("-", ""), admin.token.split(".")[1], user.json.token.split(".")[1], UP_KEY, "garbage"]) {
       assert.ok(!text.includes(secret), "secret in audit");
     }
+  });
+});
+
+test("10b. the CLI actions are in the audit, in UTC, with their source", async () => {
+  await withFacade({}, async (ctx) => {
+    const dev = await enrol(ctx);
+    const out = [];
+    const env = { FACADE_DATA: ctx.dataDir };
+    assert.equal(await facade.main(["revoke", dev.device_id], env, (l) => out.push(l)), 0);
+    assert.equal(await facade.main(["enrol-code", "admin"], env, (l) => out.push(l)), 0);
+    const text = readFileSync(join(ctx.dataDir, "audit.log"), "utf8");
+    const lines = text.trim().split("\n").map((l) => JSON.parse(l));
+    for (const l of lines) assert.match(l.ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    const revoke = lines.find((l) => l.event === "revoke");
+    assert.deepEqual([revoke.source, revoke.target], ["cli", dev.device_id]);
+    const code = lines.find((l) => l.event === "code.create");
+    assert.deepEqual([code.source, code.role], ["cli", "admin"]);
+    const raw = /code=(\S+)/.exec(out.join("\n"))[1].replaceAll("-", "");
+    assert.ok(!text.includes(raw) && !text.includes(dev.token.split(".")[1]), "no secret in the audit");
   });
 });
 

@@ -15,7 +15,7 @@ const { execFileSync } = require("node:child_process");
 
 const ENROL_CODE_TTL_MS = 5 * 60 * 1000;
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
-const IDEMPOTENCY_MAX_ENTRIES = 2000;
+const IDEMPOTENCY_MAX_ENTRIES = 10_000;
 const IDEMPOTENCY_MAX_BODY = 16 * 1024;
 const MAX_BODY = 1024 * 1024;
 const UPSTREAM_TIMEOUT_MS = 30_000;
@@ -75,6 +75,11 @@ function writeJsonAtomic(file, value) {
   const tmp = `${file}.${randomB64url(6)}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(value), { mode: 0o600 });
   fs.renameSync(tmp, file);
+}
+
+// one JSON line per event, UTC; the CLI and the server append to the same file
+function appendAudit(dataDir, event, fields, now = Date.now()) {
+  fs.appendFileSync(path.join(ensureDir(dataDir), "audit.log"), `${JSON.stringify({ ts: iso(now), event, ...fields })}\n`, { mode: 0o600 });
 }
 
 // ---------------------------------------------------------------- TLS: internal CA and pin
@@ -321,6 +326,7 @@ async function findExposure(port, { addresses = externalAddresses(), timeoutMs =
 // ---------------------------------------------------------------- server
 
 const PASS_HEADERS = ["content-type", "cache-control", "retry-after", "idempotency-replayed"];
+const pickHeaders = (h) => Object.fromEntries(PASS_HEADERS.filter((n) => h[n]).map((n) => [n, h[n]]));
 
 function readBody(req, max) {
   if (Number(req.headers["content-length"] || 0) > max) {
@@ -365,11 +371,69 @@ async function startFacade(cfg) {
   const limits = { ...DEFAULT_LIMITS, ...cfg.limits };
   const maxBody = cfg.maxBody || MAX_BODY;
   const limiter = new Limiter(clock);
-  const idem = new Map();
   const streams = new Set();
-  const auditFile = path.join(ensureDir(dataDir), "audit.log");
-  const audit = (event, fields) => fs.appendFileSync(auditFile, `${JSON.stringify({ ts: iso(clock()), event, ...fields })}\n`, { mode: 0o600 });
+  ensureDir(dataDir);
+  const audit = (event, fields) => appendAudit(dataDir, event, fields, clock());
   const upstreamKeyFor = (profile) => (cfg.upstreamKeys && cfg.upstreamKeys[profile]) || cfg.upstreamKey;
+
+  // The journal is the memory of the idempotency keys: one file per key, written before the request
+  // leaves, so a restart or a lost answer never sends the same key to Hermes twice
+  // state: pending (written, no answer yet), done (answer kept), unknown (Hermes may have run it)
+  // shortcut: one synchronous file read per write, use a database above a few thousand writes a day
+  const journalDir = ensureDir(path.join(dataDir, "idempotency"));
+  const journalMax = cfg.idempotencyMax || IDEMPOTENCY_MAX_ENTRIES;
+  const journalFile = (sid) => path.join(journalDir, `${sid}.json`);
+  const inflight = new Map();
+  let closed = false;
+
+  // a damaged file reads as an unknown outcome: the write is not sent again
+  function readJournal(sid, now) {
+    let entry;
+    try {
+      entry = JSON.parse(fs.readFileSync(journalFile(sid), "utf8"));
+    } catch (err) {
+      return err.code === "ENOENT" ? null : { state: "unknown" };
+    }
+    if (typeof entry?.expires !== "number") return { state: "unknown" };
+    if (entry.expires <= now) {
+      fs.rmSync(journalFile(sid), { force: true });
+      return null;
+    }
+    return entry;
+  }
+
+  // after close() a new process may own the journal: this one stops writing to it
+  function settleJournal(sid, entry) {
+    if (closed) return;
+    try {
+      if (entry) writeJsonAtomic(journalFile(sid), entry);
+      else fs.rmSync(journalFile(sid), { force: true });
+    } catch {
+      console.error("hermes-facade: idempotency journal update failed");
+    }
+  }
+
+  function purgeJournal(now) {
+    for (const f of fs.readdirSync(journalDir)) {
+      const file = path.join(journalDir, f);
+      try {
+        let expires;
+        try {
+          expires = JSON.parse(fs.readFileSync(file, "utf8")).expires;
+        } catch {
+          expires = fs.statSync(file).mtimeMs + IDEMPOTENCY_TTL_MS;
+        }
+        if (!(expires > now)) fs.rmSync(file, { force: true });
+      } catch { /* removed by another call */ }
+    }
+  }
+
+  // a full journal refuses a new key: forgetting a live key would let its write go twice
+  function journalHasRoom(now) {
+    if (fs.readdirSync(journalDir).length < journalMax) return true;
+    purgeJournal(now);
+    return fs.readdirSync(journalDir).length < journalMax;
+  }
 
   function callUpstream({ method, target, headers, body, key }) {
     return new Promise((resolve, reject) => {
@@ -385,6 +449,7 @@ async function startFacade(cfg) {
   }
 
   // Hermes answers that must not reach a device: its own auth failure and its redirects
+  // Hermes did not run the request in these cases, and when the connection was refused
   function refusal(upRes) {
     if (upRes.statusCode === 401) return "upstream_rejected";
     if (upRes.statusCode >= 300 && upRes.statusCode < 400) return "upstream_redirect";
@@ -403,27 +468,27 @@ async function startFacade(cfg) {
   }
 
   function replyBuffered(res, r, extra = {}) {
-    const headers = { "content-length": r.body.length, ...extra };
-    if (r.type) headers["content-type"] = r.type;
-    res.writeHead(r.status, headers);
+    res.writeHead(r.status, { ...r.headers, "content-length": r.body.length, ...extra });
     res.end(r.body);
   }
 
   // One upstream exchange read completely: the unit that a replay returns
+  // notRun marks a failure after which Hermes certainly did not run the request: any other
+  // failure leaves the outcome unknown
   async function exchange(opts) {
     let upRes;
     try {
       upRes = await callUpstream(opts);
     } catch (err) {
-      throw httpError(502, err.code === "ETIMEDOUT" ? "upstream_timeout" : "upstream_unavailable");
+      throw Object.assign(httpError(502, err.code === "ETIMEDOUT" ? "upstream_timeout" : "upstream_unavailable"), { notRun: err.code === "ECONNREFUSED" });
     }
     const refused = refusal(upRes);
     if (refused) {
       upRes.resume();
-      throw httpError(502, refused);
+      throw Object.assign(httpError(502, refused), { notRun: true });
     }
     const body = await bufferResponse(upRes).catch((err) => { throw err.status ? err : httpError(502, "upstream_unavailable"); });
-    return { status: upRes.statusCode, type: upRes.headers["content-type"], body };
+    return { status: upRes.statusCode, headers: pickHeaders(upRes.headers), body };
   }
 
   async function write(req, res, ctx) {
@@ -432,40 +497,47 @@ async function startFacade(cfg) {
     if (!/^[\x21-\x7e]{1,128}$/.test(key)) throw httpError(400, "idempotency_key_invalid");
     const body = await readBody(req, maxBody);
     const hash = sha256hex(body);
-    const scope = [ctx.device.id, req.method, ctx.pathname, key].join("\n");
+    const sid = sha256hex([ctx.device.id, req.method, ctx.pathname, key].join("\n"));
     const now = clock();
-    let entry = idem.get(scope);
-    if (entry && entry.expires <= now) {
-      idem.delete(scope);
-      entry = undefined;
-    }
-    if (entry && entry.hash !== hash) throw httpError(409, "idempotency_key_conflict");
-    const replayed = Boolean(entry);
-    if (!entry) {
-      entry = {
-        hash,
-        expires: now + IDEMPOTENCY_TTL_MS,
-        promise: exchange({
-          method: req.method,
-          target: ctx.pathname,
-          headers: { ...req.headers, "idempotency-key": `${ctx.device.id}:${key}` },
-          body,
-          key: ctx.upstreamKey,
-        }),
-      };
-      idem.set(scope, entry);
-      while (idem.size > IDEMPOTENCY_MAX_ENTRIES) idem.delete(idem.keys().next().value);
-    }
+    const flying = inflight.get(sid);
+    const saved = flying || readJournal(sid, now);
+    if (saved && saved.hash && saved.hash !== hash) throw httpError(409, "idempotency_key_conflict");
+
     let result;
-    try {
-      result = await entry.promise;
-    } catch (err) {
-      idem.delete(scope);
-      throw err;
+    if (flying) {
+      result = await flying.promise;
+    } else if (saved) {
+      if (saved.state !== "done") throw httpError(502, "write_outcome_unknown");
+      result = { status: saved.result.status, headers: saved.result.headers, body: saved.result.body === null ? null : Buffer.from(saved.result.body, "base64") };
+    } else {
+      if (!journalHasRoom(now)) throw httpError(503, "idempotency_journal_full");
+      const record = { hash, expires: now + IDEMPOTENCY_TTL_MS };
+      // not caught: when the record cannot be written, the request does not leave
+      writeJsonAtomic(journalFile(sid), { ...record, state: "pending" });
+      const promise = exchange({
+        method: req.method,
+        target: ctx.pathname,
+        headers: { ...req.headers, "idempotency-key": `${ctx.device.id}:${key}` },
+        body,
+        key: ctx.upstreamKey,
+      }).then((r) => {
+        // a refusal to retry later says nothing about the write: the key stays free, the headers stay
+        const transient = r.status === 408 || r.status === 429 || r.status >= 500;
+        const stored = r.body.length <= IDEMPOTENCY_MAX_BODY ? r.body.toString("base64") : null;
+        settleJournal(sid, transient ? null : { ...record, state: "done", result: { status: r.status, headers: r.headers, body: stored } });
+        return r;
+      }, (err) => {
+        if (err.notRun) {
+          settleJournal(sid, null);
+          throw err;
+        }
+        settleJournal(sid, { ...record, state: "unknown" });
+        throw httpError(502, "write_outcome_unknown");
+      }).finally(() => inflight.delete(sid));
+      inflight.set(sid, { hash, promise });
+      return replyBuffered(res, await promise);
     }
-    if (result.status >= 500) idem.delete(scope);
-    if (!replayed) return replyBuffered(res, result);
-    if (result.body.length > IDEMPOTENCY_MAX_BODY) throw httpError(409, "idempotency_replay_unavailable");
+    if (!result.body || result.body.length > IDEMPOTENCY_MAX_BODY) throw httpError(409, "idempotency_replay_unavailable");
     return replyBuffered(res, result, { "idempotency-replayed": "true" });
   }
 
@@ -481,9 +553,7 @@ async function startFacade(cfg) {
       upRes.resume();
       throw httpError(502, refused);
     }
-    const headers = {};
-    for (const name of PASS_HEADERS) if (upRes.headers[name]) headers[name] = upRes.headers[name];
-    res.writeHead(upRes.statusCode, headers);
+    res.writeHead(upRes.statusCode, pickHeaders(upRes.headers));
     const entry = { res, deviceId: ctx.device.id };
     streams.add(entry);
     res.on("close", () => { streams.delete(entry); upRes.destroy(); });
@@ -616,6 +686,9 @@ async function startFacade(cfg) {
     }
   }, cfg.sweepMs || 1000);
   sweeper.unref();
+  purgeJournal(clock());
+  const purger = setInterval(() => purgeJournal(clock()), 60 * 60 * 1000);
+  purger.unref();
 
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -624,7 +697,9 @@ async function startFacade(cfg) {
   return {
     port: server.address().port,
     close: () => new Promise((resolve) => {
+      closed = true;
       clearInterval(sweeper);
+      clearInterval(purger);
       server.close(() => setImmediate(resolve));
       server.closeAllConnections();
     }),
@@ -678,6 +753,7 @@ async function main(argv = process.argv.slice(2), env = process.env, out = conso
   if (cmd === "enrol-code") {
     const c = createEnrolCode(dataDir, rest[0] || "normal");
     out(`code=${c.code} role=${c.role} expires_at=${c.expires_at}`);
+    appendAudit(dataDir, "code.create", { source: "cli", role: c.role });
     return 0;
   }
   if (cmd === "devices") {
@@ -688,6 +764,7 @@ async function main(argv = process.argv.slice(2), env = process.env, out = conso
     const d = revokeDevice(dataDir, rest[0]);
     if (!d) throw new Error("unknown device");
     out(`revoked ${d.id} at ${d.revoked_at}`);
+    appendAudit(dataDir, "revoke", { source: "cli", target: d.id });
     return 0;
   }
   throw new Error(USAGE);
