@@ -1,7 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } = require("node:fs");
+const { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, utimesSync, writeFileSync } = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
 const net = require("node:net");
@@ -127,6 +127,9 @@ async function enrol(ctx, role = "normal", name = "phone") {
 }
 
 const writeHeaders = (key) => ({ "idempotency-key": key });
+
+// the modification time of a journal file follows the clock of the test
+const touch = (file, ms) => utimesSync(file, new Date(ms), new Date(ms));
 
 test("1. no access without a valid token", async () => {
   await withFacade({ config: { limits: { fail: { burst: 100, perSecond: 100 } } } }, async (ctx) => {
@@ -449,23 +452,32 @@ test("6. writes are idempotent", async () => {
   });
 });
 
-test("6b. an upstream failure is not remembered, a body over the limit is refused", async () => {
-  let n = 0;
-  const upstreamHandler = (req, res) => {
-    n++;
-    res.writeHead(n === 1 ? 500 : 202, { "content-type": "application/json" });
-    res.end("{}");
-  };
-  await withFacade({ upstreamHandler, config: { maxBody: 1024 } }, async (ctx) => {
-    const dev = await enrol(ctx);
-    const send = (body, key = "k") => ctx.call({ method: "POST", path: "/v1/runs", token: dev.token, body, headers: writeHeaders(key) });
-    assert.equal((await send({ input: "x" })).status, 500);
-    const retry = await send({ input: "x" });
-    assert.equal(retry.status, 202);
-    assert.equal(retry.headers["idempotency-replayed"], undefined);
-    assert.equal((await send("x".repeat(2048), "big")).status, 413);
-    assert.equal(n, 2);
-  });
+test("6b. a Hermes 5xx keeps the key as unknown, a body over the limit is refused", async () => {
+  // the 5xx can come after the write ran: the same key must not run it a second time
+  for (const status of [500, 502, 503, 504]) {
+    let effects = 0;
+    const upstreamHandler = (req, res) => {
+      effects++;
+      res.writeHead(effects === 1 ? status : 202, { "content-type": "application/json" });
+      res.end("{}");
+    };
+    await withFacade({ upstreamHandler, config: { maxBody: 1024 } }, async (ctx) => {
+      const dev = await enrol(ctx);
+      const send = (body, key = "k") => ctx.call({ method: "POST", path: "/v1/runs", token: dev.token, body, headers: writeHeaders(key) });
+      assert.equal((await send({ input: "x" })).status, status, "the 5xx reaches the device");
+      for (let i = 0; i < 2; i++) {
+        const retry = await send({ input: "x" });
+        assert.deepEqual([retry.status, retry.json], [502, { error: "write_outcome_unknown" }], String(status));
+      }
+      assert.equal((await send({ input: "autre" })).status, 409);
+      assert.equal(effects, 1, "the write ran once for three sends");
+      assert.equal((await send({ input: "x" }, "k2")).status, 202, "a new key goes");
+      assert.equal((await send("x".repeat(2048), "big")).status, 413);
+      assert.equal(effects, 2);
+      ctx.advance(24 * 60 * 60 * 1000);
+      assert.equal((await send({ input: "x" })).status, 202, "the doubt ends with the 24 hours of the key");
+    });
+  }
 });
 
 const postKey = (ctx, token) => (key, body = { input: "x" }, path = "/v1/runs") =>
@@ -606,8 +618,9 @@ test("6g. a damaged or half-written record is an unknown outcome", async () => {
     const record = JSON.parse(readFileSync(file, "utf8"));
     assert.ok(!readFileSync(file, "utf8").includes("k1"), "the key is stored hashed");
     // the facade died after it wrote the record and before Hermes answered
-    for (const damaged of [JSON.stringify({ ...record, state: "pending", result: undefined }), "{broken", "", "null"]) {
+    for (const damaged of [JSON.stringify({ ...record, state: "pending", result: undefined }), "{broken", "", "null", "{}"]) {
       writeFileSync(file, damaged);
+      touch(file, ctx.now());
       const r = await post("k1");
       assert.deepEqual([r.status, r.json], [502, { error: "write_outcome_unknown" }], damaged);
     }
@@ -627,6 +640,43 @@ test("6h. the journal refuses new keys when full, and never forgets a live one",
     ctx.advance(24 * 60 * 60 * 1000);
     assert.equal((await post("d")).status, 202, "expired keys leave the journal");
     assert.equal(ctx.upstream.calls.length, 4);
+  });
+});
+
+test("6i. an invalid record keeps its key for 24 hours, across a restart and a purge", async () => {
+  await withFacade({ config: { idempotencyMax: 2 } }, async (ctx) => {
+    const dev = await enrol(ctx);
+    const post = postKey(ctx, dev.token);
+    assert.equal((await post("k1")).status, 202);
+    const dir = join(ctx.dataDir, "idempotency");
+    const file = join(dir, readdirSync(dir)[0]);
+    // the startup purge used to remove a record with no expiry, so the key ran its write again
+    for (const damaged of ["{}", '{"state":"done"}', '{"expires":"soon"}', "null", "", "{broken"]) {
+      writeFileSync(file, damaged);
+      touch(file, ctx.now());
+      await ctx.restart();
+      const r = await post("k1");
+      assert.deepEqual([r.status, r.json], [502, { error: "write_outcome_unknown" }], damaged);
+      assert.equal(readdirSync(dir).length, 1, `the record is kept: ${damaged}`);
+    }
+    assert.equal(ctx.upstream.calls.length, 1, "no restart sent the write again");
+
+    // the purge of a full journal keeps it too
+    assert.equal((await post("k2")).status, 202);
+    const full = await post("k3");
+    assert.deepEqual([full.status, full.json], [503, { error: "idempotency_journal_full" }]);
+    assert.equal((await post("k1")).status, 502);
+
+    // 24 hours after its last write the record ends, on read and on purge
+    ctx.advance(24 * 60 * 60 * 1000 - 1);
+    assert.equal((await post("k1")).status, 502, "one millisecond before the end");
+    ctx.advance(1);
+    assert.equal((await post("k1")).status, 202, "the key is free again");
+    assert.equal(ctx.upstream.calls.length, 3, "k1, k2, then k1 again once its record ended");
+    writeFileSync(file, "{broken");
+    touch(file, ctx.now() - 24 * 60 * 60 * 1000);
+    await ctx.restart();
+    assert.equal(readdirSync(dir).length, 0, "the startup purge removes the invalid record and the expired one");
   });
 });
 

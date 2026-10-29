@@ -386,20 +386,31 @@ async function startFacade(cfg) {
   const inflight = new Map();
   let closed = false;
 
-  // a damaged file reads as an unknown outcome: the write is not sent again
-  function readJournal(sid, now) {
-    let entry;
+  // a record that cannot be read keeps its key as unknown, for 24 hours after its last write
+  function parseRecord(file) {
     try {
-      entry = JSON.parse(fs.readFileSync(journalFile(sid), "utf8"));
+      return JSON.parse(fs.readFileSync(file, "utf8"));
+    } catch {
+      return null;
+    }
+  }
+
+  const expiryOf = (file, entry) => (typeof entry?.expires === "number" ? entry.expires : fs.statSync(file).mtimeMs + IDEMPOTENCY_TTL_MS);
+
+  function readJournal(sid, now) {
+    const file = journalFile(sid);
+    const entry = parseRecord(file);
+    let expires;
+    try {
+      expires = expiryOf(file, entry);
     } catch (err) {
       return err.code === "ENOENT" ? null : { state: "unknown" };
     }
-    if (typeof entry?.expires !== "number") return { state: "unknown" };
-    if (entry.expires <= now) {
-      fs.rmSync(journalFile(sid), { force: true });
+    if (expires <= now) {
+      fs.rmSync(file, { force: true });
       return null;
     }
-    return entry;
+    return typeof entry?.expires === "number" ? entry : { state: "unknown" };
   }
 
   // after close() a new process may own the journal: this one stops writing to it
@@ -417,13 +428,7 @@ async function startFacade(cfg) {
     for (const f of fs.readdirSync(journalDir)) {
       const file = path.join(journalDir, f);
       try {
-        let expires;
-        try {
-          expires = JSON.parse(fs.readFileSync(file, "utf8")).expires;
-        } catch {
-          expires = fs.statSync(file).mtimeMs + IDEMPOTENCY_TTL_MS;
-        }
-        if (!(expires > now)) fs.rmSync(file, { force: true });
+        if (!(expiryOf(file, parseRecord(file)) > now)) fs.rmSync(file, { force: true });
       } catch { /* removed by another call */ }
     }
   }
@@ -521,10 +526,13 @@ async function startFacade(cfg) {
         body,
         key: ctx.upstreamKey,
       }).then((r) => {
-        // a refusal to retry later says nothing about the write: the key stays free, the headers stay
-        const transient = r.status === 408 || r.status === 429 || r.status >= 500;
+        // 408 and 429 say Hermes did not run the write: the key stays free, the headers stay
+        // a 5xx can come after the write ran: the key stays, as unknown
         const stored = r.body.length <= IDEMPOTENCY_MAX_BODY ? r.body.toString("base64") : null;
-        settleJournal(sid, transient ? null : { ...record, state: "done", result: { status: r.status, headers: r.headers, body: stored } });
+        let entry = { ...record, state: "done", result: { status: r.status, headers: r.headers, body: stored } };
+        if (r.status >= 500) entry = { ...record, state: "unknown" };
+        if (r.status === 408 || r.status === 429) entry = null;
+        settleJournal(sid, entry);
         return r;
       }, (err) => {
         if (err.notRun) {
