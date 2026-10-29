@@ -15,14 +15,14 @@ Tests alone are not sufficient verification. A PR is verified only when its unit
 ### Arm the program
 
 - [ ] State the protocol and this plan to the operator, then stop. Start execution only on the operator's explicit go.
-- [ ] Read these from trunk at program start. Re-read them at every tick.
-  - [ ] `git show origin/main:pstack/skills/poteto-mode/playbooks/autopilot-full.md`
-  - [ ] `git show origin/main:pstack/skills/swarm/SKILL.md`
-  - [ ] `git show origin/main:pstack/skills/control-cli/SKILL.md`
-  - [ ] `git show origin/main:pstack/skills/poteto-mode/playbooks/opening-a-pr.md`
-  - [ ] `git show origin/main:pstack/skills/poteto-mode/playbooks/babysit.md`
-  - [ ] `git show origin/main:pstack/skills/poteto-mode/playbooks/shipping.md`
-  - [ ] `git show origin/main:pstack/skills/show-me-your-work/SKILL.md`
+- [ ] Read these from trunk at program start. Re-read them at every tick. Cite only paths that exist on `origin/main`.
+  - [ ] `git show origin/main:AGENTS.md`
+  - [ ] `git show origin/main:docs/prd/prd-consolide.md`
+  - [ ] `git show origin/main:docs/spike/pr1-facade.md`
+  - [ ] `git show origin/main:scripts/hermes-facade.js`
+  - [ ] `git show origin/main:test/hermes-facade.test.js`
+  - [ ] `git show origin/main:scripts/infra-guard-ci.js`
+  - [ ] `git show origin/main:scripts/check-plan.mjs`
 - [ ] On the operator's go, arm the audit tick as `/loop 1h` with the tick prompt below. Never leave the cadence to memory.
 - [ ] Use this tick prompt, verbatim. "Re-read the execution playbook from trunk. Audit the operation against it and fix drift in this tick. Probe every active lane and judge progress by side effects only. Stand down a stuck lane and dispatch its replacement now. Then post a short status message to the operator in chat only when the audit found a tracked change that no earlier status message reported, such as a PR opened, a code-ready head, a round launched or closed, a verdict, a merge, a stuck agent and the action taken, a blocker added or cleared, or a decision only the operator can make. Name every such change and nothing else. Do not repeat a table, the merged list, or an unchanged blocker. If the audit found none, end the turn with no reply text. Either way, log this tick's row in your decision trail. The row names the items reported, or none."
 - [ ] On the operator's hold or stand-down, send every owner a zero-writes order at once.
@@ -32,7 +32,7 @@ Tests alone are not sufficient verification. A PR is verified only when its unit
 - [ ] Spawn one owner per PR with the full lifecycle the execution playbook names.
 - [ ] Follow this dependency graph. Start dependent work only after its parent merges, or base it on the parent branch when the execution playbook stacks.
   - [ ] HA-02 is independent and first. It branches from `main`.
-- [ ] Hold the file boundaries. HA-02 touches only `docs/api/**`, `docs/spike/pr1-facade.md`, `docs/plans/hermes-api-pr2.md`, `scripts/hermes-facade.js` only when a contract gap forces a small allowlist or error-shape fix, `test/hermes-facade.test.js` and/or `test/hermes-api-contract.test.js`, and `package.json` only if a new test script is required. No PR touches Swift, `.claude/`, `.codex/`, or `.mcp.json`.
+- [ ] Hold the file boundaries. HA-02 touches only `docs/api/**`, `docs/spike/pr1-facade.md`, `docs/plans/hermes-api-pr2.md`, `scripts/hermes-facade.js` only when a contract gap forces a small allowlist or error-shape fix, `test/hermes-api-contract.test.js`, and `package.json` only if a new test script is required. No PR touches Swift, `.claude/`, `.codex/`, or `.mcp.json`.
 - [ ] Hold the review gate. No PR in this program waits on an operator screenshot review.
 
 ### PR mechanics, for every PR
@@ -52,11 +52,11 @@ Tests alone are not sufficient verification. A PR is verified only when its unit
 
 ### Boot recipe, for every live lane
 
-Each live lane runs on its own cloud VM at the PR head. Drive through `control-cli`. Do not launch the macOS app and do not run XCUITest.
+Each live lane runs on its own cloud VM at the PR head. Drive through `control-cli`. Do not launch the macOS app and do not run XCUITest. Node 26 is a prerequisite.
 
 - [ ] `git fetch origin <head-branch> && git checkout <head SHA>`.
-- [ ] Install Node 22 with `npm ci`.
-- [ ] Deliver input only through `npm test`, `npm run lint`, and reads of the OpenAPI file plus the facade tests. The read-only diagnostics are `git diff origin/main --stat` and `rg` over `docs/api` and `scripts/hermes-facade.js`.
+- [ ] Install Node 26 with `npm ci`.
+- [ ] Deliver input only through `npm test`, `npm run lint`, and reads of the OpenAPI file plus `test/hermes-api-contract.test.js`. The read-only diagnostics are `git diff origin/main --stat` and `rg` over `docs/api` and `scripts/hermes-facade.js`.
 - [ ] Save every screenshot to `/tmp/swarm-ha-02/worker-<n>/<slug>.png` and return the paths with the report.
 
 ## Publish the Hermes product API contract (HA-02)
@@ -68,7 +68,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Create `docs/api/hermes-product.openapi.yaml` (or `.json`) for the product surface behind the facade.
 - [ ] Create `docs/api/README.md` with examples that contain no secret, no host, no local path, and no machine name.
 - [ ] Create `docs/plans/hermes-api-pr2.md` (this plan).
-- [ ] Create `test/hermes-api-contract.test.js` (or extend `test/hermes-facade.test.js`) so every socle route in the contract has a green assertion against the facade with a fake upstream.
+- [ ] Create `test/hermes-api-contract.test.js` so every socle route in the contract has a green assertion against the facade with a fake upstream.
 - [ ] Edit `docs/spike/pr1-facade.md` to replace the stale "28 tests" line with "29 tests", and to state that a 409 on a reused idempotency key requires a preserved body fingerprint, while a missing fingerprint and a different body yield 502.
 - [ ] Edit `scripts/hermes-facade.js` only if a contract gap forces a documented error shape or a missing operation-id lookup that the PRD already requires. Keep the HTTP allowlist. Do not add a WebSocket bridge in this PR.
 
@@ -90,7 +90,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
 - [ ] Contract tests cover every socle route in the OpenAPI file against the facade with a fake upstream, including one idempotent write replay and one auth failure. Run `npm test` and `npm run lint`.
-- [ ] `rg` over `docs/api` finds no private IP, no local absolute path, and no machine or user name. Run `node scripts/infra-guard-ci.js` on the diff.
+- [ ] `rg` over `docs/api` finds no private IP, no local absolute path, and no machine or user name. Run `git diff origin/main...HEAD | node scripts/infra-guard-ci.js --diff`.
 
 **Verify, live.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked. Ten lanes on `grok-4.7-xhigh-fast` at the PR head, per the boot recipe.
 
@@ -103,7 +103,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-c
 - [ ] Lane 7. Confirm no Swift file and no WebSocket bridge file appears in `git diff --name-only origin/main...HEAD`. Save `ha02-scope.png`. Pass when the diff stays inside the file boundaries above.
 - [ ] Lane 8. Run `npm test` and `npm run lint` at head. Save `ha02-node.png`. Pass when both exit 0.
 - [ ] Lane 9. Confirm the root API key never appears in `docs/api` examples and that the contract tells clients they never hold it. Save `ha02-root-key.png`. Pass when both hold.
-- [ ] Lane 10. Run `node scripts/infra-guard-ci.js` on the diff. Save `ha02-infra.png`. Pass when the scan exits 0.
+- [ ] Lane 10. Run `git diff origin/main...HEAD | node scripts/infra-guard-ci.js --diff`. Save `ha02-infra.png`. Pass when the scan exits 0.
 
 **Verify, perf.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.
 
