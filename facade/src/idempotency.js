@@ -22,6 +22,17 @@ function fingerprint(method, params) {
   return crypto.createHash("sha256").update(`${method}\n${canonical(params)}`).digest("hex");
 }
 
+// writeSync may write less than asked, so the loop goes on until the whole text is written
+function writeAll(fd, text) {
+  const bytes = Buffer.from(text);
+  let done = 0;
+  while (done < bytes.length) {
+    const n = fs.writeSync(fd, bytes, done, bytes.length - done);
+    if (!(n > 0)) throw Object.assign(new Error("EIO: the journal write made no progress"), { code: "EIO" });
+    done += n;
+  }
+}
+
 // A write runs at most once per (device, key). A successful result is replayed. A failed
 // call frees the key. A call whose outcome was lost (the upstream closed first, or the
 // facade stopped while the call ran) is never run again: the key answers "unknown" until
@@ -29,8 +40,12 @@ function fingerprint(method, params) {
 //
 // With a `file`, every change is appended to a journal and synced before the caller goes on.
 // `begin` is on disk before the write is forwarded, so a crash at any point leaves a record.
+// A record is written whole. After a write that failed midway, the next record starts on a new
+// line, and the torn line is ignored at replay.
 // At start the journal is replayed, a write that was still running becomes "unknown", and the
-// journal is rewritten (temporary file, sync, rename) with the live entries only.
+// journal is rewritten (temporary file, sync, rename) with the live entries only. The
+// descriptor of the temporary file becomes the journal descriptor, so no step after the rename
+// can leave it on a replaced file
 class Idempotency {
   constructor({ now = Date.now, ttlMs = IDEMPOTENCY_TTL_MS, file = null, compactAfterRecords = COMPACT_AFTER_RECORDS } = {}) {
     this.now = now;
@@ -40,6 +55,7 @@ class Idempotency {
     this.entries = new Map();
     this.fd = null;
     this.records = 0;
+    this.torn = false;
     if (file) this.open();
   }
 
@@ -100,21 +116,34 @@ class Idempotency {
       if (entry.state === "done") lines.push(JSON.stringify({ op: "done", scope, key, result: entry.result }));
       if (entry.state === "unknown") lines.push(JSON.stringify({ op: "unknown", scope, key }));
     }
-    const fd = fs.openSync(tmp, "w", 0o600);
-    fs.writeSync(fd, lines.length ? `${lines.join("\n")}\n` : "");
-    fs.fsyncSync(fd);
-    fs.closeSync(fd);
-    fs.renameSync(tmp, this.file);
-    const next = fs.openSync(this.file, "a", 0o600);
-    if (this.fd !== null) fs.closeSync(this.fd);
+    const next = fs.openSync(tmp, "w", 0o600);
+    try {
+      writeAll(next, lines.length ? `${lines.join("\n")}\n` : "");
+      fs.fsyncSync(next);
+      fs.renameSync(tmp, this.file);
+    } catch (err) {
+      fs.closeSync(next);
+      fs.rmSync(tmp, { force: true });
+      throw err;
+    }
+    const old = this.fd;
     this.fd = next;
     this.records = 0;
+    this.torn = false;
+    if (old !== null) fs.closeSync(old);
   }
 
   journal(record) {
     if (this.fd === null) return;
-    fs.writeSync(this.fd, `${JSON.stringify(record)}\n`);
-    fs.fsyncSync(this.fd);
+    try {
+      if (this.torn) writeAll(this.fd, "\n");
+      writeAll(this.fd, `${JSON.stringify(record)}\n`);
+      fs.fsyncSync(this.fd);
+    } catch (err) {
+      this.torn = true;
+      throw err;
+    }
+    this.torn = false;
     this.records += 1;
   }
 
@@ -125,7 +154,7 @@ class Idempotency {
     try {
       this.compact();
     } catch {
-      // the old journal and its descriptor are untouched
+      // the rename is the last step that can fail, so the old journal and its descriptor are still the live pair
     }
   }
 
