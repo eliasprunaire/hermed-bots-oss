@@ -16,6 +16,6 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "26"
       - name: Check program plans
         run: node scripts/check-plans.js

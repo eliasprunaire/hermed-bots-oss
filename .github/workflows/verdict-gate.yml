@@ -36,7 +36,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "26"
       - name: Post verdict-gate on the head SHA
         env:
           GITHUB_TOKEN: ${{ github.token }}
