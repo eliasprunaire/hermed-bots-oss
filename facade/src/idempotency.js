@@ -154,7 +154,7 @@ class Idempotency {
     try {
       this.compact();
     } catch {
-      // the rename is the last step that can fail, so the old journal and its descriptor are still the live pair
+      // a failure up to the rename leaves nothing to undo, so the old journal and its descriptor are still the live pair
     }
   }
 
