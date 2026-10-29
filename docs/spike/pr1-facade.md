@@ -129,6 +129,7 @@ Two requests with the same key at the same time share one Hermes call.
 2. A device has to trust the CA before it enrols, because TLS is validated before the code is sent. The CA certificate and the pin travel with the code, outside the facade. A device that gets a wrong CA from that channel is exposed.
 3. The CA key stays in the data folder of the host. Move it offline after the server certificate is issued.
 4. The idempotency keys survive a restart (journal on disk). The rate limit counters and the revocation sweep live in the process memory. The journal is written without `fsync`: it survives the end of the process, not a power cut. It holds the answers of Hermes up to 16 KiB in clear (mode 0600), for 24 hours, in the data folder: protect that folder like the audit.
+   The limit of 10 000 keys is global and the write limit is per device: one device that writes at the sustained limit (5 per second) fills the journal in about 33 minutes, and every device then gets 503 `idempotency_journal_full` until keys expire. A limit per device is the next step.
    A 5xx answer of Hermes frees the key (see "Idempotency journal"). For approval, stop, model and chat, a retry after a 5xx can run the write twice.
 5. A token has no expiry and the audit file has no rotation.
 6. The facade reads and writes small files synchronously. It is sized for a few devices.

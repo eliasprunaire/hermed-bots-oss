@@ -449,7 +449,7 @@ async function startFacade(cfg) {
   }
 
   // Hermes answers that must not reach a device: its own auth failure and its redirects
-  // Hermes did not run the request in these cases, and when the connection was refused
+  // Hermes did not run the request in these cases
   function refusal(upRes) {
     if (upRes.statusCode === 401) return "upstream_rejected";
     if (upRes.statusCode >= 300 && upRes.statusCode < 400) return "upstream_redirect";
