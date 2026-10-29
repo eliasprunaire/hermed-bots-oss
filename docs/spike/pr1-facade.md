@@ -74,18 +74,17 @@ The facade keeps one record per write key in `<data>/idempotency/<sha256 of devi
 | --- | --- | --- |
 | `pending` | written, no answer yet. After a restart, nothing finishes it | 502 `write_outcome_unknown`, Hermes is not called |
 | `done` | Hermes answered. Status, `content-type`, `cache-control`, `retry-after` and the body (up to 16 KiB) are kept | the kept answer with `Idempotency-Replayed: true`. A body over 16 KiB: 409 `idempotency_replay_unavailable` |
-| `unknown` | the connection broke, timed out or was reset after the request was sent, or the answer could not be read completely | 502 `write_outcome_unknown`, Hermes is not called |
+| `unknown` | the connection broke, timed out or was reset after the request was sent, the answer could not be read completely, or Hermes answered 5xx | 502 `write_outcome_unknown`, Hermes is not called. The first request got the 5xx of Hermes as it was |
 | no file, or the record expired (24 hours) | new write | sent to Hermes |
 
-A file that cannot be read or parsed counts as `unknown`. The same key with another body gives 409 `idempotency_key_conflict` in every state.
+A file that cannot be read or parsed, or that has no numeric `expires` (`{}`, `null`, empty), counts as `unknown`. It keeps its key for 24 hours after its last write (the modification time of the file), on read, on the hourly purge, on the purge of a full journal and at startup. A restart never frees the key of an invalid record. The same key with another body gives 409 `idempotency_key_conflict` in every state.
 
 What frees the key (the next send reaches Hermes):
 
 - Hermes certainly did not run the write: the connection was refused, Hermes answered 401 (`upstream_rejected`) or a redirect (`upstream_redirect`).
 - Hermes refused for a later retry: 408 or 429. The answer reaches the device with its `Retry-After`, and the record is not kept.
-- Hermes answered 5xx. This is a decision: a 5xx is an answer, not a lost one. A retry reaches Hermes again. Hermes deduplicates `/v1/runs` with its own key. For approval, stop, model and chat a retry after a 5xx can run the write twice if Hermes failed after it started.
 
-Every other failure keeps the key in `unknown`. A device that gets `write_outcome_unknown` does not retry with the same key: it reads the state on Hermes (`GET /v1/runs/{id}`, `GET /api/sessions/{id}/messages`), then sends a new write with a new key if the first did not happen. The doubt ends with the 24 hours of the key.
+A 5xx answer does not free the key: Hermes can answer 5xx after it ran the write, and a second send would run it twice. The device gets the 5xx once. The same key then gets 502 `write_outcome_unknown`. Every other failure keeps the key in `unknown` too. A device that gets `write_outcome_unknown` does not retry with the same key: it reads the state on Hermes (`GET /v1/runs/{id}`, `GET /api/sessions/{id}/messages`), then sends a new write with a new key if the first did not happen. The doubt ends with the 24 hours of the key.
 
 Two requests with the same key at the same time share one Hermes call.
 
@@ -109,12 +108,14 @@ Two requests with the same key at the same time share one Hermes call.
 | Code or token written in clear on disk | not stored in clear | 5b |
 | Code guessing | 429 | 5c |
 | Write with no key, with a bad key, same key with another body, concurrent same key, other device, after 24 hours | 400, 400, 409, one Hermes call, independent, new call | 6 |
-| Hermes 5xx on a write, body over the limit | not remembered, 413 | 6b |
+| Hermes 5xx on a write (500, 502, 503, 504) after it ran the write | the 5xx reaches the device once. The same key gets 502 `write_outcome_unknown`, another body 409, a new key is sent. One effect for three sends. After 24 hours: sent | 6b |
+| Body over the limit | 413, Hermes is not called | 6b |
 | Response lost after the request was sent (connection dropped) | 502 `write_outcome_unknown`. The same key never reaches Hermes again. Another body: 409. A new key: sent. After 24 hours: sent | 6c |
 | Hermes refused the connection or answered 401 | 502 `upstream_unavailable` or `upstream_rejected`. The same key is sent again | 6d |
 | Hermes answered 408 or 429 | the answer and its `Retry-After` reach the device. The key is not kept, the retry reaches Hermes | 6e |
 | Restart of the facade, with a finished write and with a write cut in flight | the finished write replays with `Idempotency-Replayed: true`, the cut write gives `write_outcome_unknown`. One Hermes call each | 6f |
-| Journal record damaged, empty, `null` or left `pending` | 502 `write_outcome_unknown`, Hermes is not called | 6g |
+| Journal record damaged, empty, `null`, `{}` or left `pending` | 502 `write_outcome_unknown`, Hermes is not called | 6g |
+| Invalid record (`{}`, no numeric `expires`, `null`, empty, broken JSON) at a restart, at the purge of a full journal, and after 24 hours | kept: the key stays `unknown`, the journal stays full. It ends 24 hours after its last write, on read and on purge | 6i |
 | Journal full | 503 `idempotency_journal_full`, Hermes is not called. A live key still replays. Expired keys leave | 6h |
 | Route outside the allowlist, traversal, wrong method, bad query | 404, 404, 405, 400 | 7 |
 | Normal role on a management route | 403 | 8 |
@@ -130,7 +131,7 @@ Two requests with the same key at the same time share one Hermes call.
 3. The CA key stays in the data folder of the host. Move it offline after the server certificate is issued.
 4. The idempotency keys survive a restart (journal on disk). The rate limit counters and the revocation sweep live in the process memory. The journal is written without `fsync`: it survives the end of the process, not a power cut. It holds the answers of Hermes up to 16 KiB in clear (mode 0600), for 24 hours, in the data folder: protect that folder like the audit.
    The limit of 10 000 keys is global and the write limit is per device: one device that writes at the sustained limit (5 per second) fills the journal in about 33 minutes, and every device then gets 503 `idempotency_journal_full` until keys expire. A limit per device is the next step.
-   A 5xx answer of Hermes frees the key (see "Idempotency journal"). For approval, stop, model and chat, a retry after a 5xx can run the write twice.
+   A 5xx answer of Hermes keeps the key as `unknown` (see "Idempotency journal"). A device that wants to retry after a 5xx reads the state on Hermes, then uses a new key. A 5xx that Hermes sent before it ran the write blocks the key for 24 hours, and the facade cannot tell the two cases apart.
 5. A token has no expiry and the audit file has no rotation.
 6. The facade reads and writes small files synchronously. It is sized for a few devices.
 7. The dashboard of the real target was not inspected: only the test instance was reachable. On the real host, run `check-local <hermes-port>` and `check-local <dashboard-port>` before opening the facade port.
@@ -237,8 +238,8 @@ guard rc=0
 
 Notes on this pass:
 
-1. It ran on commit `ec49030` (the idempotency journal, the 408 and 429 rule, the CLI audit). Passes on the earlier head `2a30e85` gave 26 of 26, then 25 of 26 (the driver sent more than 20 writes in a few seconds with one device and got 429, which is the write limit working; the driver now waits 5 seconds between the two profiles), then 26 of 26 again.
-2. The lanes `temps-2` and `accept-6` exercise the journal path (record written before the request, replay, conflict) on the test instance. The restart, the lost response, the 408 and 429 answers and the full journal have no live lane: tests 6c to 6h cover them against a fake upstream.
+1. The output above is the pass on commit `ec49030` (the idempotency journal, the 408 and 429 rule, the CLI audit). A new pass ran on commit `1d379db` (a 5xx keeps the key as `unknown`, an invalid record keeps its key for 24 hours): 26 of 26 lanes, 303 s, driver rc=0, wrapper rc=0, `GUARD OK`, audit 185 lines, the Hermes key found in no file of the evidence or of the repository. Passes on the earlier head `2a30e85` gave 26 of 26, then 25 of 26 (the driver sent more than 20 writes in a few seconds with one device and got 429, which is the write limit working; the driver now waits 5 seconds between the two profiles), then 26 of 26 again.
+2. The lanes `temps-2` and `accept-6` exercise the journal path (record written before the request, replay, conflict) on the test instance. The restart, the lost response, the 5xx answers, the 408 and 429 answers, the invalid records and the full journal have no live lane: tests 6b to 6i cover them against a fake upstream (the test instance does not answer 5xx after a write on demand).
 3. The `stop` lane checks the container process list: no `sleep 300` is left after the cancel.
 4. The test instance runs the API server platform and a fake model provider. It has no dashboard process (its listening sockets are the API port and the provider), so `check-local` proves that the published API port answers on the loopback only. It does not prove the dashboard of the real target. See item 7 of "Not done, and risks".
 5. Everything ran on the loopback of one machine. A device on a real network was not tested.
