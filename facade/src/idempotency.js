@@ -184,6 +184,14 @@ class Idempotency {
     return { state: "pending", wait: new Promise((resolve) => entry.waiters.push(resolve)) };
   }
 
+  // The journal could not record a change to a call that is already out. The key must not stay
+  // pending: it becomes unknown in memory at once, which is also what a restart would make of
+  // a `begin` with nothing after it, and every waiter is woken. The call is never run again.
+  lose(entry) {
+    entry.state = "unknown";
+    this.settle(entry, { state: "unknown" });
+  }
+
   complete(scope, key, result) {
     const entry = this.entries.get(`${scope}\0${key}`);
     if (!entry) return;
@@ -191,7 +199,12 @@ class Idempotency {
       this.markUnknown(scope, key);
       return;
     }
-    this.journal({ op: "done", scope, key, result });
+    try {
+      this.journal({ op: "done", scope, key, result });
+    } catch (err) {
+      this.lose(entry);
+      throw err;
+    }
     entry.state = "done";
     entry.result = result;
     this.settle(entry, { state: "replay", result });
@@ -202,7 +215,12 @@ class Idempotency {
     const id = `${scope}\0${key}`;
     const entry = this.entries.get(id);
     if (!entry) return;
-    this.journal({ op: "release", scope, key });
+    try {
+      this.journal({ op: "release", scope, key });
+    } catch (err) {
+      this.lose(entry);
+      throw err;
+    }
     this.entries.delete(id);
     this.settle(entry, { state: "released" });
     this.compactIfDue();
@@ -211,7 +229,12 @@ class Idempotency {
   markUnknown(scope, key) {
     const entry = this.entries.get(`${scope}\0${key}`);
     if (!entry || entry.state !== "pending") return;
-    this.journal({ op: "unknown", scope, key });
+    try {
+      this.journal({ op: "unknown", scope, key });
+    } catch (err) {
+      this.lose(entry);
+      throw err;
+    }
     entry.state = "unknown";
     this.settle(entry, { state: "unknown" });
     this.compactIfDue();
