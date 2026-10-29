@@ -10,7 +10,7 @@ PR-0 ([pr0-api-feasibility.md](pr0-api-feasibility.md)) deferred the single writ
 | --- | --- |
 | Software | `hermes serve` 0.22.5, built from tag `v0.22.5` (commit `bf0203a794a07aac3ff764972ab9087baa4e4f4e`) of the public repository |
 | Data | an empty throwaway data directory, deleted after the run |
-| Network | bound to the loopback of the test machine only |
+| Network | bound to the loopback only |
 | Credential | a throwaway process-wide session token (`HERMES_DASHBOARD_SESSION_TOKEN`), valid for that process only |
 | Model provider | none configured. Turns fail inside Hermes, which is enough to prove the routes and costs nothing |
 
@@ -49,7 +49,9 @@ Reads that the product needs are `session.list`, `session.most_recent`, `session
 
 ```
 hermes serve --port <test port>        # on a throwaway data directory, loopback only
-HERMES_TEST_PORT=<test port> HERMES_TEST_TOKEN=<throwaway token> node facade/testkit/live-smoke.js
+HERMES_TEST_PORT=<test port> HERMES_TEST_TOKEN=<throwaway token> HERMES_TEST_HOME=<throwaway data directory> node facade/testkit/live-smoke.js
 ```
 
 The script starts the facade with a generated internal CA, enrolls devices, and prints one `PASS` or `FAIL` line per check. It prints no credential.
+
+**Guard.** The script writes only to a disposable instance, and it checks that before any write. The operator marks the throwaway data directory by creating the file `.hermed-bots-disposable` in it with the text `disposable test instance, writes allowed` and a newline. The script then reads `GET /api/status` (a read) and requires the instance to report that same directory. With no marker, a wrong marker text, a missing report or a different directory, it stops with `refusing to write` and has sent nothing but that one read.
