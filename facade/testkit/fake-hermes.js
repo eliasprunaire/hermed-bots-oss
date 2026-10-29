@@ -8,8 +8,9 @@ const TOKEN = "upstream-test-credential-0001";
 // A stand-in for `hermes serve` on the loopback. It mimics what the test instance showed:
 // the credential as a header or a query token, strict JSON-RPC parameters, a status route
 // that carries install paths, and replies that carry headers a device must never see.
-async function startFakeHermes({ host = "127.0.0.1", delayMs = 0 } = {}) {
+async function startFakeHermes({ host = "127.0.0.1", delayMs = 0, token = TOKEN, home = "home-value" } = {}) {
   const calls = {};
+  const seen = [];
   const requests = [];
   const sockets = new Set();
   let nextRow = 1;
@@ -17,7 +18,7 @@ async function startFakeHermes({ host = "127.0.0.1", delayMs = 0 } = {}) {
 
   const server = http.createServer((req, res) => {
     requests.push({ method: req.method, url: req.url, headers: { ...req.headers } });
-    if (req.headers["x-hermes-session-token"] !== TOKEN) {
+    if (req.headers["x-hermes-session-token"] !== token) {
       res.writeHead(401, { "content-type": "application/json" });
       res.end('{"detail":"Unauthorized"}');
       return;
@@ -35,7 +36,7 @@ async function startFakeHermes({ host = "127.0.0.1", delayMs = 0 } = {}) {
       });
     } else if (url.pathname === "/api/sessions/moved") {
       send(302, {}, { location: `http://${host}:${server.address().port}/api/sessions` });
-    } else if (url.pathname === "/api/sessions/s1/messages") {
+    } else if (/^\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
       send(200, { messages: [{ role: "user", content: "hello" }] });
     } else if (url.pathname === "/api/status") {
       send(200, {
@@ -43,7 +44,7 @@ async function startFakeHermes({ host = "127.0.0.1", delayMs = 0 } = {}) {
         gateway_running: true,
         active_sessions: 2,
         overall: "ok",
-        hermes_home: "home-value",
+        hermes_home: home,
         config_path: "config-value",
         install_id: "0123456789abcdef",
       });
@@ -54,7 +55,7 @@ async function startFakeHermes({ host = "127.0.0.1", delayMs = 0 } = {}) {
 
   server.on("upgrade", (req, socket) => {
     const url = new URL(req.url, "http://localhost");
-    if (url.pathname !== "/api/ws" || url.searchParams.get("token") !== TOKEN) {
+    if (url.pathname !== "/api/ws" || url.searchParams.get("token") !== token) {
       socket.end("HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\n\r\n");
       return;
     }
@@ -67,6 +68,7 @@ async function startFakeHermes({ host = "127.0.0.1", delayMs = 0 } = {}) {
       const { id, method } = msg;
       const params = msg.params || {};
       calls[method] = (calls[method] || 0) + 1;
+      seen.push({ method, id });
       const reply = (result) => peer.send(JSON.stringify({ jsonrpc: "2.0", id, result }));
       const fail = (code, message) => peer.send(JSON.stringify({ jsonrpc: "2.0", id, error: { code, message } }));
       const allowed = {
@@ -110,9 +112,16 @@ async function startFakeHermes({ host = "127.0.0.1", delayMs = 0 } = {}) {
 
   return {
     port: server.address().port,
-    token: TOKEN,
+    token,
     calls,
+    seen,
     requests,
+    emit(params) {
+      for (const peer of sockets) peer.send(JSON.stringify({ jsonrpc: "2.0", method: "event", params }));
+    },
+    emitRaw(text) {
+      for (const peer of sockets) peer.send(text);
+    },
     dropSockets() {
       for (const peer of sockets) peer.socket.destroy();
     },

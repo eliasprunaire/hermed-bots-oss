@@ -306,7 +306,7 @@ function createFacade(config, { now = Date.now, tls } = {}) {
       if (config.checkExposure) {
         const exposure = await checkExposure({ host: config.upstreamHost, port: config.upstreamPort });
         if (!exposure.ok) {
-          audit.record("exposure_refused", { exposedOn: exposure.exposedOn });
+          audit.record("exposure_refused", { exposedOn: exposure.exposedOn, unverified: exposure.unverified, loopbackHost: exposure.loopbackHost });
           throw new Error("Hermes is reachable beyond the loopback: refusing to start, the facade would be bypassable");
         }
       }
@@ -314,7 +314,7 @@ function createFacade(config, { now = Date.now, tls } = {}) {
         server.once("error", reject);
         server.listen(config.listenPort, config.listenHost, resolve);
       });
-      sweep = setInterval(() => store.refresh(), 1000);
+      sweep = setInterval(() => store.refresh(), config.sweepMs || 1000);
       sweep.unref();
       audit.record("start", {});
       return server.address().port;

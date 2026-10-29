@@ -6,6 +6,21 @@ const path = require("node:path");
 const SECRET_KEY = /token|secret|authorization|cookie|password|^code$/i;
 const RING_SIZE = 500;
 const MAX_VALUE = 200;
+const TAIL_BYTES = 256 * 1024;
+
+function tail(file, bytes) {
+  const fd = fs.openSync(file, "r");
+  try {
+    const size = fs.fstatSync(fd).size;
+    const length = Math.min(size, bytes);
+    const buffer = Buffer.alloc(length);
+    fs.readSync(fd, buffer, 0, length, size - length);
+    const text = buffer.toString("utf8");
+    return size > length ? text.slice(text.indexOf("\n") + 1) : text;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
 
 // Shapes of credentials. A value that carries one is masked wherever it sits, whatever its field is called.
 const SECRET_SHAPES = [
@@ -21,12 +36,17 @@ const SECRET_SHAPES = [
 
 // Append-only JSON lines. Every timestamp is UTC (ISO 8601 with a Z suffix).
 // Nothing a device controls goes in raw. A value is masked when its field name looks secret,
-// when it holds a known credential shape, or when it equals a secret the audit was told about.
+// when it holds a known credential shape, or when it contains a secret the audit was told
+// about, whatever its length.
 class Audit {
   constructor({ file = null, now = Date.now, secrets = [] } = {}) {
     this.file = file;
     this.now = now;
-    this.secrets = secrets.filter((s) => typeof s === "string" && s.length >= 8);
+    this.secrets = secrets
+      .filter((s) => typeof s === "string" && s.length > 0)
+      .flatMap((s) => [s, encodeURIComponent(s)])
+      .filter((s, i, all) => all.indexOf(s) === i)
+      .sort((a, b) => b.length - a.length);
     this.ring = [];
     if (file) fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   }
@@ -52,9 +72,26 @@ class Audit {
     return entry;
   }
 
+  // With a file, the file is the source, so entries written by the host CLI show up too.
   recent(limit = 100) {
     const n = Math.max(1, Math.min(Number(limit) || 100, RING_SIZE));
-    return this.ring.slice(-n);
+    if (!this.file) return this.ring.slice(-n);
+    let text;
+    try {
+      text = tail(this.file, TAIL_BYTES);
+    } catch {
+      return this.ring.slice(-n);
+    }
+    const entries = [];
+    for (const line of text.split("\n")) {
+      try {
+        const entry = JSON.parse(line);
+        if (entry && typeof entry === "object" && typeof entry.ts === "string") entries.push(entry);
+      } catch {
+        continue;
+      }
+    }
+    return entries.slice(-n);
   }
 }
 

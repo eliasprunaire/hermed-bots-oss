@@ -289,7 +289,7 @@ test("audit: unit masking by value, by field name, and for known secrets", () =>
   });
   for (const key of ["a", "b", "c", "d", "e", "f", "g", "h", "j"]) assert.match(entry[key], /\[redacted\]/, key);
   assert.ok(!entry.i.includes(known));
-  assert.ok(entry.i.includes("tiny"), "a secret under 8 characters is not a masking rule");
+  assert.ok(!entry.i.includes("tiny"), "a configured secret is masked whatever its length");
   assert.equal(entry.k, "line break ");
   assert.ok(entry.l.length <= 203);
   assert.equal(entry.m, 7);

@@ -19,10 +19,10 @@ function pki() {
 }
 
 // Fake Hermes + facade on the loopback, real TLS, real enrollment calls. Ports are ephemeral.
-async function startStack({ now, ratePerMinute = 1000, delayMs = 0, checkExposure = false } = {}) {
+async function startStack({ now, ratePerMinute = 1000, delayMs = 0, checkExposure = false, upstreamToken, sweepMs } = {}) {
   const material = pki();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "facade-state-"));
-  const hermes = await startFakeHermes({ delayMs });
+  const hermes = await startFakeHermes({ delayMs, token: upstreamToken });
   const config = {
     stateDir: dir,
     stateFile: path.join(dir, "state.json"),
@@ -35,6 +35,7 @@ async function startStack({ now, ratePerMinute = 1000, delayMs = 0, checkExposur
     upstreamToken: hermes.token,
     ratePerMinute,
     checkExposure,
+    sweepMs,
   };
   const trust = { ca: material.caCert, pin: material.pin };
   const stack = { hermes, config, trust, dir };

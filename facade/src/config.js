@@ -8,13 +8,31 @@ const ENROLLMENT_TTL_MS = 5 * 60 * 1000;
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 4096;
 const MAX_WS_MESSAGE_BYTES = 1024 * 1024;
+const MIN_SECRET_LENGTH = 16;
+
+function ipv6Groups(text) {
+  const zoneless = text.split("%")[0];
+  const halves = zoneless.split(/:{2}/);
+  if (halves.length > 2) return null;
+  const parse = (part) => (part === "" ? [] : part.split(":"));
+  const head = parse(halves[0]);
+  const tail = halves.length === 2 ? parse(halves[1]) : [];
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const groups = [...head, ...Array(halves.length === 2 ? missing : 0).fill("0"), ...tail];
+  if (!groups.every((g) => /^[0-9a-f]{1,4}$/i.test(g))) return null;
+  return groups.map((g) => parseInt(g, 16));
+}
 
 function isLoopbackHost(host) {
   if (typeof host !== "string" || host === "") return false;
   if (host === "localhost") return true;
   const bare = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
   if (net.isIPv4(bare)) return bare.split(".")[0] === "127";
-  if (net.isIPv6(bare)) return bare === "::1" || bare === "0:0:0:0:0:0:0:1";
+  if (net.isIPv6(bare)) {
+    const groups = ipv6Groups(bare);
+    return groups !== null && groups.slice(0, 7).every((g) => g === 0) && groups[7] === 1;
+  }
   return false;
 }
 
@@ -43,6 +61,9 @@ function validate(config) {
   }
   if (!config.upstreamToken) {
     throw new Error("the upstream credential is required (HERMES_FACADE_UPSTREAM_TOKEN or HERMES_FACADE_UPSTREAM_TOKEN_FILE)");
+  }
+  if (config.upstreamToken.length < MIN_SECRET_LENGTH || /\s/.test(config.upstreamToken)) {
+    throw new Error(`the upstream credential must be at least ${MIN_SECRET_LENGTH} characters with no whitespace`);
   }
   if (config.listenPort === config.upstreamPort && config.listenPort !== 0) {
     throw new Error("the facade port must differ from the Hermes port");
@@ -83,6 +104,7 @@ module.exports = {
   IDEMPOTENCY_TTL_MS,
   MAX_BODY_BYTES,
   MAX_WS_MESSAGE_BYTES,
+  MIN_SECRET_LENGTH,
   fromEnv,
   isLoopbackHost,
   upstreamEndpoint,

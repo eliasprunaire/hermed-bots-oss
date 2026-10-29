@@ -2,8 +2,10 @@
 "use strict";
 
 // Live check of the facade in front of a Hermes TEST instance (never a production one).
-// HERMES_TEST_PORT and HERMES_TEST_TOKEN name a `hermes serve` that runs on this machine's
-// loopback with a throwaway data directory. Nothing here prints a credential.
+// HERMES_TEST_PORT and HERMES_TEST_TOKEN name a `hermes serve` that runs on the loopback with a
+// throwaway data directory, and HERMES_TEST_HOME names that directory. The script writes
+// nothing until `assertDisposable` proves that the directory carries the disposable marker and
+// that the running instance reports the same directory. Nothing here prints a credential.
 
 const fs = require("node:fs");
 const os = require("node:os");
@@ -11,6 +13,7 @@ const path = require("node:path");
 const { createFacade } = require("../src/server");
 const { generatePki } = require("../src/tls");
 const { connectWs, request } = require("./client");
+const { assertDisposable } = require("./disposable");
 
 const port = Number(process.env.HERMES_TEST_PORT);
 const token = process.env.HERMES_TEST_TOKEN;
@@ -26,6 +29,8 @@ function check(name, ok, detail = "") {
 }
 
 async function main() {
+  await assertDisposable({ port, token, home: process.env.HERMES_TEST_HOME });
+  check("the instance is marked disposable and reports the marked data directory", true);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "facade-live-"));
   const material = generatePki({ dir: path.join(dir, "tls") });
   const config = {

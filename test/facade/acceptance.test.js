@@ -13,6 +13,7 @@ const http = require("node:http");
 const { checkExposure } = require("../../facade/src/exposure");
 const { createFacade } = require("../../facade/src/server");
 const { generatePki } = require("../../facade/src/tls");
+const { outsideAddress, wildcardAddress } = require("../../facade/testkit/addresses");
 const { pki, startStack } = require("../../facade/testkit/stack");
 
 const T0 = Date.parse("2026-10-29T12:00:00Z");
@@ -27,15 +28,6 @@ function clock(start = T0) {
 }
 
 const WRITE = { session_id: "s1", text: "hello" };
-
-function outsideAddress() {
-  for (const entries of Object.values(os.networkInterfaces())) {
-    for (const entry of entries || []) {
-      if (!entry.internal && entry.family === "IPv4") return entry.address;
-    }
-  }
-  return null;
-}
 
 test("1. no access without a valid token", async (t) => {
   const now = clock();
@@ -158,7 +150,7 @@ test("4. a device never sees Hermes over HTTP", async (t) => {
 
   const tls = { key: pki().serverKey, cert: pki().serverCert };
   const foreign = outsideAddress();
-  for (const host of ["::", "", "not-a-loopback", ...(foreign ? [foreign] : [])]) {
+  for (const host of [await wildcardAddress(), "", "not-a-loopback", ...(foreign ? [foreign] : [])]) {
     assert.throws(() => createFacade({ ...stack.config, upstreamHost: host }, { tls }), /loopback/, `host ${host ? "(an address or name)" : "(empty)"}`);
   }
   assert.throws(() => createFacade({ ...stack.config, upstreamPort: stack.port, listenPort: stack.port }, { tls: { key: pki().serverKey, cert: pki().serverCert } }), /differ/);
@@ -166,7 +158,7 @@ test("4. a device never sees Hermes over HTTP", async (t) => {
 
 test("4b. the facade refuses to start when Hermes is reachable beyond the loopback", async (t) => {
   const outside = outsideAddress();
-  if (!outside) return t.skip("no non-loopback interface on this machine");
+  if (!outside) return t.skip("no non-loopback interface");
   const open = http.createServer((_req, res) => res.end("x"));
   await new Promise((resolve) => open.listen(0, outside, resolve));
   t.after(() => open.close());
@@ -194,7 +186,7 @@ test("5. an expired or reused enrollment code is refused", async (t) => {
   const now = clock();
   const stack = await startStack({ now });
   t.after(() => stack.close());
-  const enroll = (code, name = "phone") => stack.call({ method: "POST", path: "/facade/enroll", body: { code, name } });
+  const enroll = (code, name = "device") => stack.call({ method: "POST", path: "/facade/enroll", body: { code, name } });
 
   const first = stack.facade.store.createEnrollment({ role: "normal" });
   assert.equal(first.expiresAt - T0, 5 * 60 * 1000, "a code lives five minutes");

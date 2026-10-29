@@ -8,13 +8,14 @@ const path = require("node:path");
 const { Writable } = require("node:stream");
 const { Audit } = require("../../facade/src/audit");
 const { main } = require("../../facade/bin/hermes-facade");
-const { fromEnv, isLoopbackHost } = require("../../facade/src/config");
+const { MIN_SECRET_LENGTH, fromEnv, isLoopbackHost } = require("../../facade/src/config");
 const { Idempotency, fingerprint } = require("../../facade/src/idempotency");
 const { rpcClass } = require("../../facade/src/policy");
 const { RateLimiter } = require("../../facade/src/ratelimit");
 const { Store } = require("../../facade/src/store");
 const { generatePki, spkiPin } = require("../../facade/src/tls");
 const { WebSocketPeer, encodeFrame } = require("../../facade/src/websocket");
+const { loopbackV6, outsideAddress, scopedAddress, wildcardAddress } = require("../../facade/testkit/addresses");
 const { startStack } = require("../../facade/testkit/stack");
 const { EventEmitter } = require("node:events");
 
@@ -108,7 +109,7 @@ test("enrollment: bad names and bodies are refused and the attempts are limited"
   for (const body of [{ code, name: "" }, { code, name: "x".repeat(65) }, { code, name: "<script>" }, { name: "n" }, { code: 12, name: "n" }]) {
     assert.equal((await stack.call({ method: "POST", path: "/facade/enroll", body })).status, 400, JSON.stringify(body));
   }
-  const ok = await stack.call({ method: "POST", path: "/facade/enroll", body: { code: code.toLowerCase().replace(/-/g, " "), name: "Phone d'Elias (1)" } });
+  const ok = await stack.call({ method: "POST", path: "/facade/enroll", body: { code: code.toLowerCase().replace(/-/g, " "), name: "Device A (1)" } });
   assert.equal(ok.status, 201, "a code typed in lower case with spaces is accepted");
   const big = await stack.call({ method: "POST", path: "/facade/enroll", body: { code, name: "n".repeat(6000) } });
   assert.ok([400, 413].includes(big.status));
@@ -212,7 +213,7 @@ test("store: tokens and codes are kept as hashes, state survives a restart", () 
   let now = T0;
   const store = new Store({ file, now: () => now });
   const { code } = store.createEnrollment({ role: "admin" });
-  const redeemed = store.redeemEnrollment(code, "laptop");
+  const redeemed = store.redeemEnrollment(code, "device-b");
   assert.equal(redeemed.ok, true);
   const text = fs.readFileSync(file, "utf8");
   assert.ok(!text.includes(redeemed.token) && !text.includes(code.replace(/-/g, "")), "only hashes on disk");
@@ -276,17 +277,26 @@ test("rate limiter, idempotency and policy units", async () => {
   assert.equal(rpcClass("admin", "shell.exec"), null);
 });
 
-test("config: Hermes must be local, secrets come from the environment", () => {
+test("config: Hermes must be local, secrets come from the environment", async () => {
+  const wildcard = await wildcardAddress();
   assert.equal(isLoopbackHost("127.0.0.1"), true);
-  assert.equal(isLoopbackHost("::1"), true);
   assert.equal(isLoopbackHost("localhost"), true);
-  for (const other of ["", "::", "not-a-loopback", undefined, 42]) assert.equal(isLoopbackHost(other), false);
-  const env = { HERMES_FACADE_STATE_DIR: "state", HERMES_FACADE_UPSTREAM_TOKEN: "t", HERMES_FACADE_LISTEN_PORT: "0", HERMES_FACADE_UPSTREAM_PORT: "1" };
+  const v6 = loopbackV6();
+  if (v6) {
+    assert.equal(isLoopbackHost(v6), true);
+    assert.equal(isLoopbackHost(`[${v6}]`), true);
+    assert.equal(isLoopbackHost(v6.replace(/1$/, "2")), false, "a neighbour of the loopback address is not the loopback");
+  }
+  const others = ["", "not-a-loopback", undefined, 42, wildcard, outsideAddress(), scopedAddress()].filter((v) => v !== null);
+  for (const other of others) assert.equal(isLoopbackHost(other), false);
+  const env = { HERMES_FACADE_STATE_DIR: "state", HERMES_FACADE_UPSTREAM_TOKEN: "t".repeat(MIN_SECRET_LENGTH), HERMES_FACADE_LISTEN_PORT: "0", HERMES_FACADE_UPSTREAM_PORT: "1" };
   const config = fromEnv(env);
   assert.equal(config.listenHost, "127.0.0.1", "the facade listens on the loopback unless told otherwise");
   assert.equal(config.listenPort, 0);
   assert.equal(config.checkExposure, true);
-  assert.throws(() => fromEnv({ ...env, HERMES_FACADE_UPSTREAM_HOST: "::" }), /loopback/);
+  assert.throws(() => fromEnv({ ...env, HERMES_FACADE_UPSTREAM_HOST: wildcard }), /loopback/);
+  assert.throws(() => fromEnv({ ...env, HERMES_FACADE_UPSTREAM_TOKEN: "t".repeat(MIN_SECRET_LENGTH - 1) }), /at least 16 characters/);
+  assert.throws(() => fromEnv({ ...env, HERMES_FACADE_UPSTREAM_TOKEN: `${"t".repeat(MIN_SECRET_LENGTH)} x` }), /no whitespace/);
   assert.throws(() => fromEnv({ ...env, HERMES_FACADE_LISTEN_PORT: undefined }), /LISTEN_PORT is required/);
   assert.throws(() => fromEnv({ ...env, HERMES_FACADE_UPSTREAM_PORT: undefined }), /UPSTREAM_PORT is required/);
   assert.throws(() => fromEnv({ HERMES_FACADE_STATE_DIR: "state", HERMES_FACADE_LISTEN_PORT: "0", HERMES_FACADE_UPSTREAM_PORT: "1" }), /credential/);

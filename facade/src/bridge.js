@@ -43,7 +43,9 @@ class Bridge {
     this.idempotency = idempotency;
     this.limiter = limiter;
     this.audit = audit;
-    this.inflight = new Map();
+    this.routes = new Map();
+    this.idPrefix = crypto.randomBytes(6).toString("hex");
+    this.idCounter = 0;
     this.pending = [];
     this.ready = false;
     this.deviceGone = false;
@@ -67,26 +69,60 @@ class Bridge {
     else this.pending.push(text);
   }
 
+  // Every request leaves under an id the facade made, so a response is matched by the facade's
+  // id and never by one a device chose. A device id is put back on the way out.
+  nextUpstreamId() {
+    this.idCounter += 1;
+    return `fb-${this.idPrefix}-${this.idCounter}`;
+  }
+
+  forward(message, route) {
+    if (!route) {
+      const { id: _dropped, ...rest } = message;
+      this.toUpstream(JSON.stringify(rest));
+      return;
+    }
+    const upstreamId = this.nextUpstreamId();
+    this.routes.set(upstreamId, route);
+    this.toUpstream(JSON.stringify({ ...message, id: upstreamId }));
+  }
+
   onUpstreamMessage(data) {
     if (typeof data !== "string") return;
+    if (!this.deviceGone && !this.store.isActive(this.device.id)) {
+      this.terminate("revoked");
+      return;
+    }
     let parsed = null;
     try {
       parsed = JSON.parse(data);
     } catch {
       parsed = null;
     }
-    if (parsed && parsed.id !== undefined && this.inflight.has(parsed.id) && ("result" in parsed || "error" in parsed)) {
-      const key = this.inflight.get(parsed.id);
-      this.inflight.delete(parsed.id);
+    const isResponse = parsed && typeof parsed === "object" && ("result" in parsed || "error" in parsed) && !("method" in parsed);
+    if (!isResponse) {
+      if (!this.deviceGone) this.ws.send(data);
+      return;
+    }
+    const route = typeof parsed.id === "string" ? this.routes.get(parsed.id) : undefined;
+    if (!route) return;
+    this.routes.delete(parsed.id);
+    if (route.key !== undefined) {
       try {
-        if ("error" in parsed) this.idempotency.release(this.device.id, key);
-        else this.idempotency.complete(this.device.id, key, parsed.result);
+        if ("error" in parsed) this.idempotency.release(this.device.id, route.key);
+        else this.idempotency.complete(this.device.id, route.key, parsed.result);
       } catch {
         this.audit.record("journal_error", { device: this.device.id });
       }
-      if (this.deviceGone && this.inflight.size === 0) this.upstream.close();
     }
-    this.ws.send(data);
+    if (this.deviceGone) {
+      if (!this.hasWrites()) {
+        clearTimeout(this.drain);
+        this.upstream.close();
+      }
+      return;
+    }
+    this.ws.send(JSON.stringify({ ...parsed, id: route.id }));
   }
 
   onUpstreamClose() {
@@ -99,22 +135,29 @@ class Bridge {
 
   onDeviceClose() {
     this.deviceGone = true;
-    if (this.inflight.size === 0) {
+    if (!this.hasWrites()) {
       this.upstream.close();
       return;
     }
-    setTimeout(() => this.upstream.close(), DRAIN_MS).unref();
+    this.drain = setTimeout(() => this.upstream.close(), DRAIN_MS);
+    this.drain.unref();
+  }
+
+  hasWrites() {
+    for (const route of this.routes.values()) if (route.key !== undefined) return true;
+    return false;
   }
 
   forgetInflight() {
-    for (const key of this.inflight.values()) {
+    for (const route of this.routes.values()) {
+      if (route.key === undefined) continue;
       try {
-        this.idempotency.markUnknown(this.device.id, key);
+        this.idempotency.markUnknown(this.device.id, route.key);
       } catch {
         this.audit.record("journal_error", { device: this.device.id });
       }
     }
-    this.inflight.clear();
+    this.routes.clear();
   }
 
   terminate(reason) {
@@ -135,7 +178,12 @@ class Bridge {
       this.ws.send(rpcError(null, CODE.invalid, "invalid request"));
       return;
     }
+    const hasId = "id" in message;
     const id = message.id;
+    if (hasId && id !== null && typeof id !== "string" && typeof id !== "number") {
+      this.ws.send(rpcError(null, CODE.invalid, "id must be a string, a number or null"));
+      return;
+    }
     if (!this.store.isActive(this.device.id)) {
       this.terminate("revoked");
       return;
@@ -157,7 +205,7 @@ class Bridge {
       return;
     }
     if (kind === "read") {
-      this.toUpstream(text);
+      this.forward(message, hasId ? { id } : null);
       return;
     }
     await this.write(message);
@@ -174,10 +222,6 @@ class Bridge {
       this.ws.send(rpcError(id, CODE.keyRequired, "a write needs params.idempotency_key (8 to 128 characters of A-Z a-z 0-9 . _ : -)"));
       return;
     }
-    if (this.inflight.has(id)) {
-      this.ws.send(rpcError(id, CODE.badParams, "this id is already in flight"));
-      return;
-    }
     let outcome;
     try {
       outcome = this.idempotency.begin(this.device.id, key, fingerprint(method, params));
@@ -187,6 +231,11 @@ class Bridge {
       return;
     }
     const resolved = outcome.state === "pending" ? await outcome.wait : outcome;
+    if (!this.store.isActive(this.device.id)) {
+      if (resolved.state === "new") this.settleUnsent(key);
+      this.terminate("revoked");
+      return;
+    }
     const known = [...RPC_WRITES, ...RPC_ADMIN_WRITES].find((name) => name === method) || "[unlisted]";
     const audit = (result) => this.audit.record("write", { device: this.device.id, method: known, result });
     switch (resolved.state) {
@@ -208,8 +257,15 @@ class Bridge {
         return;
       default:
         audit("forwarded");
-        this.inflight.set(id, key);
-        this.toUpstream(JSON.stringify({ ...message, params }));
+        this.forward({ ...message, params }, { id, key });
+    }
+  }
+
+  settleUnsent(key) {
+    try {
+      this.idempotency.release(this.device.id, key);
+    } catch {
+      this.audit.record("journal_error", { device: this.device.id });
     }
   }
 }

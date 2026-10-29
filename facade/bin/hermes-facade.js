@@ -2,6 +2,7 @@
 "use strict";
 
 const path = require("node:path");
+const { Audit } = require("../src/audit");
 const { fromEnv, upstreamEndpoint } = require("../src/config");
 const { checkExposure } = require("../src/exposure");
 const { createFacade } = require("../src/server");
@@ -15,7 +16,7 @@ const USAGE = `Usage: hermes-facade <command>
   enroll [--role admin|normal]  print a one-use enrollment code (valid 5 minutes)
   devices                     list devices
   revoke <device-id>          revoke one device now
-  check-exposure              fail when Hermes is reachable beyond the loopback
+  check-exposure              fail when Hermes is reachable beyond the loopback, a scoped address included
 
 Settings come from the environment: HERMES_FACADE_STATE_DIR (required), HERMES_FACADE_TLS_DIR,
 HERMES_FACADE_LISTEN_HOST, HERMES_FACADE_LISTEN_PORT (required), HERMES_FACADE_UPSTREAM_HOST,
@@ -32,6 +33,10 @@ function option(args, name) {
 function stateDir(env) {
   if (!env.HERMES_FACADE_STATE_DIR) throw new Error("HERMES_FACADE_STATE_DIR is required");
   return path.resolve(env.HERMES_FACADE_STATE_DIR);
+}
+
+function hostAudit(env) {
+  return new Audit({ file: path.join(stateDir(env), "audit.jsonl") });
 }
 
 function tlsDir(env) {
@@ -62,6 +67,7 @@ async function main(argv, env = process.env, out = process.stdout) {
       const role = option(args, "--role")[0] || "normal";
       const store = new Store({ file: path.join(stateDir(env), "state.json") });
       const made = store.createEnrollment({ role, createdBy: "host" });
+      hostAudit(env).record("enrollment_created", { device: "host", role: made.role });
       print(`code ${made.code}`);
       print(`role ${made.role}`);
       print(`expires ${new Date(made.expiresAt).toISOString()}`);
@@ -77,12 +83,15 @@ async function main(argv, env = process.env, out = process.stdout) {
     case "revoke": {
       const store = new Store({ file: path.join(stateDir(env), "state.json") });
       const done = store.revoke(args[0]);
+      const audit = hostAudit(env);
+      if (done) audit.record("revoke", { device: "host", target: done.id });
+      else audit.record("revoke_denied", { device: "host", reason: "unknown_device" });
       print(done ? `revoked ${done.id}` : "unknown device");
       return done ? 0 : 1;
     }
     case "check-exposure": {
       const result = await checkExposure(upstreamEndpoint(env));
-      print(result.ok ? "PASS the Hermes port is reachable on the loopback only" : `FAIL loopback host ${result.loopbackHost}, reachable on ${result.exposedOn} non-loopback interface(s)`);
+      print(result.ok ? "PASS the Hermes port is reachable on the loopback only" : `FAIL loopback host ${result.loopbackHost}, reachable on ${result.exposedOn} non-loopback address(es), ${result.unverified} unverified`);
       return result.ok ? 0 : 1;
     }
     default:
