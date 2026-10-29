@@ -8,7 +8,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
+const { EventEmitter } = require("node:events");
 const http = require("node:http");
+const net = require("node:net");
 const os = require("node:os");
 const path = require("node:path");
 const { execFile } = require("node:child_process");
@@ -16,7 +18,7 @@ const { Writable } = require("node:stream");
 const { main } = require("../../facade/bin/hermes-facade");
 const { Audit } = require("../../facade/src/audit");
 const { MIN_SECRET_LENGTH } = require("../../facade/src/config");
-const { checkExposure, targets } = require("../../facade/src/exposure");
+const { checkExposure, probe, targets } = require("../../facade/src/exposure");
 const { outsideAddress, scopedAddress, wildcardAddress } = require("../../facade/testkit/addresses");
 const { MARKER_NAME, MARKER_TEXT, assertDisposable } = require("../../facade/testkit/disposable");
 const { startFakeHermes } = require("../../facade/testkit/fake-hermes");
@@ -156,6 +158,62 @@ test("exposure: a listener reachable on a scoped address alone fails the check",
   const unsure = await checkExposure({ host: "localhost", port: 1, interfaces, connect: async (target) => (target === "routable-v4" ? "unknown" : "closed") });
   assert.equal(unsure.ok, false, "a probe that proves nothing fails closed");
   assert.equal(unsure.unverified, 1);
+});
+
+// A socket that does what the test says: stay silent, fail with a code, or connect.
+function scripted(behaviour) {
+  return () => {
+    const socket = new EventEmitter();
+    let timer = null;
+    socket.destroyed = false;
+    socket.destroy = () => {
+      socket.destroyed = true;
+      clearTimeout(timer);
+    };
+    socket.setTimeout = (ms, onTimeout) => {
+      if (behaviour === "silent") timer = setTimeout(onTimeout, ms);
+    };
+    setImmediate(() => {
+      if (behaviour === "connect") socket.emit("connect");
+      else if (behaviour !== "silent") socket.emit("error", Object.assign(new Error("probe"), { code: behaviour }));
+    });
+    return socket;
+  };
+}
+
+test("exposure: the real probe keeps only a refusal as proof of closure", async () => {
+  const outcome = (behaviour) => probe("probe-target", 1, 30, scripted(behaviour));
+  assert.equal(await outcome("connect"), "open");
+  assert.equal(await outcome("ECONNREFUSED"), "closed");
+  assert.equal(await outcome("silent"), "unknown", "a timeout proves nothing");
+  for (const code of ["ETIMEDOUT", "ECONNRESET", "EHOSTUNREACH", "ENETUNREACH", "EADDRNOTAVAIL", "ENETDOWN", "EACCES", "EINVAL", "EPERM", "ENOTFOUND", undefined]) {
+    assert.equal(await outcome(code), "unknown", `error ${code} is ambiguous`);
+  }
+  const dial = () => {
+    throw new Error("dial failed");
+  };
+  assert.equal(await probe("probe-target", 1, 30, dial), "unknown");
+});
+
+test("exposure: a probe that times out fails the check, through the real probe", async () => {
+  const interfaces = { eth0: [{ address: "routable-v4", family: "IPv4", internal: false }] };
+  const silent = await checkExposure({ host: "localhost", port: 1, interfaces, timeoutMs: 30, dial: scripted("silent") });
+  assert.deepEqual({ ok: silent.ok, interfacesChecked: silent.interfacesChecked, exposedOn: silent.exposedOn, unverified: silent.unverified }, { ok: false, interfacesChecked: 1, exposedOn: 0, unverified: 1 });
+
+  const refused = await checkExposure({ host: "localhost", port: 1, interfaces, timeoutMs: 30, dial: scripted("ECONNREFUSED") });
+  assert.equal(refused.ok, true, "a refusal is a proof of closure");
+  const reset = await checkExposure({ host: "localhost", port: 1, interfaces, timeoutMs: 30, dial: scripted("ECONNRESET") });
+  assert.equal(reset.ok, false);
+});
+
+test("exposure: real sockets, open and refused are proven, an unresolvable target is not", async () => {
+  const server = net.createServer((socket) => socket.end());
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address();
+  assert.equal(await probe("127.0.0.1", port, 1000), "open");
+  await new Promise((resolve) => server.close(resolve));
+  assert.equal(await probe("127.0.0.1", port, 1000), "closed", "nothing listens any more");
+  assert.equal(await probe("unresolvable-name", port, 1000), "unknown", "a name that does not resolve proves nothing");
 });
 
 test("exposure: a wildcard or non-loopback Hermes host fails whatever the interfaces say", async () => {

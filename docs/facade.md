@@ -84,7 +84,7 @@ The facade needs Node 22 or later and `openssl`.
 
    The facade listens on `127.0.0.1` unless `HERMES_FACADE_LISTEN_HOST` says otherwise. It refuses a Hermes host that is not a loopback address.
 4. Enroll the first admin on the host with `enroll --role admin`. Type the code into the device within 5 minutes.
-5. Check the exposure at any time with `check-exposure`. It exits non-zero when the Hermes port is reachable on any non-loopback address, scoped addresses included, when a probe proves nothing, or when the configured Hermes host is not a loopback address.
+5. Check the exposure at any time with `check-exposure`. It exits non-zero when the Hermes port is reachable on any non-loopback address, scoped addresses included, when a probe proves nothing (only a refusal by the host proves a port closed, so a timeout or any other error fails the check), or when the configured Hermes host is not a loopback address.
 
 Other host commands: `enroll [--role]`, `devices`, `revoke <device-id>`. `enroll` and `revoke` are audited.
 

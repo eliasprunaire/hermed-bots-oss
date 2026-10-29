@@ -4,11 +4,11 @@ const net = require("node:net");
 const os = require("node:os");
 const { isLoopbackHost } = require("./config");
 
-const CLOSED = new Set(["ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "ENETUNREACH", "EADDRNOTAVAIL", "ENETDOWN", "ETIMEDOUT"]);
-
-// "open" when the port answers, "closed" when it is refused, dropped or unroutable, "unknown" when
-// the probe itself failed in a way that proves nothing. Unknown counts against the host.
-function probe(host, port, timeoutMs) {
+// "open" when the port answers, "closed" only when the host itself refuses the connection, which
+// proves nothing listens there. Anything else is "unknown": a timeout (a filter may drop the
+// probe while the service answers others), a reset, an unroutable or unusable address, or any
+// other error. Unknown fails the check.
+function probe(host, port, timeoutMs, dial = net.connect) {
   return new Promise((resolve) => {
     let socket;
     const done = (value) => {
@@ -16,14 +16,14 @@ function probe(host, port, timeoutMs) {
       resolve(value);
     };
     try {
-      socket = net.connect({ host, port });
+      socket = dial({ host, port });
     } catch {
       resolve("unknown");
       return;
     }
-    socket.setTimeout(timeoutMs, () => done("closed"));
+    socket.setTimeout(timeoutMs, () => done("unknown"));
     socket.once("connect", () => done("open"));
-    socket.once("error", (err) => done(CLOSED.has(err.code) ? "closed" : "unknown"));
+    socket.once("error", (err) => done(err && err.code === "ECONNREFUSED" ? "closed" : "unknown"));
   });
 }
 
@@ -44,7 +44,7 @@ function targets(interfaces) {
 // Is the Hermes port reachable on the host from anywhere but the loopback? A yes means a
 // device could skip the facade and meet Hermes directly. A configured host that is not a
 // loopback address, a wildcard included, fails at once. Only counts are reported.
-async function checkExposure({ host, port, timeoutMs = 500, interfaces = os.networkInterfaces(), connect = probe }) {
+async function checkExposure({ host, port, timeoutMs = 500, interfaces = os.networkInterfaces(), dial, connect = (target, number, ms) => probe(target, number, ms, dial) }) {
   const loopbackHost = isLoopbackHost(host);
   const list = targets(interfaces);
   const results = await Promise.all(list.map((target) => connect(target, port, timeoutMs)));
@@ -59,4 +59,4 @@ async function checkExposure({ host, port, timeoutMs = 500, interfaces = os.netw
   };
 }
 
-module.exports = { checkExposure, targets };
+module.exports = { checkExposure, probe, targets };
