@@ -1,7 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync } = require("node:fs");
+const { cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } = require("node:fs");
 const http = require("node:http");
 const https = require("node:https");
 const net = require("node:net");
@@ -147,6 +147,18 @@ test("1. no access without a valid token", async () => {
     assert.equal(ctx.upstream.calls.length, 0);
     assert.equal((await ctx.call({ path: "/v1/capabilities", token: good.token })).status, 200);
     assert.equal(ctx.upstream.calls.length, 1);
+  });
+});
+
+test("1b. a damaged device file is a 401, not a crash", async () => {
+  await withFacade({}, async (ctx) => {
+    const dev = await enrol(ctx);
+    const file = join(ctx.dataDir, "devices", `${dev.device_id}.json`);
+    for (const damaged of [JSON.stringify({ id: dev.device_id, role: "admin" }), "{broken", ""]) {
+      writeFileSync(file, damaged);
+      assert.equal((await ctx.call({ path: "/v1/capabilities", token: dev.token })).status, 401);
+    }
+    assert.equal(ctx.upstream.calls.length, 0);
   });
 });
 
@@ -538,6 +550,10 @@ test("9. rate limit per device and per failing address", async () => {
     assert.equal((await bad()).status, 401);
     assert.equal((await bad()).status, 401);
     assert.equal((await bad()).status, 429);
+    for (let i = 0; i < 20; i++) await bad();
+    const audit = readFileSync(join(ctx.dataDir, "audit.log"), "utf8");
+    assert.equal(audit.split("\n").filter((l) => l.includes('"auth.fail"')).length, 2, "a flood of bad tokens does not fill the audit");
+    assert.ok(!audit.includes("limited"));
     ctx.advance(5000);
     assert.equal((await get()).status, 200);
   });

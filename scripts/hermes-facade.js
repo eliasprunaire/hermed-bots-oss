@@ -211,7 +211,7 @@ function authenticate(dataDir, token) {
   const device = readDevice(dataDir, m[1]);
   if (!device) return { reason: "unknown", deviceId: m[1] };
   const got = Buffer.from(sha256hex(m[2]), "hex");
-  const want = Buffer.from(device.token_sha256, "hex");
+  const want = Buffer.from(String(device.token_sha256), "hex");
   if (got.length !== want.length || !crypto.timingSafeEqual(got, want)) return { reason: "bad_secret", deviceId: m[1] };
   if (device.revoked_at) return { reason: "revoked", deviceId: m[1] };
   return { device };
@@ -494,10 +494,7 @@ async function startFacade(cfg) {
   async function enrol(req, res, ip) {
     if (req.method !== "POST") throw httpError(405, "method_not_allowed");
     const wait = limiter.take(`enrol:${ip}`, limits.enrol) || limiter.take("enrol:all", limits.enrolAll);
-    if (wait) {
-      audit("enrol.limited", { remote: ip });
-      return send(res, 429, { error: "rate_limited" }, { "retry-after": String(wait) });
-    }
+    if (wait) return send(res, 429, { error: "rate_limited" }, { "retry-after": String(wait) });
     let input;
     try {
       input = JSON.parse((await readBody(req, 4096)).toString());
@@ -551,9 +548,9 @@ async function startFacade(cfg) {
     const bearer = /^Bearer (\S+)$/.exec(req.headers.authorization || "");
     const auth = authenticate(dataDir, bearer && bearer[1]);
     if (!auth.device) {
-      audit("auth.fail", { remote: ip, reason: auth.reason, device_id: auth.deviceId });
       const wait = limiter.take(`fail:${ip}`, limits.fail);
       if (wait) return send(res, 429, { error: "rate_limited" }, { "retry-after": String(wait) });
+      audit("auth.fail", { remote: ip, reason: auth.reason, device_id: auth.deviceId });
       return send(res, 401, { error: "invalid_token" });
     }
     ctx.device = auth.device;
@@ -561,10 +558,7 @@ async function startFacade(cfg) {
 
     const match = ctx.pathname.startsWith("/facade/") ? null : ROUTES.find((r) => r.method === req.method && r.re.test(ctx.pathname));
     const wait = limiter.take(`dev:${ctx.device.id}`, limits.device) || (match && match.kind === "write" ? limiter.take(`write:${ctx.device.id}`, limits.write) : 0);
-    if (wait) {
-      audit("rate.limited", { device_id: ctx.device.id });
-      return send(res, 429, { error: "rate_limited" }, { "retry-after": String(wait) });
-    }
+    if (wait) return send(res, 429, { error: "rate_limited" }, { "retry-after": String(wait) });
     if (ctx.pathname.startsWith("/facade/")) return manage(req, res, ctx);
 
     if (!match) {
