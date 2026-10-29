@@ -2,7 +2,7 @@
 
 const crypto = require("node:crypto");
 const { EventEmitter } = require("node:events");
-const { MAX_WS_MESSAGE_BYTES } = require("./config");
+const { MAX_WS_FRAGMENTS, MAX_WS_MESSAGE_BYTES } = require("./config");
 
 const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const OP = { CONT: 0x0, TEXT: 0x1, BINARY: 0x2, CLOSE: 0x8, PING: 0x9, PONG: 0xa };
@@ -38,11 +38,12 @@ function encodeFrame(opcode, payload, { mask = false } = {}) {
 // RFC 6455 endpoint over an upgraded socket. Emits "message" (text), "close" (code).
 // `expectMasked` is true on the server side: a client frame that is not masked is a protocol error.
 class WebSocketPeer extends EventEmitter {
-  constructor(socket, { expectMasked = true, maxMessageBytes = MAX_WS_MESSAGE_BYTES } = {}) {
+  constructor(socket, { expectMasked = true, maxMessageBytes = MAX_WS_MESSAGE_BYTES, maxFragments = MAX_WS_FRAGMENTS } = {}) {
     super();
     this.socket = socket;
     this.expectMasked = expectMasked;
     this.maxMessageBytes = maxMessageBytes;
+    this.maxFragments = maxFragments;
     this.buffer = Buffer.alloc(0);
     this.fragments = [];
     this.fragmentBytes = 0;
@@ -115,7 +116,8 @@ class WebSocketPeer extends EventEmitter {
       return this.fail(1002);
     }
     this.fragmentBytes += payload.length;
-    if (this.fragmentBytes > this.maxMessageBytes) return this.fail(1009);
+    // empty fragments add no bytes, so only their count bounds the memory and the work of one message
+    if (this.fragmentBytes > this.maxMessageBytes || this.fragments.length >= this.maxFragments) return this.fail(1009);
     this.fragments.push(payload);
     if (!fin) return undefined;
     const message = Buffer.concat(this.fragments);

@@ -8,6 +8,7 @@ const ENROLLMENT_TTL_MS = 5 * 60 * 1000;
 const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_BODY_BYTES = 4096;
 const MAX_WS_MESSAGE_BYTES = 1024 * 1024;
+const MAX_WS_FRAGMENTS = 64;
 const MIN_SECRET_LENGTH = 16;
 
 function ipv6Groups(text) {
@@ -103,6 +104,7 @@ module.exports = {
   ENROLLMENT_TTL_MS,
   IDEMPOTENCY_TTL_MS,
   MAX_BODY_BYTES,
+  MAX_WS_FRAGMENTS,
   MAX_WS_MESSAGE_BYTES,
   MIN_SECRET_LENGTH,
   fromEnv,

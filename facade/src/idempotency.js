@@ -32,10 +32,11 @@ function fingerprint(method, params) {
 // At start the journal is replayed, a write that was still running becomes "unknown", and the
 // journal is rewritten (temporary file, sync, rename) with the live entries only.
 class Idempotency {
-  constructor({ now = Date.now, ttlMs = IDEMPOTENCY_TTL_MS, file = null } = {}) {
+  constructor({ now = Date.now, ttlMs = IDEMPOTENCY_TTL_MS, file = null, compactAfterRecords = COMPACT_AFTER_RECORDS } = {}) {
     this.now = now;
     this.ttlMs = ttlMs;
     this.file = file;
+    this.compactAfterRecords = compactAfterRecords;
     this.entries = new Map();
     this.fd = null;
     this.records = 0;
@@ -91,7 +92,6 @@ class Idempotency {
   }
 
   compact() {
-    if (this.fd !== null) fs.closeSync(this.fd);
     const tmp = `${this.file}.${process.pid}.tmp`;
     const lines = [];
     for (const [id, entry] of this.entries) {
@@ -105,7 +105,9 @@ class Idempotency {
     fs.fsyncSync(fd);
     fs.closeSync(fd);
     fs.renameSync(tmp, this.file);
-    this.fd = fs.openSync(this.file, "a", 0o600);
+    const next = fs.openSync(this.file, "a", 0o600);
+    if (this.fd !== null) fs.closeSync(this.fd);
+    this.fd = next;
     this.records = 0;
   }
 
@@ -114,7 +116,17 @@ class Idempotency {
     fs.writeSync(this.fd, `${JSON.stringify(record)}\n`);
     fs.fsyncSync(this.fd);
     this.records += 1;
-    if (this.records >= COMPACT_AFTER_RECORDS) this.compact();
+  }
+
+  // Runs after the change is applied to entries, because the rewrite is built from entries
+  // Best effort: the record is already on disk, and the next change tries again
+  compactIfDue() {
+    if (this.fd === null || this.records < this.compactAfterRecords) return;
+    try {
+      this.compact();
+    } catch {
+      // the old journal and its descriptor are untouched
+    }
   }
 
   close() {
@@ -134,6 +146,7 @@ class Idempotency {
       const expiresAt = this.now() + this.ttlMs;
       this.journal({ op: "begin", scope, key, print, expiresAt });
       this.entries.set(id, { print, state: "pending", waiters: [], expiresAt });
+      this.compactIfDue();
       return { state: "new" };
     }
     if (entry.print !== print) return { state: "conflict" };
@@ -153,6 +166,7 @@ class Idempotency {
     entry.state = "done";
     entry.result = result;
     this.settle(entry, { state: "replay", result });
+    this.compactIfDue();
   }
 
   release(scope, key) {
@@ -162,6 +176,7 @@ class Idempotency {
     this.journal({ op: "release", scope, key });
     this.entries.delete(id);
     this.settle(entry, { state: "released" });
+    this.compactIfDue();
   }
 
   markUnknown(scope, key) {
@@ -170,6 +185,7 @@ class Idempotency {
     this.journal({ op: "unknown", scope, key });
     entry.state = "unknown";
     this.settle(entry, { state: "unknown" });
+    this.compactIfDue();
   }
 
   settle(entry, outcome) {

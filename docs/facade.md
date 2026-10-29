@@ -32,7 +32,7 @@ All routes are under TLS.
 | `DELETE /facade/devices/{id}` | admin | Revokes one device. |
 | `GET /facade/audit?limit=` | admin | Recent audit events. |
 | `GET /api/sessions...` | any device | The read routes named in `facade/src/policy.js`. Anything else under `/api/` is `403`. |
-| `GET /api/ws` (WebSocket) | any device | JSON-RPC bridge to the Hermes gateway, checked message by message. |
+| `GET /api/ws` (WebSocket) | any device | JSON-RPC bridge to the Hermes gateway, checked message by message. A message is at most 1 MiB and at most 64 fragments, empty ones included. A device that goes over either limit is closed with `1009`. |
 
 ### Socket methods
 
@@ -59,7 +59,7 @@ A write needs a string or number `id` and `params.idempotency_key` (8 to 128 cha
 | Outcome lost (Hermes dropped the socket) | Error `4010` for that key. It is never run again. Check the session, then use a new key. |
 | No key | Error `4004`. Nothing reaches Hermes. |
 
-The keys live in a journal, `idempotency.jsonl` in the state directory (mode 600). Each change is appended and synced before the facade goes on, and `begin` is on disk before a write is forwarded to Hermes. At start the journal is replayed, a write that was still running becomes "unknown" (error `4010`, never run again), expired entries are dropped, and the file is rewritten through a temporary file, a sync and a rename. A torn last line left by a crash is ignored. A result over 64 KiB is not kept, and its key answers "unknown". If the journal cannot be written, the write is refused with error `4012` and nothing reaches Hermes. The journal holds results, so keep the state directory private.
+The keys live in a journal, `idempotency.jsonl` in the state directory (mode 600). Each change is appended and synced before the facade goes on, and `begin` is on disk before a write is forwarded to Hermes. At start the journal is replayed, a write that was still running becomes "unknown" (error `4010`, never run again), expired entries are dropped, and the file is rewritten through a temporary file, a sync and a rename. The same rewrite runs after 5000 records, once the change that reached that count is applied, so the rewrite keeps it. A rewrite that fails leaves the current file in use and is tried again at the next change. A torn last line left by a crash is ignored. A result over 64 KiB is not kept, and its key answers "unknown". If the journal cannot be written, the write is refused with error `4012` and nothing reaches Hermes. The journal holds results, so keep the state directory private.
 
 ## Set up on the host
 
