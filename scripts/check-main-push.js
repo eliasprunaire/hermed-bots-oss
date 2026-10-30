@@ -43,6 +43,41 @@ function targetsMain(item) {
   return base != null && base.ref === "main" ? "main" : "other";
 }
 
+function detailBase(item) {
+  if (!Object.hasOwn(item, "base") || item.base == null) {
+    return "malformed";
+  }
+  const base = item.base;
+  if (typeof base !== "object" || Array.isArray(base)) {
+    return "malformed";
+  }
+  return base.ref === "main" ? "main" : "other";
+}
+
+function mergeCommitField(item) {
+  if (!Object.hasOwn(item, "merge_commit_sha")) {
+    return "missing";
+  }
+  const value = item.merge_commit_sha;
+  if (value == null || value === "") {
+    return "missing";
+  }
+  if (typeof value !== "string" || !HEX_SHA.test(value)) {
+    return "malformed";
+  }
+  return "present";
+}
+
+function mergedAtField(item) {
+  if (!Object.hasOwn(item, "merged_at") || item.merged_at == null || item.merged_at === "") {
+    return "absent";
+  }
+  if (typeof item.merged_at !== "string") {
+    return "malformed";
+  }
+  return "present";
+}
+
 function classify(body, sha) {
   if (!Array.isArray(body)) {
     return { kind: "malformed" };
@@ -53,14 +88,25 @@ function classify(body, sha) {
     if (item == null || typeof item !== "object" || Array.isArray(item)) {
       return { kind: "malformed" };
     }
+    const mergedAt = mergedAtField(item);
+    if (mergedAt === "malformed") {
+      return { kind: "malformed" };
+    }
     const baseKind = targetsMain(item);
     if (baseKind === "malformed") {
       return { kind: "malformed" };
     }
-    if (typeof item.merged_at !== "string" || item.merged_at === "" || baseKind !== "main") {
+    if (mergedAt === "present" && (!Object.hasOwn(item, "base") || item.base == null)) {
+      return { kind: "malformed" };
+    }
+    if (mergedAt !== "present" || baseKind !== "main") {
       continue;
     }
-    if (item.merge_commit_sha == null || item.merge_commit_sha === "") {
+    const mergeField = mergeCommitField(item);
+    if (mergeField === "malformed") {
+      return { kind: "malformed" };
+    }
+    if (mergeField === "missing") {
       const number = pullNumber(item);
       if (number == null) {
         return { kind: "malformed" };
@@ -132,13 +178,20 @@ function matchesMergeCommit(body, sha) {
   if (body == null || typeof body !== "object" || Array.isArray(body)) {
     return "malformed";
   }
-  const baseKind = targetsMain(body);
+  const baseKind = detailBase(body);
   if (baseKind === "malformed") {
     return "malformed";
   }
+  const mergeField = mergeCommitField(body);
+  if (mergeField !== "present") {
+    return "malformed";
+  }
+  const mergedAt = mergedAtField(body);
+  if (mergedAt === "malformed") {
+    return "malformed";
+  }
   if (
-    typeof body.merged_at === "string" &&
-    body.merged_at !== "" &&
+    mergedAt === "present" &&
     sameSha(body.merge_commit_sha, sha) &&
     baseKind === "main"
   ) {
