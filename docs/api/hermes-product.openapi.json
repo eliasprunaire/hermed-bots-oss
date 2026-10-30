@@ -1,0 +1,2156 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Hermed Bots product API (Hermes behind the facade)",
+    "version": "1.0.0",
+    "description": "The surface that a Hermed Bots client (Mac, iOS) uses to read and write on a Hermes instance, through the TLS facade of `scripts/hermes-facade.js`.\n\n**Bot and profile.** One bot is one named Hermes profile. The bot id is the name of the profile, the same string, and it is the `{profile}` segment of every path: `/p/{profile}/...`. The profile `default` is a profile like any other (`/p/default/...`). There is no other way to address a bot. The facade also forwards the unprefixed routes as an alias of `default`: they are not part of this contract.\n\n**Authentication.** Every route except `facade.enrol` needs `Authorization: Bearer <device token>`. A device gets its token once, from `facade.enrol`, with a one-time code that an admin creates. A client never holds the Hermes API key: the facade holds it, replaces the authorization on each request, and never sends it to a device. A Hermes 401 or redirect reaches the device as a 502.\n\n**Reads and writes.** A read is a `GET`. A write is a `POST` and needs an `Idempotency-Key` header (1 to 128 visible ASCII characters). The key is kept 24 hours, per device, method and path. The same key and the same body return the kept answer with `Idempotency-Replayed: true`. The same key with another body returns 409, when the facade kept the fingerprint of the first body. If the facade cannot know whether Hermes ran the write, it returns 502 `write_outcome_unknown` and never sends that key to Hermes again: the client reads the state (`run.get`, `session.messages`), then sends a new write with a new key if the first one did not happen. The operation id of a write is the id in its answer (`run_id`, `session.id`): a replay returns the same one. The facade has no lookup from a key to its answer.\n\n**Errors.** The facade writes its own errors as `{\"error\": \"<code>\"}` (see `FacadeError`). Every other answer of Hermes passes through with its status and its body, except 401 and redirects. A 429 or 408 of Hermes is not kept: the key stays free.\n\n**Limits.** Request body 1 MiB. Per device 20 requests per second (burst 60), writes 5 per second (burst 20). Over the limit: 429 with `Retry-After`.",
+    "x-bot-profile-mapping": {
+      "rule": "one bot, one profile",
+      "bot_id": "the name of the Hermes profile, the same string",
+      "profile": "the name of the Hermes profile, the segment after /p/",
+      "path": "/p/{profile}"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://{authority}",
+      "variables": {
+        "authority": {
+          "default": "facade.example",
+          "description": "Host and port of the facade, given when the device is enrolled"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "deviceToken": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "health",
+      "description": "Version and status"
+    },
+    {
+      "name": "capabilities",
+      "description": "Features"
+    },
+    {
+      "name": "models",
+      "description": "Model of the profile"
+    },
+    {
+      "name": "run",
+      "description": "Turns"
+    },
+    {
+      "name": "session",
+      "description": "Sessions"
+    },
+    {
+      "name": "facade",
+      "description": "Enrolment and device management, handled by the facade itself"
+    }
+  ],
+  "paths": {
+    "/p/{profile}/health": {
+      "get": {
+        "operationId": "health",
+        "summary": "Hermes version and status",
+        "description": "Read the version of Hermes. The status of the profile is `ok` when Hermes answers.",
+        "tags": [
+          "health"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Hermes answers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                },
+                "example": {
+                  "status": "ok",
+                  "platform": "hermes-agent",
+                  "version": "0.22.2"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      }
+    },
+    "/p/{profile}/v1/capabilities": {
+      "get": {
+        "operationId": "capabilities",
+        "summary": "Features and routes that Hermes offers",
+        "description": "Lists booleans such as `run_approval_response`, `session_model_lock` and `session_chat`, and the table of routes. It holds no version number.",
+        "tags": [
+          "capabilities"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Capabilities",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Capabilities"
+                },
+                "example": {
+                  "object": "hermes.api_server.capabilities",
+                  "platform": "hermes-agent",
+                  "model": "hermes-agent",
+                  "features": {
+                    "run_approval_response": true,
+                    "session_model_lock": true,
+                    "session_chat": true
+                  },
+                  "endpoints": {
+                    "run_approval": "POST /v1/runs/{run_id}/approval",
+                    "sessions": "GET /api/sessions"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      }
+    },
+    "/p/{profile}/v1/models": {
+      "get": {
+        "operationId": "models",
+        "summary": "Model of the profile",
+        "description": "Answers 200 when Hermes serves the profile. An unknown or parked profile answers 404 with a Hermes body.",
+        "tags": [
+          "models"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Models of the profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelList"
+                },
+                "example": {
+                  "object": "list",
+                  "data": [
+                    {
+                      "id": "hermes-agent"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      }
+    },
+    "/p/{profile}/v1/runs": {
+      "post": {
+        "operationId": "run.create",
+        "summary": "Start a turn",
+        "description": "Send a prompt. Hermes answers 202 at once and runs the turn. Follow it with `run.events`. `session_id` continues a session, `model` applies to this run only.",
+        "tags": [
+          "run"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The prompt, and optionally the session and the model of this run",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunRequest"
+              },
+              "example": {
+                "input": "Hello"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "The run started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunStarted"
+                },
+                "example": {
+                  "run_id": "run_1",
+                  "status": "started",
+                  "replayed": false
+                }
+              }
+            },
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "`true` when the answer is the kept answer of an earlier send of the same key",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeout"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      }
+    },
+    "/p/{profile}/v1/runs/{run_id}": {
+      "get": {
+        "operationId": "run.get",
+        "summary": "Read the state of a run",
+        "description": "Use it to read a run after a lost answer. Observed `status` values: `started`, `running`, `completed`, `cancelled`, `interrupted`. The Mac client also reads `failed` and `waiting_for_approval`.",
+        "tags": [
+          "run"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          },
+          {
+            "$ref": "#/components/parameters/RunId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                },
+                "example": {
+                  "object": "hermes.run",
+                  "run_id": "run_1",
+                  "status": "completed",
+                  "session_id": "api_1",
+                  "model": "hermes-agent",
+                  "last_event": "run.completed",
+                  "output": "Hello"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      }
+    },
+    "/p/{profile}/v1/runs/{run_id}/events": {
+      "get": {
+        "operationId": "run.events",
+        "summary": "Follow a run as an event stream",
+        "description": "Server-sent events as Hermes produces them: `message.delta`, `reasoning.available`, `approval.request`, `approval.responded`, `approval.settled`, `tool.started`, `tool.completed`, `run.completed`, `run.failed`, `run.cancelled`, `run.interrupted`. Hermes 0.22.1 names the id of an approval request `prompt_id` instead of `request_id`. `Last-Event-ID` resumes after the last event received. The facade cuts the stream when the device is revoked.",
+        "tags": [
+          "run"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          },
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/LastEventId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Event stream",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                },
+                "example": "id: 0\ndata: {\"event\":\"message.delta\",\"run_id\":\"run_1\",\"delta\":\"Hello\",\"seq\":0}\n\nid: 1\ndata: {\"event\":\"run.completed\",\"run_id\":\"run_1\",\"output\":\"Hello\",\"seq\":1}\n\n"
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      }
+    },
+    "/p/{profile}/v1/runs/{run_id}/approval": {
+      "post": {
+        "operationId": "run.approval",
+        "summary": "Answer an approval request",
+        "description": "Answer the `request_id` of an `approval.request` event with one of its `choices` (`once`, `session`, `always`, `deny`).",
+        "tags": [
+          "run"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          },
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The request and the choice",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalRequest"
+              },
+              "example": {
+                "request_id": "req_1",
+                "choice": "deny"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The request is resolved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalResult"
+                },
+                "example": {
+                  "object": "hermes.run.approval_response",
+                  "run_id": "run_1",
+                  "choice": "deny",
+                  "request_id": "req_1",
+                  "resolved": 1
+                }
+              }
+            },
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "`true` when the answer is the kept answer of an earlier send of the same key",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeout"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      }
+    },
+    "/p/{profile}/v1/runs/{run_id}/stop": {
+      "post": {
+        "operationId": "run.stop",
+        "summary": "Cancel a run",
+        "description": "Hermes answers at once. The run then settles as `cancelled`: read it with `run.get`.",
+        "tags": [
+          "run"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          },
+          {
+            "$ref": "#/components/parameters/RunId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The run is stopping",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StopResult"
+                },
+                "example": {
+                  "run_id": "run_1",
+                  "status": "stopping"
+                }
+              }
+            },
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "`true` when the answer is the kept answer of an earlier send of the same key",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeout"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      }
+    },
+    "/p/{profile}/api/sessions": {
+      "get": {
+        "operationId": "session.list",
+        "summary": "List the past sessions of the bot",
+        "description": "Most recent first. `has_more` tells that another page exists at `offset + limit`.",
+        "tags": [
+          "session"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of sessions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionList"
+                },
+                "example": {
+                  "object": "list",
+                  "data": [
+                    {
+                      "id": "api_1",
+                      "title": "First chat",
+                      "model": null
+                    }
+                  ],
+                  "limit": 50,
+                  "offset": 0,
+                  "has_more": false
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      },
+      "post": {
+        "operationId": "session.create",
+        "summary": "Create a session",
+        "description": "An invalid body creates no session.",
+        "tags": [
+          "session"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "An empty object",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              },
+              "example": {}
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionEnvelope"
+                },
+                "example": {
+                  "object": "hermes.session",
+                  "session": {
+                    "id": "api_1",
+                    "source": "api_server",
+                    "model": null,
+                    "title": null,
+                    "message_count": 0
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "`true` when the answer is the kept answer of an earlier send of the same key",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeout"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      }
+    },
+    "/p/{profile}/api/sessions/{session_id}": {
+      "get": {
+        "operationId": "session.get",
+        "summary": "Read a session",
+        "description": "The `model` field shows the model that `session.model` locked, or null when the session follows the model of the profile.",
+        "tags": [
+          "session"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionEnvelope"
+                },
+                "example": {
+                  "object": "hermes.session",
+                  "session": {
+                    "id": "api_1",
+                    "source": "api_server",
+                    "model": "model-b",
+                    "title": null,
+                    "message_count": 0
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      }
+    },
+    "/p/{profile}/api/sessions/{session_id}/messages": {
+      "get": {
+        "operationId": "session.messages",
+        "summary": "Read the messages of a session",
+        "description": "Rows with a role other than `user` and `assistant`, or with no content, are not messages to show.",
+        "tags": [
+          "session"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The messages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageList"
+                },
+                "example": {
+                  "object": "list",
+                  "session_id": "api_1",
+                  "data": [
+                    {
+                      "id": 1,
+                      "role": "user",
+                      "content": "Hello"
+                    },
+                    {
+                      "id": 2,
+                      "role": "assistant",
+                      "content": "Hi"
+                    }
+                  ],
+                  "pagination": {
+                    "limit": 500,
+                    "offset": 0,
+                    "order": "latest",
+                    "returned": 2
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      }
+    },
+    "/p/{profile}/api/sessions/{session_id}/model": {
+      "post": {
+        "operationId": "session.model",
+        "summary": "Lock the model of a session",
+        "description": "Applies to the next turns of this session.",
+        "tags": [
+          "session"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The model to lock",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ModelRequest"
+              },
+              "example": {
+                "model": "model-b"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The lock",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelLock"
+                },
+                "example": {
+                  "object": "hermes.session.model_lock",
+                  "session_id": "api_1",
+                  "runtime": {
+                    "provider": "",
+                    "model": "model-b",
+                    "route_source": "raw_request",
+                    "model_lock": "accepted"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "`true` when the answer is the kept answer of an earlier send of the same key",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeout"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      }
+    },
+    "/p/{profile}/api/sessions/{session_id}/chat": {
+      "post": {
+        "operationId": "session.chat",
+        "summary": "Send a prompt and read the whole answer",
+        "description": "Answers once, with no event. It honors the model lock. The streamed variant `chat/stream` is out of this contract: its answer cannot be replayed for an idempotent retry, and the facade answers 404 `route_not_allowed`.",
+        "tags": [
+          "session"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/Profile"
+          },
+          {
+            "$ref": "#/components/parameters/SessionId"
+          },
+          {
+            "$ref": "#/components/parameters/IdempotencyKey"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "description": "The prompt",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              },
+              "example": {
+                "input": "Hello"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The answer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatReply"
+                },
+                "example": {
+                  "object": "hermes.session.chat.completion",
+                  "session_id": "api_1",
+                  "message": {
+                    "role": "assistant",
+                    "content": "Hi"
+                  },
+                  "runtime": {
+                    "model": "model-b"
+                  }
+                }
+              }
+            },
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "`true` when the answer is the kept answer of an earlier send of the same key",
+                "schema": {
+                  "type": "string",
+                  "enum": [
+                    "true"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeout"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          },
+          "502": {
+            "$ref": "#/components/responses/BadGateway"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
+          },
+          "5XX": {
+            "$ref": "#/components/responses/HermesServerError"
+          }
+        }
+      }
+    },
+    "/facade/enrol": {
+      "post": {
+        "operationId": "facade.enrol",
+        "summary": "Enrol a device",
+        "description": "Exchange a one-time code for a device token. The code is valid 5 minutes and works once. An unknown, used or expired code gets the same 403. The token is shown once.",
+        "tags": [
+          "facade"
+        ],
+        "security": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnrolRequest"
+              },
+              "example": {
+                "code": "<enrolment code>",
+                "name": "phone"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The device and its token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Enrolled"
+                },
+                "example": {
+                  "device_id": "0123456789abcdef",
+                  "role": "normal",
+                  "token": "<device-id>.<secret>"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/facade/devices": {
+      "get": {
+        "operationId": "facade.devices.list",
+        "summary": "List the devices",
+        "description": "Admin role only.",
+        "tags": [
+          "facade"
+        ],
+        "responses": {
+          "200": {
+            "description": "The devices, oldest first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeviceList"
+                },
+                "example": {
+                  "devices": [
+                    {
+                      "id": "0123456789abcdef",
+                      "name": "phone",
+                      "role": "normal",
+                      "created_at": "2027-01-15T08:00:00.000Z"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/facade/enrol-codes": {
+      "post": {
+        "operationId": "facade.codes.create",
+        "summary": "Create an enrolment code",
+        "description": "Admin role only. The role defaults to `normal`.",
+        "tags": [
+          "facade"
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CodeRequest"
+              },
+              "example": {
+                "role": "normal"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The code, valid 5 minutes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EnrolCode"
+                },
+                "example": {
+                  "code": "<enrolment code>",
+                  "role": "normal",
+                  "expires_at": "2027-01-15T08:05:00.000Z"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "413": {
+            "$ref": "#/components/responses/PayloadTooLarge"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    },
+    "/facade/devices/{device_id}/revoke": {
+      "post": {
+        "operationId": "facade.devices.revoke",
+        "summary": "Revoke a device",
+        "description": "Admin role only. The token is refused from the next request, and the event streams of the device are cut within one second.",
+        "tags": [
+          "facade"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/DeviceId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The device, revoked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Device"
+                },
+                "example": {
+                  "id": "0123456789abcdef",
+                  "name": "phone",
+                  "role": "normal",
+                  "created_at": "2027-01-15T08:00:00.000Z",
+                  "revoked_at": "2027-01-15T09:00:00.000Z"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "405": {
+            "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "deviceToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "The token returned once by `facade.enrol`, `<device id>.<secret>`"
+      }
+    },
+    "parameters": {
+      "Profile": {
+        "name": "profile",
+        "in": "path",
+        "required": true,
+        "description": "The Hermes profile of the bot: one bot, one profile. The bot id is this name",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
+        },
+        "example": "hv-bot-a"
+      },
+      "RunId": {
+        "name": "run_id",
+        "in": "path",
+        "required": true,
+        "description": "The `run_id` of `run.create`",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        },
+        "example": "run_1"
+      },
+      "SessionId": {
+        "name": "session_id",
+        "in": "path",
+        "required": true,
+        "description": "The `session.id` of `session.create` or `session.list`",
+        "schema": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        },
+        "example": "api_1"
+      },
+      "DeviceId": {
+        "name": "device_id",
+        "in": "path",
+        "required": true,
+        "description": "The id of a device, as `facade.devices.list` shows it",
+        "schema": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "example": "0123456789abcdef"
+      },
+      "IdempotencyKey": {
+        "name": "Idempotency-Key",
+        "in": "header",
+        "required": true,
+        "description": "Chosen by the client, new for each write, reused for a retry of the same write",
+        "schema": {
+          "type": "string",
+          "pattern": "^[!-~]{1,128}$"
+        },
+        "example": "send-0001"
+      },
+      "LastEventId": {
+        "name": "Last-Event-ID",
+        "in": "header",
+        "required": false,
+        "description": "The id of the last event received",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "required": false,
+        "description": "Page size",
+        "schema": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "Offset": {
+        "name": "offset",
+        "in": "query",
+        "required": false,
+        "description": "Entries to skip",
+        "schema": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "A facade 400 (`invalid_query`, `invalid_json`, `invalid_role`, `idempotency_key_required`, `idempotency_key_invalid`), or a 400 of Hermes with its own body",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "idempotency_key_required"
+            }
+          }
+        }
+      },
+      "Unauthorized": {
+        "description": "No valid token: missing, malformed, unknown, wrong secret or revoked. Every path answers the same, so a path cannot be probed",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/FacadeError"
+            },
+            "example": {
+              "error": "invalid_token"
+            }
+          }
+        }
+      },
+      "Forbidden": {
+        "description": "The role is not admin (`forbidden`), or the enrolment code is unknown, used or expired (`invalid_code`)",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/FacadeError"
+            },
+            "example": {
+              "error": "forbidden"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "`route_not_allowed` when the facade does not forward the route, `unknown_device`, or a 404 of Hermes: `Unknown or unconfigured profile` (JSON or plain text), `session_not_found`, `run_not_found`",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "route_not_allowed"
+            }
+          },
+          "text/plain": {
+            "schema": {
+              "type": "string"
+            },
+            "example": "Unknown or unconfigured profile"
+          }
+        }
+      },
+      "MethodNotAllowed": {
+        "description": "The route exists for another method",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/FacadeError"
+            },
+            "example": {
+              "error": "method_not_allowed"
+            }
+          }
+        }
+      },
+      "Conflict": {
+        "description": "A facade 409 (`idempotency_key_conflict`: the key was used with another body; `idempotency_replay_unavailable`: the first answer was over 16 KiB, so the facade did not keep it), or a 409 of Hermes with its own body. Hermes sends `error` as an object for `approval_not_pending`, `approval_not_active` and `run_not_active`. The facade keeps that answer: the same key returns it with `Idempotency-Replayed: true`",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "idempotency_key_conflict"
+            }
+          }
+        }
+      },
+      "RequestTimeout": {
+        "description": "Hermes answered 408: it did not run the write, so the facade keeps nothing and the key stays free. The answer passes through as Hermes sent it, with its `Retry-After`. Send the same key again after the delay",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds to wait before the next try, when Hermes sends it",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HermesError"
+            },
+            "example": {
+              "error": "request timeout"
+            }
+          }
+        }
+      },
+      "PayloadTooLarge": {
+        "description": "The body is over the limit. Hermes is not called",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/FacadeError"
+            },
+            "example": {
+              "error": "body_too_large"
+            }
+          }
+        }
+      },
+      "RateLimited": {
+        "description": "The device is over its limit (`rate_limited`), or Hermes asked for a later retry. The key of a write is not kept",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds to wait before the next try",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "rate_limited"
+            }
+          }
+        }
+      },
+      "BadGateway": {
+        "description": "The facade could not get an answer from Hermes: `upstream_unavailable`, `upstream_timeout`, `upstream_rejected` (Hermes refused the key of the facade), `upstream_redirect`, `upstream_key_missing` (no Hermes key for the profile), or `write_outcome_unknown` (a write may have run: do not send its key again). A 502 that Hermes sends on a write passes through with the body of Hermes: tell the two apart by the body",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "write_outcome_unknown"
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "`idempotency_journal_full`: the facade keeps no new key until old ones expire. Hermes is not called. A 503 that Hermes sends on a write passes through with the body of Hermes",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            },
+            "example": {
+              "error": "idempotency_journal_full"
+            }
+          }
+        }
+      },
+      "HermesServerError": {
+        "description": "A 5xx of Hermes, passed through as Hermes sent it. For a write, the first send gets it and the same key then gets 502 `write_outcome_unknown`",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HermesError"
+            },
+            "example": {
+              "error": "internal error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "FacadeError": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "invalid_json",
+              "invalid_query",
+              "invalid_role",
+              "idempotency_key_required",
+              "idempotency_key_invalid",
+              "invalid_token",
+              "forbidden",
+              "invalid_code",
+              "route_not_allowed",
+              "unknown_device",
+              "not_found",
+              "method_not_allowed",
+              "idempotency_key_conflict",
+              "idempotency_replay_unavailable",
+              "body_too_large",
+              "rate_limited",
+              "upstream_unavailable",
+              "upstream_timeout",
+              "upstream_rejected",
+              "upstream_redirect",
+              "upstream_key_missing",
+              "write_outcome_unknown",
+              "idempotency_journal_full",
+              "internal_error"
+            ]
+          }
+        }
+      },
+      "HermesError": {
+        "type": "object",
+        "description": "The body of Hermes, as it sent it. Its shape differs by route: `{\"error\": \"...\"}`, `{\"error\": {\"code\": \"run_not_found\", ...}}`, or plain text"
+      },
+      "Error": {
+        "description": "A facade error, or a body of Hermes. A facade error fits both branches, so the branches are not exclusive",
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/FacadeError"
+          },
+          {
+            "$ref": "#/components/schemas/HermesError"
+          }
+        ]
+      },
+      "Health": {
+        "type": "object",
+        "required": [
+          "status",
+          "version"
+        ],
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string",
+            "description": "Version of Hermes, information only"
+          }
+        }
+      },
+      "Capabilities": {
+        "type": "object",
+        "required": [
+          "object",
+          "features"
+        ],
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "features": {
+            "type": "object"
+          },
+          "endpoints": {
+            "type": "object"
+          }
+        }
+      },
+      "ModelList": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "RunRequest": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "The prompt, not empty"
+          },
+          "session_id": {
+            "type": "string",
+            "description": "Continue this session"
+          },
+          "model": {
+            "type": "string",
+            "description": "Model of this run only"
+          }
+        }
+      },
+      "RunStarted": {
+        "type": "object",
+        "required": [
+          "run_id",
+          "status"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "replayed": {
+            "type": "boolean",
+            "description": "Set by Hermes when it replays its own key"
+          }
+        }
+      },
+      "Run": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "model": {
+            "type": "string"
+          },
+          "last_event": {
+            "type": "string"
+          },
+          "output": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ApprovalRequest": {
+        "type": "object",
+        "required": [
+          "request_id",
+          "choice"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "choice": {
+            "type": "string",
+            "description": "One of the `choices` of the event"
+          }
+        }
+      },
+      "ApprovalResult": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string"
+          },
+          "choice": {
+            "type": "string"
+          },
+          "resolved": {
+            "type": "integer",
+            "description": "Hermes 0.22.2. Hermes 0.22.1 answers `status: resolved` instead"
+          }
+        }
+      },
+      "StopResult": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "Session": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "model": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The locked model, or null"
+          }
+        }
+      },
+      "SessionEnvelope": {
+        "type": "object",
+        "required": [
+          "session"
+        ],
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "session": {
+            "$ref": "#/components/schemas/Session"
+          }
+        }
+      },
+      "SessionList": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Session"
+            }
+          },
+          "limit": {
+            "type": "integer"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "has_more": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MessageList": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "data": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "role"
+              ],
+              "properties": {
+                "id": {
+                  "type": "integer"
+                },
+                "role": {
+                  "type": "string"
+                },
+                "content": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "pagination": {
+            "type": "object"
+          }
+        }
+      },
+      "ModelRequest": {
+        "type": "object",
+        "required": [
+          "model"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          }
+        }
+      },
+      "ModelLock": {
+        "type": "object",
+        "required": [
+          "session_id"
+        ],
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "runtime": {
+            "type": "object",
+            "properties": {
+              "model": {
+                "type": "string"
+              },
+              "model_lock": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "ChatRequest": {
+        "type": "object",
+        "required": [
+          "input"
+        ],
+        "properties": {
+          "input": {
+            "type": "string"
+          }
+        }
+      },
+      "ChatReply": {
+        "type": "object",
+        "required": [
+          "session_id",
+          "message"
+        ],
+        "properties": {
+          "object": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "object",
+            "required": [
+              "content"
+            ],
+            "properties": {
+              "role": {
+                "type": "string"
+              },
+              "content": {
+                "type": "string"
+              }
+            }
+          },
+          "usage": {
+            "type": "object"
+          },
+          "runtime": {
+            "type": "object"
+          }
+        }
+      },
+      "EnrolRequest": {
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "The one-time code, with or without dashes"
+          },
+          "name": {
+            "type": "string",
+            "description": "Name of the device, 64 characters at most"
+          }
+        }
+      },
+      "Enrolled": {
+        "type": "object",
+        "required": [
+          "device_id",
+          "role",
+          "token"
+        ],
+        "properties": {
+          "device_id": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "normal"
+            ]
+          },
+          "token": {
+            "type": "string",
+            "description": "`<device id>.<secret>`, shown once, stored hashed by the facade"
+          }
+        }
+      },
+      "CodeRequest": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "normal"
+            ]
+          }
+        }
+      },
+      "EnrolCode": {
+        "type": "object",
+        "required": [
+          "code",
+          "role",
+          "expires_at"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "normal"
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "Device": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "role",
+          "created_at"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "admin",
+              "normal"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "DeviceList": {
+        "type": "object",
+        "required": [
+          "devices"
+        ],
+        "properties": {
+          "devices": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Device"
+            }
+          }
+        }
+      }
+    }
+  }
+}

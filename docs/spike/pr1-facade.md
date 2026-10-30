@@ -1,6 +1,6 @@
 # PR-1: Hermes authentication and TLS facade
 
-Status: implemented in `scripts/hermes-facade.js`, tested by `test/hermes-facade.test.js` (28 tests) and by a live pass on the dedicated test instance on 2026-10-29. Step 2 of the PR-0 spike (the write routes) is done here, on the test instance only. No production Hermes was touched.
+Status: implemented in `scripts/hermes-facade.js`, tested by `test/hermes-facade.test.js` (29 tests) and by a live pass on the dedicated test instance on 2026-10-29. Step 2 of the PR-0 spike (the write routes) is done here, on the test instance only. No production Hermes was touched.
 
 The facade is the answer of PR-0 to a target with no TLS, no per-device token and no operator revocation. It terminates TLS, authenticates one token per device, and talks to Hermes over the host loopback only. The Hermes credentials never leave the facade process.
 
@@ -77,7 +77,7 @@ The facade keeps one record per write key in `<data>/idempotency/<sha256 of devi
 | `unknown` | the connection broke, timed out or was reset after the request was sent, the answer could not be read completely, or Hermes answered 5xx | 502 `write_outcome_unknown`, Hermes is not called. The first request got the 5xx of Hermes as it was |
 | no file, or the record expired (24 hours) | new write | sent to Hermes |
 
-A file that cannot be read or parsed, or that has no numeric `expires` (`{}`, `null`, empty), counts as `unknown`. It keeps its key for 24 hours after its last write (the modification time of the file), on read, on the hourly purge, on the purge of a full journal and at startup. A restart never frees the key of an invalid record. The same key with another body gives 409 `idempotency_key_conflict` in every state.
+A file that cannot be read or parsed, or that has no numeric `expires` (`{}`, `null`, empty), counts as `unknown`. It keeps its key for 24 hours after its last write (the modification time of the file), on read, on the hourly purge, on the purge of a full journal and at startup. A restart never frees the key of an invalid record. The same key with another body gives 409 `idempotency_key_conflict` only when the record keeps the fingerprint of the first body (the SHA-256 of the body, written with the record). A record with no fingerprint (damaged, empty, `null`, `{}`) cannot compare bodies: any body, the same or another, gets 502 `write_outcome_unknown`.
 
 What frees the key (the next send reaches Hermes):
 
