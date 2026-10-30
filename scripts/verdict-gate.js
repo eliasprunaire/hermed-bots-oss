@@ -32,6 +32,7 @@ const FORCE_PUSH_QUERY = `query($owner:String!,$name:String!,$number:Int!,$commi
 }`;
 const VERIFIERS = Object.freeze([
   Object.freeze({ login: "app-pilote-verifier[bot]", type: "Bot" }),
+  Object.freeze({ login: "cursor[bot]", type: "Bot" }),
 ]);
 
 function render(text) {
