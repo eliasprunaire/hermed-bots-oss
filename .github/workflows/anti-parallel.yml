@@ -6,13 +6,16 @@ on:
   issue_comment:
     types: [created, edited]
 
+run-name: anti-parallel pr-${{ github.event.pull_request.number || github.event.issue.number }}
+
 permissions:
   contents: read
   pull-requests: read
   actions: read
+  statuses: write
 
 concurrency:
-  group: verifier-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event.pull_request.head.sha || github.sha }}
+  group: verifier-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: false
 
 jobs:
@@ -20,6 +23,11 @@ jobs:
     if: github.event_name == 'pull_request' || github.event.issue.pull_request != null
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: read
+      statuses: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -31,4 +39,13 @@ jobs:
       - name: Fail closed on parallel verifiers or executors
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/check-anti-parallel.js
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+        run: |
+          checker="$RUNNER_TEMP/check-anti-parallel.js"
+          if git cat-file -e "$BASE_SHA:scripts/check-anti-parallel.js" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/check-anti-parallel.js" > "$checker"
+          else
+            echo "::notice::scripts/check-anti-parallel.js is absent on the base: using the PR copy"
+            cp scripts/check-anti-parallel.js "$checker"
+          fi
+          node "$checker"

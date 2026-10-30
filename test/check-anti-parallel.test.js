@@ -92,6 +92,31 @@ test("a second in-progress verifier run for the head SHA fails", () => {
   assert.equal(decision.description, `concurrent verifier runs for ${HEAD}`);
 });
 
+test("an issue_comment verifier run for the same PR is counted", () => {
+  const decision = decideVerifier({
+    headSha: HEAD,
+    number: 70,
+    comments: [],
+    runs: [
+      {
+        headSha: HEAD,
+        status: "in_progress",
+        path: VERIFIER_PATH,
+        event: "pull_request",
+      },
+      {
+        headSha: OTHER,
+        status: "queued",
+        path: VERIFIER_PATH,
+        event: "issue_comment",
+        displayTitle: "verdict-gate pr-70",
+      },
+    ],
+  });
+  assert.equal(decision.kind, "fail");
+  assert.equal(decision.reason.code, "verifier-in-progress");
+});
+
 test("one in-progress verifier run for the head SHA passes", () => {
   const decision = decideVerifier({
     headSha: HEAD,
@@ -166,7 +191,7 @@ test("unreadable runs fail closed", () => {
   assert.equal(decision.reason.code, "unreadable-runs");
 });
 
-test("workflows key verifier concurrency on PR and head SHA", () => {
+test("workflows key verifier concurrency on the PR number", () => {
   const verdict = readFileSync(
     join(__dirname, "..", ".github/workflows/verdict-gate.yml"),
     "utf8",
@@ -178,18 +203,25 @@ test("workflows key verifier concurrency on PR and head SHA", () => {
   const ci = readFileSync(join(__dirname, "..", ".github/workflows/ci.yml"), "utf8");
   assert.match(
     verdict,
-    /group: verdict-gate-\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.issue\.number \}\}-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/,
+    /group: verdict-gate-\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.issue\.number \}\}$/m,
+  );
+  assert.equal(
+    /group: verdict-gate-.*github\.sha/.test(verdict),
+    false,
   );
   assert.match(verdict, /cancel-in-progress:\s*false/);
   assert.match(
     lock,
-    /group: verifier-\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.issue\.number \}\}-\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/,
+    /group: verifier-\$\{\{ github\.event\.pull_request\.number \|\| github\.event\.issue\.number \}\}/,
   );
+  assert.equal(lock.includes("github.event.pull_request.head.sha || github.sha"), false);
   assert.match(lock, /cancel-in-progress:\s*false/);
+  assert.match(lock, /statuses:\s*write/);
+  assert.match(lock, /git show "\$BASE_SHA:scripts\/check-anti-parallel\.js"/);
+  assert.match(lock, /node "\$checker"/);
   assert.match(
     ci,
     /group: executor-\$\{\{ github\.event\.pull_request\.number \|\| github\.run_id \}\}/,
   );
   assert.match(ci, /cancel-in-progress:\s*false/);
-  assert.match(lock, /node scripts\/check-anti-parallel\.js/);
 });

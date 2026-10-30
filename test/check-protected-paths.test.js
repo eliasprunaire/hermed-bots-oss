@@ -38,6 +38,8 @@ test("matches agent config and the gate files", () => {
     "scripts/verdict-gate.js",
     ".github/workflows/verdict-gate.yml",
     ".github/workflows/protected-paths.yml",
+    ".github/workflows/anti-parallel.yml",
+    "scripts/check-anti-parallel.js",
     "docs/scripts/verdict-gate.js",
   ]);
   assert.deepEqual(hits, [
@@ -50,6 +52,8 @@ test("matches agent config and the gate files", () => {
     "scripts/verdict-gate.js",
     ".github/workflows/verdict-gate.yml",
     ".github/workflows/protected-paths.yml",
+    ".github/workflows/anti-parallel.yml",
+    "scripts/check-anti-parallel.js",
   ]);
   for (const file of GATE_FILES) {
     assert.equal(isGateFile(file), true, file);

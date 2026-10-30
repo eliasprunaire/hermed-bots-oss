@@ -17,6 +17,7 @@ const ACTIVE_RUN = new Set([
 ]);
 const SIGNALER_LOGIN = "cursor[bot]";
 const DESCRIPTION_MAX = 140;
+const STATUS_CONTEXT = "anti-parallel";
 
 function render(text) {
   if (text.length > DESCRIPTION_MAX) {
@@ -136,11 +137,9 @@ function decideVerifier(input) {
     if (run == null || typeof run !== "object" || !isVerifierWorkflow(run)) {
       continue;
     }
-    const sha =
-      typeof run.headSha === "string" ? run.headSha.toLowerCase() : "";
     const status =
       typeof run.status === "string" ? run.status.toLowerCase() : "";
-    if (sha === headSha && ACTIVE_RUN.has(status)) {
+    if (ACTIVE_RUN.has(status) && runBelongsToPr(run, headSha, input.number)) {
       active.push(run);
     }
   }
@@ -159,6 +158,24 @@ function decideVerifier(input) {
     kind: "pass",
     description: render(`one verifier for ${headSha}`),
   };
+}
+
+function runBelongsToPr(run, headSha, number) {
+  const sha = typeof run.headSha === "string" ? run.headSha.toLowerCase() : "";
+  if (sha === headSha) {
+    return true;
+  }
+  const event = typeof run.event === "string" ? run.event.toLowerCase() : "";
+  if (event !== "issue_comment") {
+    return false;
+  }
+  if (typeof number === "number" && Array.isArray(run.pullNumbers)) {
+    if (run.pullNumbers.includes(number)) {
+      return true;
+    }
+  }
+  const title = typeof run.displayTitle === "string" ? run.displayTitle : "";
+  return typeof number === "number" && title.includes(`pr-${number}`);
 }
 
 function identitiesOf(message) {
@@ -307,11 +324,29 @@ function toRun(raw) {
   if (raw == null || typeof raw !== "object") {
     throw new Error("run page is unreadable");
   }
+  const pullNumbers = [];
+  if (Array.isArray(raw.pull_requests)) {
+    for (const pull of raw.pull_requests) {
+      if (
+        pull != null &&
+        typeof pull === "object" &&
+        typeof pull.number === "number" &&
+        Number.isInteger(pull.number) &&
+        pull.number > 0
+      ) {
+        pullNumbers.push(pull.number);
+      }
+    }
+  }
   return {
+    id: typeof raw.id === "number" ? raw.id : 0,
     headSha: typeof raw.head_sha === "string" ? raw.head_sha : "",
     status: typeof raw.status === "string" ? raw.status : "",
     path: typeof raw.path === "string" ? raw.path : "",
     name: typeof raw.name === "string" ? raw.name : "",
+    event: typeof raw.event === "string" ? raw.event : "",
+    displayTitle: typeof raw.display_title === "string" ? raw.display_title : "",
+    pullNumbers,
     workflow:
       raw.workflow != null && typeof raw.workflow === "object"
         ? { path: raw.workflow.path }
@@ -319,9 +354,9 @@ function toRun(raw) {
   };
 }
 
-async function loadRuns(io, token, owner, repo, headSha) {
+async function loadRunPages(io, token, startUrl) {
   const runs = [];
-  let url = `https://api.github.com/repos/${owner}/${repo}/actions/runs?head_sha=${headSha}&per_page=100`;
+  let url = startUrl;
   while (url) {
     const response = await githubGet(io, token, url);
     const page = await response.json();
@@ -336,6 +371,30 @@ async function loadRuns(io, token, owner, repo, headSha) {
       runs.push(toRun(raw));
     }
     url = nextUrl(response.headers.get("link"));
+  }
+  return runs;
+}
+
+async function loadRuns(io, token, owner, repo, headSha) {
+  const byHead = await loadRunPages(
+    io,
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/actions/runs?head_sha=${headSha}&per_page=100`,
+  );
+  const byComment = await loadRunPages(
+    io,
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/actions/workflows/verdict-gate.yml/runs?event=issue_comment&per_page=100`,
+  );
+  const seen = new Set();
+  const runs = [];
+  for (const run of [...byHead, ...byComment]) {
+    const key = run.id !== 0 ? `id:${run.id}` : `sha:${run.headSha}:${run.status}:${run.event}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    runs.push(run);
   }
   return runs;
 }
@@ -442,8 +501,48 @@ async function resolveHead(io, token, owner, repo, eventName, payload) {
   return { action: "exit", code: 1 };
 }
 
-function report(io, decision) {
+async function postStatus(io, token, owner, repo, sha, state, description) {
+  let response;
+  try {
+    response = await io.fetch(
+      `https://api.github.com/repos/${owner}/${repo}/statuses/${sha}`,
+      {
+        method: "POST",
+        headers: {
+          ...apiHeaders(token),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          state,
+          context: STATUS_CONTEXT,
+          description,
+        }),
+      },
+    );
+  } catch {
+    return 1;
+  }
+  if (!response || response.status !== 201) {
+    return 1;
+  }
+  return 0;
+}
+
+async function report(io, token, owner, repo, sha, decision) {
+  const state = decision.kind === "pass" ? "success" : "failure";
+  const posted = await postStatus(
+    io,
+    token,
+    owner,
+    repo,
+    sha,
+    state,
+    decision.description,
+  );
   io.stderr(decision.description);
+  if (posted !== 0) {
+    return 1;
+  }
   return decision.kind === "pass" ? 0 : 1;
 }
 
@@ -499,7 +598,7 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
       head.number,
     );
   } catch {
-    return report(io, {
+    return report(io, token, names.owner, names.repo, headSha, {
       kind: "fail",
       description: render("could not read PR comments"),
     });
@@ -509,15 +608,20 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
   try {
     runs = await loadRuns(io, token, names.owner, names.repo, headSha);
   } catch {
-    return report(io, {
+    return report(io, token, names.owner, names.repo, headSha, {
       kind: "fail",
       description: render("could not read verifier runs"),
     });
   }
 
-  const verifier = decideVerifier({ headSha, comments, runs });
+  const verifier = decideVerifier({
+    headSha,
+    number: head.number,
+    comments,
+    runs,
+  });
   if (verifier.kind !== "pass") {
-    return report(io, verifier);
+    return report(io, token, names.owner, names.repo, headSha, verifier);
   }
 
   if (head.checkCommits) {
@@ -525,20 +629,19 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     try {
       commits = loadCommits(io, head.baseSha, headSha);
     } catch {
-      return report(io, {
+      return report(io, token, names.owner, names.repo, headSha, {
         kind: "fail",
         description: render("could not read PR commits"),
       });
     }
     const executor = decideExecutor({ commits });
     if (executor.kind !== "pass") {
-      return report(io, executor);
+      return report(io, token, names.owner, names.repo, headSha, executor);
     }
     io.stderr(executor.description);
   }
 
-  io.stderr(verifier.description);
-  return 0;
+  return report(io, token, names.owner, names.repo, headSha, verifier);
 }
 
 const defaultIo = {
@@ -566,7 +669,7 @@ const defaultIo = {
   },
 };
 
-module.exports = { decideExecutor, decideVerifier, main };
+module.exports = { decideExecutor, decideVerifier, main, STATUS_CONTEXT };
 
 if (require.main === module) {
   main()

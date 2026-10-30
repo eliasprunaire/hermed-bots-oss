@@ -10,8 +10,10 @@ permissions:
   contents: read
   pull-requests: read
 
+run-name: verdict-gate pr-${{ github.event.pull_request.number || github.event.issue.number }}
+
 concurrency:
-  group: verdict-gate-${{ github.event.pull_request.number || github.event.issue.number }}-${{ github.event.pull_request.head.sha || github.sha }}
+  group: verdict-gate-${{ github.event.pull_request.number || github.event.issue.number }}
   cancel-in-progress: false
 
 jobs:
