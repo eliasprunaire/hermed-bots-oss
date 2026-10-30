@@ -23,8 +23,8 @@ function marked(verdict, sha) {
   return `VERDICT: ${verdict} @ ${sha}\n${MARKER}`;
 }
 
-function comment(id, body, login = "app-pilote-verifier[bot]") {
-  return { id, body, user: { login } };
+function comment(id, body, login = "app-pilote-verifier[bot]", type = "Bot") {
+  return { id, body, user: { login, type } };
 }
 
 function decideV(input) {
@@ -41,6 +41,18 @@ test("single verdict passes", () => {
   });
   assert.equal(decision.kind, "pass");
   assert.equal(decision.description, `one verifier for ${HEAD}`);
+});
+
+test("a copied marker from a User login does not count as a verifier", () => {
+  const decision = decideV({
+    headSha: HEAD,
+    comments: [
+      comment("1", marked("PASS", HEAD)),
+      comment("2", marked("PASS", HEAD), "app-pilote-verifier[bot]", "User"),
+      comment("3", marked("FAIL", HEAD), "spoof", "User"),
+    ],
+  });
+  assert.equal(decision.kind, "pass");
 });
 
 test("two verdicts for the same sha fail", () => {
@@ -302,11 +314,11 @@ test("an issue_comment fail posts a head status and exits 0", async () => {
         return jsonResponse([
           {
             body: marked("PASS", HEAD),
-            user: { login: "app-pilote-verifier[bot]" },
+            user: { login: "app-pilote-verifier[bot]", type: "Bot" },
           },
           {
             body: marked("FAIL", HEAD),
-            user: { login: "app-pilote-verifier[bot]" },
+            user: { login: "app-pilote-verifier[bot]", type: "Bot" },
           },
         ]);
       }
@@ -365,11 +377,11 @@ test("a pull_request fail posts a head status and exits 1", async () => {
         return jsonResponse([
           {
             body: marked("PASS", HEAD),
-            user: { login: "app-pilote-verifier[bot]" },
+            user: { login: "app-pilote-verifier[bot]", type: "Bot" },
           },
           {
             body: marked("FAIL", HEAD),
-            user: { login: "app-pilote-verifier[bot]" },
+            user: { login: "app-pilote-verifier[bot]", type: "Bot" },
           },
         ]);
       }
@@ -387,6 +399,152 @@ test("a pull_request fail posts a head status and exits 1", async () => {
     assert.equal(await main([], io), 1);
     assert.equal(posted.length, 1);
     assert.equal(posted[0].state, "failure");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("issue_comment still fails when executors overlap on the same head", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "anti-parallel-"));
+  const eventPath = join(dir, "event.json");
+  writeFileSync(
+    eventPath,
+    JSON.stringify({
+      issue: { number: 70, pull_request: { url: "https://api.github.com/repos/acme/app/pulls/70" } },
+    }),
+  );
+  const posted = [];
+  const io = {
+    env: {
+      GITHUB_TOKEN: "test-token",
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_REPOSITORY: "acme/app",
+      GITHUB_EVENT_NAME: "issue_comment",
+    },
+    readFile(path) {
+      return readFileSync(path, "utf8");
+    },
+    stderr() {},
+    async fetch(url, init) {
+      const href = String(url);
+      if (href.endsWith("/pulls/70") && (init == null || init.method == null)) {
+        return jsonResponse({
+          number: 70,
+          head: { sha: HEAD },
+          base: { sha: OTHER },
+        });
+      }
+      if (href.includes("/issues/70/comments")) {
+        return jsonResponse([
+          {
+            body: marked("PASS", HEAD),
+            user: { login: "app-pilote-verifier[bot]", type: "Bot" },
+          },
+        ]);
+      }
+      if (href.includes("/pulls/70/commits")) {
+        return jsonResponse([
+          {
+            commit: {
+              message: `fix\n\n${AGENT_A}\n`,
+              author: { date: "2026-10-30T00:00:00Z" },
+            },
+          },
+          {
+            commit: {
+              message: `also\n\n${AGENT_B}\n`,
+              author: { date: "2026-10-30T00:00:00Z" },
+            },
+          },
+        ]);
+      }
+      if (href.includes("/actions/") && href.includes("/runs")) {
+        return jsonResponse({ workflow_runs: [] });
+      }
+      if (href.includes(`/statuses/${HEAD}`) && init && init.method === "POST") {
+        posted.push(JSON.parse(init.body));
+        return jsonResponse({}, 201);
+      }
+      throw new Error(`unexpected url ${href}`);
+    },
+  };
+  try {
+    assert.equal(await main([], io), 0);
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].state, "failure");
+    assert.match(posted[0].description, /multiple executor identities/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("issue_comment ignores a spoofed marker and keeps a single approved verdict", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "anti-parallel-"));
+  const eventPath = join(dir, "event.json");
+  writeFileSync(
+    eventPath,
+    JSON.stringify({
+      issue: { number: 70, pull_request: { url: "https://api.github.com/repos/acme/app/pulls/70" } },
+    }),
+  );
+  const posted = [];
+  const io = {
+    env: {
+      GITHUB_TOKEN: "test-token",
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_REPOSITORY: "acme/app",
+      GITHUB_EVENT_NAME: "issue_comment",
+    },
+    readFile(path) {
+      return readFileSync(path, "utf8");
+    },
+    stderr() {},
+    async fetch(url, init) {
+      const href = String(url);
+      if (href.endsWith("/pulls/70") && (init == null || init.method == null)) {
+        return jsonResponse({
+          number: 70,
+          head: { sha: HEAD },
+          base: { sha: OTHER },
+        });
+      }
+      if (href.includes("/issues/70/comments")) {
+        return jsonResponse([
+          {
+            body: marked("PASS", HEAD),
+            user: { login: "app-pilote-verifier[bot]", type: "Bot" },
+          },
+          {
+            body: marked("PASS", HEAD),
+            user: { login: "app-pilote-verifier[bot]", type: "User" },
+          },
+        ]);
+      }
+      if (href.includes("/pulls/70/commits")) {
+        return jsonResponse([
+          {
+            commit: {
+              message: `fix\n\n${AGENT_A}\n`,
+              author: { date: "2026-10-30T00:00:00Z" },
+            },
+          },
+        ]);
+      }
+      if (href.includes("/actions/") && href.includes("/runs")) {
+        return jsonResponse({ workflow_runs: [] });
+      }
+      if (href.includes(`/statuses/${HEAD}`) && init && init.method === "POST") {
+        posted.push(JSON.parse(init.body));
+        return jsonResponse({}, 201);
+      }
+      throw new Error(`unexpected url ${href}`);
+    },
+  };
+  try {
+    assert.equal(await main([], io), 0);
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].state, "success");
+    assert.match(posted[0].description, /one verifier/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

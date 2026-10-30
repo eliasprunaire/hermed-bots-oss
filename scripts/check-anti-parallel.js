@@ -16,6 +16,9 @@ const ACTIVE_RUN = new Set([
   "requested",
 ]);
 const SIGNALER_LOGIN = "cursor[bot]";
+const VERIFIERS = Object.freeze([
+  Object.freeze({ login: "app-pilote-verifier[bot]", type: "Bot" }),
+]);
 const DESCRIPTION_MAX = 140;
 const STATUS_CONTEXT = "anti-parallel";
 
@@ -46,6 +49,20 @@ function foldLogin(user) {
 
 function isSignaler(comment) {
   return foldLogin(comment && comment.user) === SIGNALER_LOGIN;
+}
+
+function userType(user) {
+  return user != null && typeof user.type === "string" ? user.type : "";
+}
+
+function isApprovedVerifier(comment) {
+  const user = comment && comment.user;
+  if (user == null || !nonEmpty(user.login) || userType(user) === "") {
+    return false;
+  }
+  return VERIFIERS.some(
+    (entry) => entry.login === user.login && entry.type === user.type,
+  );
 }
 
 function markedVerdicts(body) {
@@ -106,6 +123,9 @@ function decideVerifier(input) {
         reason: { code: "unreadable", headSha },
         description: render("could not read PR comments"),
       };
+    }
+    if (!isApprovedVerifier(comment)) {
+      continue;
     }
     const citesHead = markedVerdicts(comment.body).some(
       (line) => line.sha === headSha,
@@ -302,9 +322,13 @@ function toComment(raw) {
   }
   const login =
     raw.user != null && typeof raw.user === "object" ? raw.user.login : undefined;
+  const type =
+    raw.user != null && typeof raw.user === "object" ? raw.user.type : undefined;
   return {
     body: raw.body,
-    user: nonEmpty(login) ? { login } : null,
+    user: nonEmpty(login)
+      ? { login, type: nonEmpty(type) ? type : "" }
+      : null,
   };
 }
 
@@ -440,6 +464,60 @@ function loadCommits(io, baseSha, headSha) {
   return parseCommits(result.stdout);
 }
 
+function toPullCommit(raw) {
+  if (raw == null || typeof raw !== "object") {
+    throw new Error("could not read PR commits");
+  }
+  const commit = raw.commit;
+  if (commit == null || typeof commit !== "object") {
+    throw new Error("could not read PR commits");
+  }
+  const message = typeof commit.message === "string" ? commit.message : "";
+  const author = commit.author;
+  const stamp =
+    author != null && typeof author.date === "string" ? author.date : "";
+  const authoredAtMs = Date.parse(stamp);
+  return {
+    message,
+    authoredAtMs: Number.isFinite(authoredAtMs) ? authoredAtMs : 0,
+  };
+}
+
+async function loadPullCommits(io, token, owner, repo, number) {
+  const pages = await loadPages(
+    io,
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${number}/commits?per_page=100`,
+  );
+  const commits = [];
+  for (const page of pages) {
+    for (const raw of page) {
+      commits.push(toPullCommit(raw));
+    }
+  }
+  return commits;
+}
+
+async function loadExecutorCommits(
+  io,
+  token,
+  owner,
+  repo,
+  number,
+  baseSha,
+  headSha,
+  eventName,
+) {
+  if (eventName === "issue_comment") {
+    return loadPullCommits(io, token, owner, repo, number);
+  }
+  try {
+    return loadCommits(io, baseSha, headSha);
+  } catch {
+    return loadPullCommits(io, token, owner, repo, number);
+  }
+}
+
 function repositoryParts(repository) {
   const parts = repository.split("/");
   if (parts.length !== 2 || parts[0] === "" || parts[1] === "") {
@@ -491,7 +569,6 @@ async function resolveHead(io, token, owner, repo, eventName, payload) {
       number: issue.number,
       sha: readHeadSha(pull),
       baseSha: readBaseSha(pull),
-      checkCommits: false,
     };
   }
   if (eventName === "pull_request" || eventName === "pull_request_target") {
@@ -502,7 +579,6 @@ async function resolveHead(io, token, owner, repo, eventName, payload) {
       number,
       sha: readHeadSha(pullRequest),
       baseSha: readBaseSha(pullRequest),
-      checkCommits: true,
     };
   }
   return { action: "exit", code: 1 };
@@ -634,22 +710,29 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     return report(io, token, names.owner, names.repo, headSha, verifier);
   }
 
-  if (head.checkCommits) {
-    let commits;
-    try {
-      commits = loadCommits(io, head.baseSha, headSha);
-    } catch {
-      return report(io, token, names.owner, names.repo, headSha, {
-        kind: "fail",
-        description: render("could not read PR commits"),
-      });
-    }
-    const executor = decideExecutor({ commits });
-    if (executor.kind !== "pass") {
-      return report(io, token, names.owner, names.repo, headSha, executor);
-    }
-    io.stderr(executor.description);
+  let commits;
+  try {
+    commits = await loadExecutorCommits(
+      io,
+      token,
+      names.owner,
+      names.repo,
+      head.number,
+      head.baseSha,
+      headSha,
+      eventName,
+    );
+  } catch {
+    return report(io, token, names.owner, names.repo, headSha, {
+      kind: "fail",
+      description: render("could not read PR commits"),
+    });
   }
+  const executor = decideExecutor({ commits });
+  if (executor.kind !== "pass") {
+    return report(io, token, names.owner, names.repo, headSha, executor);
+  }
+  io.stderr(executor.description);
 
   return report(io, token, names.owner, names.repo, headSha, verifier);
 }
