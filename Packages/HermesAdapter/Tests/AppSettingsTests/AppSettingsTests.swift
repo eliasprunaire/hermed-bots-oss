@@ -249,6 +249,28 @@ final class AppSettingsTests: XCTestCase {
         }
     }
 
+    func testPreviewLockKeepsEphemeralIdentityWhenThePickerMovesToSession() {
+        XCTAssertEqual(
+            SSHLaunchIdentity.overlayMode(picker: .sessionAgent, launch: .ephemeralAgent),
+            .ephemeralAgent
+        )
+        let launch = SSHLaunchIdentity.overlay(
+            mode: SSHLaunchIdentity.overlayMode(picker: .sessionAgent, launch: .ephemeralAgent),
+            sessionKind: .file,
+            sessionPresent: false,
+            keyCommandSet: true,
+            hasExternalIdentityAgent: false
+        )
+        XCTAssertEqual(launch.kind, .agent)
+        XCTAssertFalse(SSHLaunchIdentity.allows(.file, launch: .ephemeralAgent))
+        XCTAssertTrue(SSHLaunchIdentity.allows(.agent, launch: .ephemeralAgent))
+        XCTAssertTrue(SSHLaunchIdentity.allows(.file, launch: .sessionAgent))
+        XCTAssertTrue(SSHLaunchIdentity.allows(.file, launch: nil))
+        XCTAssertEqual(SSHLaunchIdentityKind.agent.rawValue, "agent")
+        XCTAssertEqual(SSHLaunchIdentityKind.file.rawValue, "file")
+        XCTAssertEqual(SSHLaunchIdentityKind.certificate.rawValue, "certificate")
+    }
+
     func testTenThousandOverlaysStayCheap() {
         for _ in 0..<10_000 {
             let launch = SSHLaunchIdentity.overlay(
