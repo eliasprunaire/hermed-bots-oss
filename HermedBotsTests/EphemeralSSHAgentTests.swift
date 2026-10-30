@@ -157,6 +157,52 @@ final class EphemeralSSHAgentTests: XCTestCase {
         await backend.close()
     }
 
+    func testAttachResolvesIdentityAgentFromSSHAuthSockInTheLaunchEnvironment() async throws {
+        let watchdog = try Spawn.startWatchdog()
+        addTeardownBlock {
+            watchdog.closeStdin()
+            killpg(watchdog.group, SIGKILL)
+        }
+        let directory = try EphemeralSSHAgent.makeDirectory()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let agent = try await EphemeralSSHAgent.start(joining: watchdog.pid, directory: directory)
+        try await agent.addKey(OpenSSHFixture.ed25519(), joining: watchdog.pid)
+        let backend = SystemSSHBackend(
+            environment: [
+                "PATH": "/usr/bin:/bin",
+                "HOME": "/tmp/example-home",
+                "USER": "user",
+                "LOGNAME": "user",
+                "SSH_AUTH_SOCK": agent.socketPath,
+            ],
+            resolver: AgreeingSSHResolver(identityAgent: "$SSH_AUTH_SOCK"),
+            client: SSHClientSettings(authMode: .ephemeralAgent, sshBinary: try installDouble()),
+            keySource: nil
+        )
+        addTeardownBlock { await backend.close() }
+        let config = try SSHTunnelConfig(
+            alias: "lab.invalid",
+            hostname: "example.invalid",
+            user: "user",
+            sshPort: 2200,
+            refuseTestHost: true
+        )
+        let session = try await backend.open(config)
+        XCTAssertTrue((1...65535).contains(session.localPort))
+        let pid = await backend.temporaryAgentPID()
+        let socket = await backend.temporaryAgentSocketPath()
+        XCTAssertNil(pid)
+        XCTAssertNil(socket)
+        let listed = try await Spawn.run(
+            "/usr/bin/ssh-add",
+            ["-l"],
+            environment: SSHChildEnvironment.make(["SSH_AUTH_SOCK": agent.socketPath]),
+            timeout: .seconds(5)
+        )
+        XCTAssertEqual(listed.status, 0)
+        await backend.close()
+    }
+
     @MainActor
     func testAFatalErrorAfterAnOpenTunnelDestroysTheTemporaryAgent() async throws {
         let backend = SystemSSHBackend(
