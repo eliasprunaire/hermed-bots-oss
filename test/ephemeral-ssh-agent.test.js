@@ -95,6 +95,17 @@ function banner(kind) {
   return "";
 }
 
+test("an empty key command does not construct a command private key source", () => {
+  const app = readFileSync(join(ROOT, "HermedBots/App/AppModel.swift"), "utf8");
+  const start = app.indexOf("private func ephemeralKeySource");
+  assert.notEqual(start, -1);
+  const fn = app.slice(start, app.indexOf("private static func apiMessage", start));
+  const afterEndif = fn.slice(fn.lastIndexOf("#endif"));
+  const nilAt = afterEndif.indexOf("return nil");
+  const commandAt = afterEndif.indexOf("CommandPrivateKeySource");
+  assert.ok(nilAt !== -1 && commandAt !== -1 && nilAt < commandAt, afterEndif);
+});
+
 test("app Swift starts ssh-agent, loads the key on stdin, and never writes it", () => {
   const agent = readFileSync(AGENT, "utf8");
   const tunnel = readFileSync(TUNNEL, "utf8");

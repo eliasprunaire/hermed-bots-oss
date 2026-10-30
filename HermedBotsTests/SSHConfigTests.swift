@@ -939,6 +939,36 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertEqual(model.preview?.identity, .file)
     }
 
+    func testAnEmptyKeyCommandDoesNotLoadAPrivateKeyWhenTheDumpNamesAnExternalIdentityAgent() async {
+        let dump = SSHConfigDump(
+            stdout: """
+            user operator
+            hostname gateway.invalid
+            port 22
+            identityagent /tmp/fake-agent.invalid
+            identityfile /tmp/fake-id.invalid
+            proxyjump none
+            """
+        )
+        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump, .profileList: dump, .profileLocks: dump])
+        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], defaults: isolatedDefaults(), keychain: { InMemorySecretStore(apiKey: nil) })
+        let model = AppModel(environment: environment, sshResolver: resolver)
+        model.host = "lab.invalid"
+        model.authMode = .ephemeralAgent
+        model.authModeChosen = true
+        model.keyCommandPath = ""
+        model.connect()
+        await eventually {
+            if case .failed = model.tunnel.state { true } else { false }
+        }
+        if case .failed(let failure) = model.tunnel.state {
+            XCTAssertEqual(failure, .missingAgent)
+        } else {
+            XCTFail("\(model.tunnel.state)")
+        }
+        await model.tunnel.stop()
+    }
+
     func testEphemeralPreviewOnAppModelShowsAgentNotFile() async {
         let dump = knownDump(hostname: "gateway.invalid")
         let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump])
