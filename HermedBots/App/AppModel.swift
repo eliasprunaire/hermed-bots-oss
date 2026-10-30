@@ -520,8 +520,10 @@ final class AppModel {
             if !material.isEmpty { return DataPrivateKeySource(data: Data(material.utf8)) }
         }
         #endif
+        let command = client.keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty else { return nil }
         return CommandPrivateKeySource(
-            path: client.keyCommandPath,
+            path: command,
             environment: ProcessInfo.processInfo.environment
         )
     }
