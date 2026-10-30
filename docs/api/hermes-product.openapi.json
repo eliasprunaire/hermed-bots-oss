@@ -1490,11 +1490,11 @@
         }
       },
       "Conflict": {
-        "description": "`idempotency_key_conflict`: the key was used with another body. `idempotency_replay_unavailable`: the first answer was over 16 KiB, so the facade did not keep it",
+        "description": "A facade 409 (`idempotency_key_conflict`: the key was used with another body; `idempotency_replay_unavailable`: the first answer was over 16 KiB, so the facade did not keep it), or a 409 of Hermes with its own body. Hermes sends `error` as an object for `approval_not_pending`, `approval_not_active` and `run_not_active`. The facade keeps that answer: the same key returns it with `Idempotency-Replayed: true`",
         "content": {
           "application/json": {
             "schema": {
-              "$ref": "#/components/schemas/FacadeError"
+              "$ref": "#/components/schemas/Error"
             },
             "example": {
               "error": "idempotency_key_conflict"

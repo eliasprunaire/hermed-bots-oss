@@ -536,3 +536,31 @@ test("16. a 408 of Hermes on a write passes through with its Retry-After and doe
     }
   });
 });
+
+test("17. a 409 of Hermes on a write passes through and a replay returns it with Idempotency-Replayed", async () => {
+  const writes = PRODUCT.filter(needsKey);
+  for (const op of writes) assert.ok(op.responses["409"], `${op.operationId}: 409 is not declared`);
+
+  const cases = [
+    ["run.approval", "k-pending", { error: { message: "Run has no pending approval: run_1", type: "invalid_request_error", param: null, code: "approval_not_pending" } }],
+    ["run.approval", "k-active", { error: { message: "Approval is not active: run_1", type: "invalid_request_error", param: null, code: "approval_not_active" } }],
+    ["run.stop", "k-stop", { error: { message: "Run is not active: run_1", type: "invalid_request_error", param: null, code: "run_not_active" } }],
+  ];
+  const byKey = new Map(cases.map(([, key, body]) => [key, body]));
+  const upstreamHandler = (req, res) => {
+    const key = String(req.headers["idempotency-key"] || "").split(":").pop();
+    replyJson(409, byKey.get(key))(req, res);
+  };
+  await withFacade({ upstreamHandler }, async (ctx) => {
+    ctx.dev = await enrol(ctx);
+    for (const [id, key, body] of cases) {
+      const first = await send(ctx, id, { key });
+      assert.deepEqual([first.status, first.json], [409, body], `${id} ${body.error.code}`);
+      assert.equal(first.headers["idempotency-replayed"], undefined, `${id}: first send is not a replay`);
+      const replay = await send(ctx, id, { key });
+      assert.deepEqual([replay.status, replay.json], [409, body], `${id} replay`);
+      assert.equal(replay.headers["idempotency-replayed"], "true", `${id}: replay names Idempotency-Replayed`);
+    }
+    assert.equal(ctx.upstream.calls.length, cases.length, "Hermes is called once per key");
+  });
+});

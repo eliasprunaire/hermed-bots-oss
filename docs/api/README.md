@@ -138,6 +138,7 @@ The facade writes its own errors as `{"error": "<code>"}`. Hermes answers other 
 | 405 | `method_not_allowed` | The route exists for another method |
 | 408 | Hermes body | Hermes did not run a write. Header `Retry-After` when Hermes sends it. The key stays free: send it again after the delay |
 | 409 | `idempotency_key_conflict`, `idempotency_replay_unavailable` | See "What the key guarantees" |
+| 409 | Hermes body | Hermes refused the write. The facade keeps the answer. Replay returns the same 409 with `Idempotency-Replayed: true`. Hermes uses `error` as an object for `approval_not_pending`, `approval_not_active` and `run_not_active` |
 | 413 | `body_too_large` | Body over 1 MiB (4 KiB on enrolment) |
 | 429 | `rate_limited`, or a Hermes body | Over the limit. Header `Retry-After` in seconds |
 | 500 | `internal_error` | A fault of the facade |
