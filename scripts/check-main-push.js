@@ -35,12 +35,61 @@ function pullNumber(item) {
     : null;
 }
 
+function readableBaseRef(base) {
+  return (
+    base != null &&
+    typeof base === "object" &&
+    !Array.isArray(base) &&
+    typeof base.ref === "string" &&
+    base.ref !== ""
+  );
+}
+
 function targetsMain(item) {
-  const base = item.base;
-  if (base != null && (typeof base !== "object" || Array.isArray(base))) {
+  if (!Object.hasOwn(item, "base") || item.base == null) {
+    return "other";
+  }
+  if (!readableBaseRef(item.base)) {
     return "malformed";
   }
-  return base != null && base.ref === "main" ? "main" : "other";
+  return item.base.ref === "main" ? "main" : "other";
+}
+
+function detailBase(item) {
+  if (!Object.hasOwn(item, "base") || item.base == null) {
+    return "malformed";
+  }
+  if (!readableBaseRef(item.base)) {
+    return "malformed";
+  }
+  return item.base.ref === "main" ? "main" : "other";
+}
+
+function mergeCommitField(item) {
+  if (!Object.hasOwn(item, "merge_commit_sha")) {
+    return "missing";
+  }
+  const value = item.merge_commit_sha;
+  if (value == null || value === "") {
+    return "missing";
+  }
+  if (typeof value !== "string" || !HEX_SHA.test(value)) {
+    return "malformed";
+  }
+  return "present";
+}
+
+function mergedAtField(item) {
+  if (!Object.hasOwn(item, "merged_at")) {
+    return "missing";
+  }
+  if (item.merged_at == null) {
+    return "absent";
+  }
+  if (typeof item.merged_at !== "string" || item.merged_at === "") {
+    return "malformed";
+  }
+  return "present";
 }
 
 function classify(body, sha) {
@@ -53,14 +102,25 @@ function classify(body, sha) {
     if (item == null || typeof item !== "object" || Array.isArray(item)) {
       return { kind: "malformed" };
     }
+    const mergedAt = mergedAtField(item);
+    if (mergedAt === "malformed" || mergedAt === "missing") {
+      return { kind: "malformed" };
+    }
     const baseKind = targetsMain(item);
     if (baseKind === "malformed") {
       return { kind: "malformed" };
     }
-    if (typeof item.merged_at !== "string" || item.merged_at === "" || baseKind !== "main") {
+    if (mergedAt === "present" && (!Object.hasOwn(item, "base") || item.base == null)) {
+      return { kind: "malformed" };
+    }
+    if (mergedAt !== "present" || baseKind !== "main") {
       continue;
     }
-    if (item.merge_commit_sha == null || item.merge_commit_sha === "") {
+    const mergeField = mergeCommitField(item);
+    if (mergeField === "malformed") {
+      return { kind: "malformed" };
+    }
+    if (mergeField === "missing") {
       const number = pullNumber(item);
       if (number == null) {
         return { kind: "malformed" };
@@ -101,16 +161,24 @@ function firstParent(body) {
   return { kind: "ok", sha: parent.sha.toLowerCase() };
 }
 
+const UNKNOWN = "UNKNOWN";
+const NONCOMPLIANT = "NONCOMPLIANT";
+
+function fail(io, status, message) {
+  io.stderr(`${status}: ${message}`);
+  return 1;
+}
+
 async function readJson(io, url, token, version, failMessage) {
   let response;
   try {
     response = await io.fetch(url, { headers: headers(token, version) });
   } catch {
-    io.stderr(failMessage);
+    fail(io, UNKNOWN, failMessage);
     return { ok: false };
   }
   if (response == null || response.ok !== true) {
-    io.stderr(failMessage);
+    fail(io, UNKNOWN, failMessage);
     return { ok: false };
   }
   try {
@@ -124,13 +192,20 @@ function matchesMergeCommit(body, sha) {
   if (body == null || typeof body !== "object" || Array.isArray(body)) {
     return "malformed";
   }
-  const baseKind = targetsMain(body);
+  const baseKind = detailBase(body);
   if (baseKind === "malformed") {
     return "malformed";
   }
+  const mergeField = mergeCommitField(body);
+  if (mergeField !== "present") {
+    return "malformed";
+  }
+  const mergedAt = mergedAtField(body);
+  if (mergedAt === "malformed" || mergedAt === "missing") {
+    return "malformed";
+  }
   if (
-    typeof body.merged_at === "string" &&
-    body.merged_at !== "" &&
+    mergedAt === "present" &&
     sameSha(body.merge_commit_sha, sha) &&
     baseKind === "main"
   ) {
@@ -149,22 +224,18 @@ async function main(io = defaultIo()) {
     "",
   );
   if (typeof repository !== "string" || !REPOSITORY.test(repository)) {
-    io.stderr("GITHUB_REPOSITORY must be owner/repo");
-    return 1;
+    return fail(io, UNKNOWN, "GITHUB_REPOSITORY must be owner/repo");
   }
   if (typeof sha !== "string" || !HEX_SHA.test(sha)) {
-    io.stderr("GITHUB_SHA must be 40 hex digits");
-    return 1;
+    return fail(io, UNKNOWN, "GITHUB_SHA must be 40 hex digits");
   }
   sha = sha.toLowerCase();
   if (typeof before !== "string" || !HEX_SHA.test(before) || before.toLowerCase() === ZERO_SHA) {
-    io.stderr("GITHUB_BEFORE must be a non-zero sha");
-    return 1;
+    return fail(io, UNKNOWN, "GITHUB_BEFORE must be a non-zero sha");
   }
   before = before.toLowerCase();
   if (typeof token !== "string" || token === "") {
-    io.stderr("GITHUB_TOKEN is required");
-    return 1;
+    return fail(io, UNKNOWN, "GITHUB_TOKEN is required");
   }
   const [owner, repo] = repository.split("/");
   const encoded = `${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
@@ -181,13 +252,11 @@ async function main(io = defaultIo()) {
     return 1;
   }
   if (pulls.jsonFailed) {
-    io.stderr("malformed pull request list");
-    return 1;
+    return fail(io, UNKNOWN, "malformed pull request list");
   }
   const listed = classify(pulls.body, sha);
   if (listed.kind === "malformed") {
-    io.stderr("malformed pull request list");
-    return 1;
+    return fail(io, UNKNOWN, "malformed pull request list");
   }
   let merged = listed.kind === "merged";
   if (listed.kind === "lookup") {
@@ -203,13 +272,11 @@ async function main(io = defaultIo()) {
         return 1;
       }
       if (detail.jsonFailed) {
-        io.stderr("malformed pull request");
-        return 1;
+        return fail(io, UNKNOWN, "malformed pull request");
       }
       const match = matchesMergeCommit(detail.body, sha);
       if (match === "malformed") {
-        io.stderr("malformed pull request");
-        return 1;
+        return fail(io, UNKNOWN, "malformed pull request");
       }
       if (match === "merged") {
         merged = true;
@@ -218,8 +285,7 @@ async function main(io = defaultIo()) {
     }
   }
   if (!merged) {
-    io.stderr(`no merged pull request for ${sha}`);
-    return 1;
+    return fail(io, NONCOMPLIANT, `no merged pull request for ${sha}`);
   }
   const commit = await readJson(
     io,
@@ -232,22 +298,19 @@ async function main(io = defaultIo()) {
     return 1;
   }
   if (commit.jsonFailed) {
-    io.stderr("malformed commit");
-    return 1;
+    return fail(io, UNKNOWN, "malformed commit");
   }
   const parent = firstParent(commit.body);
   if (parent.kind === "malformed") {
-    io.stderr("malformed commit");
-    return 1;
+    return fail(io, UNKNOWN, "malformed commit");
   }
   if (parent.kind !== "ok" || parent.sha !== before) {
-    io.stderr("before sha is not the first parent");
-    return 1;
+    return fail(io, NONCOMPLIANT, "before sha is not the first parent");
   }
   return 0;
 }
 
-module.exports = { main };
+module.exports = { main, UNKNOWN, NONCOMPLIANT };
 
 if (require.main === module) {
   main()
