@@ -4,7 +4,7 @@
     "beforeShellExecution": [
       {
         "command": "node .cursor/hooks/deny-coauthored-by.js",
-        "matcher": "Co-authored-by"
+        "matcher": "*"
       }
     ]
   }

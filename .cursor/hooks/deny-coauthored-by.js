@@ -24,12 +24,94 @@ function normalizeCommand(command) {
   return String(command).replace(/\\r\\n/g, "\n").replace(/\\n/g, "\n");
 }
 
-function commandHasCoAuthoredBy(command) {
+function argvOf(command) {
   const text = normalizeCommand(command);
-  if (hitsIn(text).includes("Co-authored-by")) {
+  const tokens = [];
+  let i = 0;
+  while (i < text.length) {
+    while (i < text.length && /[ \t]/.test(text[i])) {
+      i += 1;
+    }
+    if (i >= text.length) {
+      break;
+    }
+    if (text[i] === "\n") {
+      i += 1;
+      continue;
+    }
+    const quote = text[i] === '"' || text[i] === "'" ? text[i] : "";
+    if (quote !== "") {
+      i += 1;
+      let token = "";
+      while (i < text.length && text[i] !== quote) {
+        if (quote === '"' && text[i] === "\\" && i + 1 < text.length) {
+          token += text[i + 1];
+          i += 2;
+          continue;
+        }
+        token += text[i];
+        i += 1;
+      }
+      if (i < text.length && text[i] === quote) {
+        i += 1;
+      }
+      tokens.push(token);
+      continue;
+    }
+    let token = "";
+    while (i < text.length && !/[ \t\n]/.test(text[i])) {
+      if (text[i] === "\\" && i + 1 < text.length) {
+        token += text[i + 1];
+        i += 2;
+        continue;
+      }
+      token += text[i];
+      i += 1;
+    }
+    tokens.push(token);
+  }
+  return tokens;
+}
+
+function flagValues(tokens) {
+  const values = [];
+  for (let i = 0; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (token === "--trailer" || token === "-m" || token === "--message") {
+      if (i + 1 < tokens.length) {
+        i += 1;
+        values.push(tokens[i]);
+      }
+      continue;
+    }
+    if (token.startsWith("--trailer=")) {
+      values.push(token.slice("--trailer=".length));
+      continue;
+    }
+    if (token.startsWith("--message=")) {
+      values.push(token.slice("--message=".length));
+      continue;
+    }
+    if (token.startsWith("-m") && token.length > 2) {
+      values.push(token.slice(2));
+    }
+  }
+  return values;
+}
+
+function textHasCoAuthoredBy(text) {
+  const normalized = normalizeCommand(text);
+  if (hitsIn(normalized).includes("Co-authored-by")) {
     return true;
   }
-  return text.split("\n").some((line) => isCoAuthoredByLine(line));
+  return normalized.split("\n").some((line) => isCoAuthoredByLine(line));
+}
+
+function commandHasCoAuthoredBy(command) {
+  if (textHasCoAuthoredBy(command)) {
+    return true;
+  }
+  return flagValues(argvOf(command)).some((value) => textHasCoAuthoredBy(value));
 }
 
 function decide(input) {

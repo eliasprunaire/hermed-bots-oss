@@ -28,7 +28,7 @@ test("hooks.json points the cloud agent hook at the deny script", () => {
   const hooks = parsed.hooks.beforeShellExecution;
   assert.equal(Array.isArray(hooks), true);
   assert.equal(hooks[0].command, "node .cursor/hooks/deny-coauthored-by.js");
-  assert.equal(hooks[0].matcher, "Co-authored-by");
+  assert.equal(hooks[0].matcher, "*");
 });
 
 test("a clean git commit command is allowed", () => {
@@ -65,4 +65,58 @@ test("stdin JSON from beforeShellExecution allows a clean command", () => {
   const result = runHook({ command: "git commit -m feat: land the merge" });
   assert.equal(result.status, 0, result.stderr);
   assert.deepEqual(JSON.parse(result.stdout), { permission: "allow" });
+});
+
+test("a quoted --trailer Co-authored-by argument is denied", () => {
+  const command =
+    'git commit -m "feat: change" --trailer "Co-authored-by: Reviewer <reviewer@example.com>"';
+  assert.equal(commandHasCoAuthoredBy(command), true);
+  assert.equal(decide({ command }).permission, "deny");
+  const result = runHook({ command });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).permission, "deny");
+});
+
+test("a quoted -m Co-authored-by argument is denied", () => {
+  const command =
+    'git commit -m "Co-authored-by: Reviewer <reviewer@example.com>"';
+  assert.equal(commandHasCoAuthoredBy(command), true);
+  assert.equal(decide({ command }).permission, "deny");
+});
+
+test("an equals --trailer Co-authored-by argument is denied", () => {
+  const command =
+    "git commit -m feat --trailer=Co-authored-by: Reviewer <reviewer@example.com>";
+  assert.equal(decide({ command }).permission, "deny");
+});
+
+test("a quoted Signed-off-by trailer stays allowed", () => {
+  const command =
+    'git commit -m "feat: change" --trailer "Signed-off-by: Reviewer <reviewer@example.com>"';
+  assert.equal(commandHasCoAuthoredBy(command), false);
+  assert.equal(decide({ command }).permission, "allow");
+});
+
+test("a quoted --message Co-authored-by argument is denied", () => {
+  const command =
+    'git commit --message "Co-authored-by: Reviewer <reviewer@example.com>"';
+  assert.equal(decide({ command }).permission, "deny");
+});
+
+test("an equals --message Co-authored-by argument is denied", () => {
+  const command =
+    "git commit --message=Co-authored-by: Reviewer <reviewer@example.com>";
+  assert.equal(decide({ command }).permission, "deny");
+});
+
+test("a lowercase quoted --trailer Co-authored-by argument is denied", () => {
+  const command =
+    'git commit -m feat --trailer "co-authored-by: Reviewer <reviewer@example.com>"';
+  assert.equal(decide({ command }).permission, "deny");
+});
+
+test("a search command that only mentions Co-authored-by stays allowed", () => {
+  const command = 'rg "Co-authored-by:"';
+  assert.equal(commandHasCoAuthoredBy(command), false);
+  assert.equal(decide({ command }).permission, "allow");
 });
