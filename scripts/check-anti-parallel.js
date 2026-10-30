@@ -21,6 +21,7 @@ const VERIFIERS = Object.freeze([
 ]);
 const DESCRIPTION_MAX = 140;
 const STATUS_CONTEXT = "anti-parallel";
+const PULL_COMMIT_CAP = 250;
 
 function render(text) {
   if (text.length > DESCRIPTION_MAX) {
@@ -498,6 +499,19 @@ async function loadPullCommits(io, token, owner, repo, number) {
   return commits;
 }
 
+function requireCompletePullCommits(commits, declaredCount) {
+  if (commits.length >= PULL_COMMIT_CAP) {
+    throw new Error("could not read PR commits");
+  }
+  if (declaredCount != null && declaredCount >= PULL_COMMIT_CAP) {
+    throw new Error("could not read PR commits");
+  }
+  if (declaredCount != null && declaredCount !== commits.length) {
+    throw new Error("could not read PR commits");
+  }
+  return commits;
+}
+
 async function loadExecutorCommits(
   io,
   token,
@@ -506,15 +520,13 @@ async function loadExecutorCommits(
   number,
   baseSha,
   headSha,
-  eventName,
+  declaredCount,
 ) {
-  if (eventName === "issue_comment") {
-    return loadPullCommits(io, token, owner, repo, number);
-  }
   try {
     return loadCommits(io, baseSha, headSha);
   } catch {
-    return loadPullCommits(io, token, owner, repo, number);
+    const commits = await loadPullCommits(io, token, owner, repo, number);
+    return requireCompletePullCommits(commits, declaredCount);
   }
 }
 
@@ -538,6 +550,14 @@ function readBaseSha(pull) {
   const sha = pull && pull.base ? pull.base.sha : undefined;
   if (typeof sha === "string" && HEX_SHA.test(sha)) {
     return sha.toLowerCase();
+  }
+  return null;
+}
+
+function readCommitCount(pull) {
+  const n = pull && pull.commits;
+  if (typeof n === "number" && Number.isInteger(n) && n >= 0) {
+    return n;
   }
   return null;
 }
@@ -569,6 +589,7 @@ async function resolveHead(io, token, owner, repo, eventName, payload) {
       number: issue.number,
       sha: readHeadSha(pull),
       baseSha: readBaseSha(pull),
+      commitCount: readCommitCount(pull),
     };
   }
   if (eventName === "pull_request" || eventName === "pull_request_target") {
@@ -579,6 +600,7 @@ async function resolveHead(io, token, owner, repo, eventName, payload) {
       number,
       sha: readHeadSha(pullRequest),
       baseSha: readBaseSha(pullRequest),
+      commitCount: readCommitCount(pullRequest),
     };
   }
   return { action: "exit", code: 1 };
@@ -720,7 +742,7 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
       head.number,
       head.baseSha,
       headSha,
-      eventName,
+      head.commitCount,
     );
   } catch {
     return report(io, token, names.owner, names.repo, headSha, {

@@ -478,6 +478,77 @@ test("issue_comment still fails when executors overlap on the same head", async 
   }
 });
 
+test("issue_comment fails closed when the pull commit list is truncated at 250", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "anti-parallel-"));
+  const eventPath = join(dir, "event.json");
+  writeFileSync(
+    eventPath,
+    JSON.stringify({
+      issue: { number: 70, pull_request: { url: "https://api.github.com/repos/acme/app/pulls/70" } },
+    }),
+  );
+  const posted = [];
+  const oneAgent = Array.from({ length: 250 }, () => ({
+    commit: {
+      message: `fix\n\n${AGENT_A}\n`,
+      author: { date: "2026-10-30T00:00:00Z" },
+    },
+  }));
+  const io = {
+    env: {
+      GITHUB_TOKEN: "test-token",
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_REPOSITORY: "acme/app",
+      GITHUB_EVENT_NAME: "issue_comment",
+    },
+    readFile(path) {
+      return readFileSync(path, "utf8");
+    },
+    stderr() {},
+    run() {
+      return { status: 1, stdout: "" };
+    },
+    async fetch(url, init) {
+      const href = String(url);
+      if (href.endsWith("/pulls/70") && (init == null || init.method == null)) {
+        return jsonResponse({
+          number: 70,
+          commits: 251,
+          head: { sha: HEAD },
+          base: { sha: OTHER },
+        });
+      }
+      if (href.includes("/issues/70/comments")) {
+        return jsonResponse([
+          {
+            body: marked("PASS", HEAD),
+            user: { login: "app-pilote-verifier[bot]", type: "Bot" },
+          },
+        ]);
+      }
+      if (href.includes("/pulls/70/commits")) {
+        return jsonResponse(oneAgent);
+      }
+      if (href.includes("/actions/") && href.includes("/runs")) {
+        return jsonResponse({ workflow_runs: [] });
+      }
+      if (href.includes(`/statuses/${HEAD}`) && init && init.method === "POST") {
+        posted.push(JSON.parse(init.body));
+        return jsonResponse({}, 201);
+      }
+      throw new Error(`unexpected url ${href}`);
+    },
+  };
+  try {
+    assert.equal(await main([], io), 0);
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].state, "failure");
+    assert.match(posted[0].description, /could not read PR commits/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("issue_comment ignores a spoofed marker and keeps a single approved verdict", async () => {
   const dir = mkdtempSync(join(tmpdir(), "anti-parallel-"));
   const eventPath = join(dir, "event.json");
