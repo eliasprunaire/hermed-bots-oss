@@ -1520,7 +1520,7 @@
         }
       },
       "BadGateway": {
-        "description": "The facade could not get an answer from Hermes: `upstream_unavailable`, `upstream_timeout`, `upstream_rejected` (Hermes refused the key of the facade), `upstream_redirect`, `upstream_key_missing` (no Hermes key for the profile), or `write_outcome_unknown` (a write may have run: do not send its key again)",
+        "description": "The facade could not get an answer from Hermes: `upstream_unavailable`, `upstream_timeout`, `upstream_rejected` (Hermes refused the key of the facade), `upstream_redirect`, `upstream_key_missing` (no Hermes key for the profile), or `write_outcome_unknown` (a write may have run: do not send its key again). A 502 that Hermes sends on a write passes through with the body of Hermes: tell the two apart by the body",
         "content": {
           "application/json": {
             "schema": {
@@ -1533,7 +1533,7 @@
         }
       },
       "ServiceUnavailable": {
-        "description": "`idempotency_journal_full`: the facade keeps no new key until old ones expire. Hermes is not called",
+        "description": "`idempotency_journal_full`: the facade keeps no new key until old ones expire. Hermes is not called. A 503 that Hermes sends on a write passes through with the body of Hermes",
         "content": {
           "application/json": {
             "schema": {
