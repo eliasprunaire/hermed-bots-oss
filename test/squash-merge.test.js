@@ -4,7 +4,7 @@ const { mkdirSync, mkdtempSync, readFileSync, writeFileSync } = require("node:fs
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const { hitsIn } = require("../scripts/check-pr-attribution.js");
+const { hitsIn, stripCoAuthoredBy } = require("../scripts/check-pr-attribution.js");
 const {
   main,
   materializeTrustedHelpers,
@@ -28,7 +28,39 @@ test("mergeArgv always passes an explicit body file", () => {
   assert.equal(origin[6], "/tmp/body.txt");
 });
 
-test("refuses to merge when the squash body has a co-author trailer", () => {
+test("strips every Co-authored-by line from the squash body, with no allowlist", () => {
+  const raw = [
+    "Ship the merge rule.",
+    "",
+    "Co-authored-by: Cursor Agent <cursoragent@cursor.com>",
+    "Co-authored-by: Human Reviewer <human@example.com>",
+    "# Co-authored-by: Hidden <hidden@example.com>",
+    "Co-authored-by : Spaced colon bot@example.com",
+    "Kept summary line.",
+    "",
+  ].join("\n");
+  const stripped = stripCoAuthoredBy(raw);
+  assert.match(stripped, /Ship the merge rule/);
+  assert.match(stripped, /Kept summary line/);
+  assert.doesNotMatch(stripped, /Co-authored-by/);
+  assert.deepEqual(hitsIn(stripped), []);
+
+  let bodyFile;
+  const code = main(["27"], {
+    squashBody: () => raw,
+    resolveForge: () => "gh",
+    spawn: (cmd) => {
+      bodyFile = cmd[cmd.indexOf("--body-file") + 1];
+      return 0;
+    },
+  });
+  assert.equal(code, 0);
+  const text = readFileSync(bodyFile, "utf8");
+  assert.equal(text, stripped);
+  assert.doesNotMatch(text, /Co-authored-by/);
+});
+
+test("still refuses to merge when another forbidden token remains after stripping", () => {
   const error = console.error;
   const chunks = [];
   console.error = (...args) => {
@@ -38,7 +70,7 @@ test("refuses to merge when the squash body has a co-author trailer", () => {
   try {
     const code = main(["27"], {
       squashBody: () =>
-        "Co-authored-by: Cursor Agent <cursoragent@cursor.com>\n",
+        "Co-authored-by: Cursor Agent <cursoragent@cursor.com>\nSee Open in Cursor\n",
       resolveForge: () => "gh",
       spawn: () => {
         spawned = true;
@@ -47,7 +79,8 @@ test("refuses to merge when the squash body has a co-author trailer", () => {
     });
     assert.equal(code, 1);
     assert.equal(spawned, false);
-    assert.match(chunks.join("\n"), /squash body contains Co-authored-by/);
+    assert.match(chunks.join("\n"), /squash body contains Open in Cursor/);
+    assert.doesNotMatch(chunks.join("\n"), /squash body contains Co-authored-by/);
   } finally {
     console.error = error;
   }
