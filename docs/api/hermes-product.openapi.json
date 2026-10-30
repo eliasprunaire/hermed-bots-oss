@@ -294,6 +294,9 @@
           "405": {
             "$ref": "#/components/responses/MethodNotAllowed"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeout"
+          },
           "409": {
             "$ref": "#/components/responses/Conflict"
           },
@@ -505,6 +508,9 @@
           "405": {
             "$ref": "#/components/responses/MethodNotAllowed"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeout"
+          },
           "409": {
             "$ref": "#/components/responses/Conflict"
           },
@@ -582,6 +588,9 @@
           },
           "405": {
             "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeout"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -740,6 +749,9 @@
           },
           "405": {
             "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeout"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -973,6 +985,9 @@
           "405": {
             "$ref": "#/components/responses/MethodNotAllowed"
           },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeout"
+          },
           "409": {
             "$ref": "#/components/responses/Conflict"
           },
@@ -1071,6 +1086,9 @@
           },
           "405": {
             "$ref": "#/components/responses/MethodNotAllowed"
+          },
+          "408": {
+            "$ref": "#/components/responses/RequestTimeout"
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
@@ -1484,6 +1502,28 @@
           }
         }
       },
+      "RequestTimeout": {
+        "description": "Hermes answered 408: it did not run the write, so the facade keeps nothing and the key stays free. The answer passes through as Hermes sent it, with its `Retry-After`. Send the same key again after the delay",
+        "headers": {
+          "Retry-After": {
+            "description": "Seconds to wait before the next try, when Hermes sends it",
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/HermesError"
+            },
+            "example": {
+              "error": "request timeout"
+            }
+          }
+        }
+      },
       "PayloadTooLarge": {
         "description": "The body is over the limit. Hermes is not called",
         "content": {
@@ -1602,8 +1642,8 @@
         "description": "The body of Hermes, as it sent it. Its shape differs by route: `{\"error\": \"...\"}`, `{\"error\": {\"code\": \"run_not_found\", ...}}`, or plain text"
       },
       "Error": {
-        "description": "A facade error, or a body of Hermes",
-        "oneOf": [
+        "description": "A facade error, or a body of Hermes. A facade error fits both branches, so the branches are not exclusive",
+        "anyOf": [
           {
             "$ref": "#/components/schemas/FacadeError"
           },

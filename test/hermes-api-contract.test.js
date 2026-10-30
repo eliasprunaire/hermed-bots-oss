@@ -63,10 +63,13 @@ function validate(schema, value, where) {
   };
   if (schema.type) assert.ok([].concat(schema.type).some((t) => is[t](value)), `${where}: expected ${schema.type}, got ${JSON.stringify(value)}`);
   if (schema.enum) assert.ok(schema.enum.includes(value), `${where}: ${JSON.stringify(value)} is not in the contract`);
+  const fits = (s) => { try { validate(s, value, where); return true; } catch { return false; } };
+  // oneOf means exactly one branch, anyOf at least one (JSON Schema)
   if (schema.oneOf) {
-    const fits = (s) => { try { validate(s, value, where); return true; } catch { return false; } };
-    assert.ok(schema.oneOf.some(fits), `${where}: no schema of oneOf fits ${JSON.stringify(value)}`);
+    const n = schema.oneOf.filter(fits).length;
+    assert.equal(n, 1, `${where}: ${n} schemas of oneOf fit ${JSON.stringify(value)}, exactly one must`);
   }
+  if (schema.anyOf) assert.ok(schema.anyOf.some(fits), `${where}: no schema of anyOf fits ${JSON.stringify(value)}`);
   if (is.object(value)) {
     for (const k of schema.required || []) assert.ok(k in value, `${where}: ${k} is missing`);
     for (const [k, s] of Object.entries(schema.properties || {})) if (k in value) validate(s, value[k], `${where}.${k}`);
@@ -492,4 +495,43 @@ test("14. every error code of the contract exists in the facade, and the files h
     assert.doesNotMatch(text, /[0-9a-f]{16}\.[A-Za-z0-9_-]{43}/, `${file}: a device token`);
     assert.doesNotMatch(text, /Bearer [A-Za-z0-9_-]{20,}/, `${file}: a bearer value`);
   }
+});
+
+// ---------------------------------------------------------------- strict schemas and the 408 of Hermes
+
+test("15. every facade error fits the Error schema, and oneOf means exactly one branch", () => {
+  const schema = { $ref: "#/components/schemas/Error" };
+  for (const code of CONTRACT.components.schemas.FacadeError.properties.error.enum) {
+    validate(schema, { error: code }, `Error ${code}`);
+  }
+  validate(schema, { error: { code: "run_not_found" } }, "Error of Hermes");
+  // the validator itself: two branches that fit are a failure of oneOf and not of anyOf
+  const both = [{ type: "object" }, { type: "object", required: ["error"] }];
+  assert.throws(() => validate({ oneOf: both }, { error: "x" }, "two"), /2 schemas of oneOf fit/);
+  assert.doesNotThrow(() => validate({ anyOf: both }, { error: "x" }, "two"));
+  assert.throws(() => validate({ anyOf: [{ type: "string" }, { type: "integer" }] }, {}, "none"), /no schema of anyOf fits/);
+});
+
+test("16. a 408 of Hermes on a write passes through with its Retry-After and does not keep the key", async () => {
+  const writes = PRODUCT.filter(needsKey);
+  assert.equal(writes.length, 6);
+  for (const op of writes) assert.ok(op.responses["408"], `${op.operationId}: 408 is not declared`);
+
+  const upstreamHandler = (req, res) => {
+    res.writeHead(408, { "content-type": "application/json", "retry-after": "2" });
+    res.end(JSON.stringify({ error: "request timeout" }));
+  };
+  await withFacade({ upstreamHandler }, async (ctx) => {
+    ctx.dev = await enrol(ctx);
+    for (const op of writes) {
+      const before = ctx.upstream.calls.length;
+      for (let i = 0; i < 2; i += 1) {
+        const r = await send(ctx, op.operationId, { key: "k408" });
+        assert.deepEqual([r.status, r.json], [408, { error: "request timeout" }], `${op.operationId} send ${i + 1}`);
+        assert.equal(r.headers["retry-after"], "2", `${op.operationId}: Retry-After passes through`);
+        assert.equal(r.headers["idempotency-replayed"], undefined, `${op.operationId}: a 408 is not replayed`);
+      }
+      assert.equal(ctx.upstream.calls.length, before + 2, `${op.operationId}: the key is free, Hermes is called twice`);
+    }
+  });
 });

@@ -136,6 +136,7 @@ The facade writes its own errors as `{"error": "<code>"}`. Hermes answers other 
 | 404 | `unknown_device`, `not_found` | Management routes |
 | 404 | Hermes body | Unknown or parked profile, `session_not_found`, `run_not_found` |
 | 405 | `method_not_allowed` | The route exists for another method |
+| 408 | Hermes body | Hermes did not run a write. Header `Retry-After` when Hermes sends it. The key stays free: send it again after the delay |
 | 409 | `idempotency_key_conflict`, `idempotency_replay_unavailable` | See "What the key guarantees" |
 | 413 | `body_too_large` | Body over 1 MiB (4 KiB on enrolment) |
 | 429 | `rate_limited`, or a Hermes body | Over the limit. Header `Retry-After` in seconds |
