@@ -43,4 +43,10 @@ module.exports = Object.freeze([
     test: "test/infra-guard-ci.test.js",
     job: "scan",
   }),
+  Object.freeze({
+    rule: "One verifier per head SHA and one executor per PR",
+    script: "scripts/check-anti-parallel.js",
+    test: "test/check-anti-parallel.test.js",
+    job: "anti-parallel",
+  }),
 ]);
