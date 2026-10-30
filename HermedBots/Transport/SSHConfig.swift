@@ -1,3 +1,4 @@
+import AppSettings
 import Foundation
 
 /// Ce que `ssh -G` a retenu pour un alias, sans aucun secret
@@ -13,6 +14,22 @@ enum SSHIdentityKind: Equatable, Sendable {
         case .file: String(localized: "fichier")
         }
     }
+
+    var launchKind: SSHLaunchIdentityKind {
+        switch self {
+        case .agent: .agent
+        case .certificate: .certificate
+        case .file: .file
+        }
+    }
+
+    init(_ launch: SSHLaunchIdentityKind) {
+        switch launch {
+        case .agent: self = .agent
+        case .certificate: self = .certificate
+        case .file: self = .file
+        }
+    }
 }
 
 struct SSHConnectionPreview: Equatable, Sendable {
@@ -23,6 +40,7 @@ struct SSHConnectionPreview: Equatable, Sendable {
     let hasRelay: Bool
     let identity: SSHIdentityKind
     let identityPresent: Bool
+    let usesExternalIdentityAgent: Bool
 
     var identityPresentLabel: String {
         if identity == .certificate {
@@ -33,6 +51,26 @@ struct SSHConnectionPreview: Equatable, Sendable {
 
     var identityPresentTitle: String {
         identity == .certificate ? String(localized: "Certificat") : String(localized: "Clé publique")
+    }
+
+    func matchingLaunch(mode: SSHAuthMode, keyCommandSet: Bool) -> SSHConnectionPreview {
+        let launch = SSHLaunchIdentity.overlay(
+            mode: mode,
+            sessionKind: identity.launchKind,
+            sessionPresent: identityPresent,
+            keyCommandSet: keyCommandSet,
+            hasExternalIdentityAgent: usesExternalIdentityAgent
+        )
+        return SSHConnectionPreview(
+            alias: alias,
+            hostname: hostname,
+            user: user,
+            port: port,
+            hasRelay: hasRelay,
+            identity: SSHIdentityKind(launch.kind),
+            identityPresent: launch.present,
+            usesExternalIdentityAgent: usesExternalIdentityAgent
+        )
     }
 }
 
@@ -171,7 +209,8 @@ enum SSHConfig {
             port: port,
             hasRelay: hasRelay,
             identity: identity,
-            identityPresent: present
+            identityPresent: present,
+            usesExternalIdentityAgent: SSHLaunchIdentity.identityAgentIsExternal(agent)
         )
     }
 
@@ -278,6 +317,8 @@ final class SSHConnector {
     func begin(
         alias: String,
         refuseTestHost: Bool,
+        authMode: SSHAuthMode = .sessionAgent,
+        keyCommandSet: Bool = false,
         opened: @escaping @MainActor (SSHTunnelConfig, SSHConnectionPreview) -> Void,
         refused: @escaping @MainActor (SSHFailure, SSHConnectionPreview?) -> Void
     ) {
@@ -298,13 +339,25 @@ final class SSHConnector {
             refused(.invalidHost, nil)
             return
         }
-        task = Task { await resolve(alias: trimmed, id: id, refuseTestHost: refuseTestHost, opened: opened, refused: refused) }
+        task = Task {
+            await resolve(
+                alias: trimmed,
+                id: id,
+                refuseTestHost: refuseTestHost,
+                authMode: authMode,
+                keyCommandSet: keyCommandSet,
+                opened: opened,
+                refused: refused
+            )
+        }
     }
 
     private func resolve(
         alias: String,
         id: Int,
         refuseTestHost: Bool,
+        authMode: SSHAuthMode,
+        keyCommandSet: Bool,
         opened: @MainActor (SSHTunnelConfig, SSHConnectionPreview) -> Void,
         refused: @MainActor (SSHFailure, SSHConnectionPreview?) -> Void
     ) async {
@@ -315,6 +368,7 @@ final class SSHConnector {
                 let dump = try await resolver.dump(alias: alias, invocation: invocation)
                 guard id == generation, !Task.isCancelled else { return }
                 let next = SSHConfig.parse(dump, alias: alias, localUser: localUser, authSock: authSock)
+                    .matchingLaunch(mode: authMode, keyCommandSet: keyCommandSet)
                 preview = preview ?? next
                 let config = try SSHConnectionPlanner.config(from: next, refuseTestHost: refuseTestHost)
                 tunnel = tunnel ?? (config, next)

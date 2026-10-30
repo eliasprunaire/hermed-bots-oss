@@ -104,4 +104,67 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(port.settingsValue, String(SSHDisplayedPort.fallback))
         XCTAssertEqual(port.statusText, "Port SSH \(SSHDisplayedPort.fallback)")
     }
+
+    func testEphemeralModeOverlaysASessionFileDumpToAgent() {
+        let launch = SSHLaunchIdentity.overlay(
+            mode: .ephemeralAgent,
+            sessionKind: .file,
+            sessionPresent: false,
+            keyCommandSet: true,
+            hasExternalIdentityAgent: false
+        )
+        XCTAssertEqual(launch.kind, .agent)
+        XCTAssertTrue(launch.present)
+        XCTAssertEqual(SSHLaunchIdentityKind.agent.rawValue, "agent")
+        XCTAssertFalse(SSHLaunchIdentityKind.agent.rawValue.contains("/tmp"))
+    }
+
+    func testSessionModeKeepsTheFileIdentityFromTheDump() {
+        let launch = SSHLaunchIdentity.overlay(
+            mode: .sessionAgent,
+            sessionKind: .file,
+            sessionPresent: false,
+            keyCommandSet: false,
+            hasExternalIdentityAgent: false
+        )
+        XCTAssertEqual(launch.kind, .file)
+        XCTAssertFalse(launch.present)
+    }
+
+    func testEphemeralPresenceFollowsKeyCommandOrExternalAgent() {
+        let missing = SSHLaunchIdentity.overlay(
+            mode: .ephemeralAgent,
+            sessionKind: .file,
+            sessionPresent: true,
+            keyCommandSet: false,
+            hasExternalIdentityAgent: false
+        )
+        XCTAssertEqual(missing.kind, .agent)
+        XCTAssertFalse(missing.present)
+        let external = SSHLaunchIdentity.overlay(
+            mode: .ephemeralAgent,
+            sessionKind: .file,
+            sessionPresent: false,
+            keyCommandSet: false,
+            hasExternalIdentityAgent: true
+        )
+        XCTAssertTrue(external.present)
+        XCTAssertTrue(SSHLaunchIdentity.identityAgentIsExternal("/tmp/fake-agent.invalid"))
+        XCTAssertFalse(SSHLaunchIdentity.identityAgentIsExternal("none"))
+        XCTAssertFalse(SSHLaunchIdentity.identityAgentIsExternal("SSH_AUTH_SOCK"))
+        XCTAssertFalse(SSHLaunchIdentity.identityAgentIsExternal(nil))
+    }
+
+    func testTenThousandOverlaysStayCheap() {
+        for _ in 0..<10_000 {
+            let launch = SSHLaunchIdentity.overlay(
+                mode: .ephemeralAgent,
+                sessionKind: .file,
+                sessionPresent: false,
+                keyCommandSet: true,
+                hasExternalIdentityAgent: false
+            )
+            XCTAssertEqual(launch.kind, .agent)
+        }
+    }
 }

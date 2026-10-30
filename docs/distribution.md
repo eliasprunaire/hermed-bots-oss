@@ -214,7 +214,7 @@ Aucune commande de cette PR ne se connecte à la production.
 
 1. S'assurer que l'alias SSH de production existe dans la config OpenSSH de l'utilisateur (`Include` compris), avec l'identité (agent, certificat ou fichier) déjà gérée hors de l'app.
 2. Ouvrir **Réglages**, onglet **Connexion**.
-3. Saisir uniquement l'alias SSH. L'app lit hôte, utilisateur, port et identité via `ssh -G`.
+3. Saisir uniquement l'alias SSH. L'app lit hôte, utilisateur et port via `ssh -G`. L'identité affichée est celle du mode SSH choisi pour Connecter.
 4. Cliquer sur **Connecter**.
 5. Contrôler la liste des bots et la version Hermes affichée. L'app lit `API_SERVER_KEY` toute seule par SSH ; il n'y a aucune saisie de clé API.
 

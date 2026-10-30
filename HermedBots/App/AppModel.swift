@@ -254,14 +254,21 @@ final class AppModel {
             displayedPort = nil
             return
         }
-        Task { await resolvePreview(alias: alias, id: id) }
+        let mode = authMode
+        let keyCommandSet = !keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        Task { await resolvePreview(alias: alias, id: id, mode: mode, keyCommandSet: keyCommandSet) }
     }
 
     /// Ouvre le tunnel vers l'alias saisi ; un alias vide, invalide ou refusé invalide la génération en cours sans lancer ssh
     func connect() {
         apiKeyFetches.reset()
         persistEndpoint()
-        connector.begin(alias: host, refuseTestHost: environment.refuseTestHost, opened: { [weak self] config, preview in
+        connector.begin(
+            alias: host,
+            refuseTestHost: environment.refuseTestHost,
+            authMode: authMode,
+            keyCommandSet: !keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            opened: { [weak self] config, preview in
             self?.preview = preview
             self?.displayedPort = .readOnly(resolvedPort: preview.port)
             self?.openTunnel(config)
@@ -286,7 +293,7 @@ final class AppModel {
         openTunnel(config)
     }
 
-    private func resolvePreview(alias: String, id: Int) async {
+    private func resolvePreview(alias: String, id: Int, mode: SSHAuthMode, keyCommandSet: Bool) async {
         do {
             let dump = try await sshResolver.dump(alias: alias, invocation: .tunnel)
             let next = SSHConfig.parse(
@@ -294,7 +301,7 @@ final class AppModel {
                 alias: alias,
                 localUser: NSUserName(),
                 authSock: ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"]
-            )
+            ).matchingLaunch(mode: mode, keyCommandSet: keyCommandSet)
             guard id == previewGeneration else { return }
             preview = next
             displayedPort = .readOnly(resolvedPort: next.port)
