@@ -369,9 +369,13 @@ test("8. a record with no body fingerprint answers 502 for any body, a record wi
   });
 });
 
-test("9. a lost answer or a Hermes 5xx leaves the outcome unknown, the key is not sent again", async () => {
+test("9. a lost answer, an answer over 1 MiB or a Hermes 5xx leaves the outcome unknown, the key is not sent again", async () => {
   let mode = "drop";
-  const upstreamHandler = (req, res) => (mode === "drop" ? req.socket.destroy() : replyJson(500, { error: "boom" })(req, res));
+  const upstreamHandler = (req, res) => {
+    if (mode === "drop") return req.socket.destroy();
+    if (mode === "huge") return replyJson(202, { run_id: "run_1", pad: "x".repeat(1024 * 1024) })(req, res);
+    return replyJson(500, { error: "boom" })(req, res);
+  };
   await withFacade({ upstreamHandler }, async (ctx) => {
     ctx.dev = await enrol(ctx);
     const lost = await send(ctx, "run.create", { key: "lost" });
@@ -386,6 +390,12 @@ test("9. a lost answer or a Hermes 5xx leaves the outcome unknown, the key is no
     assert.deepEqual([five.status, five.json], [500, { error: "boom" }], "the first answer is the one of Hermes");
     assert.equal((await send(ctx, "run.create", { key: "five" })).status, 502);
     assert.equal(ctx.upstream.calls.length, 2);
+
+    // the facade reads at most 1 MiB of a buffered answer: the write may have run, so upstream_response_too_large is not a code of the contract
+    mode = "huge";
+    const huge = await send(ctx, "run.create", { key: "huge" });
+    assert.deepEqual([huge.status, huge.json], [502, { error: "write_outcome_unknown" }]);
+    assert.ok(!CONTRACT.components.schemas.FacadeError.properties.error.enum.includes("upstream_response_too_large"));
   });
 });
 
