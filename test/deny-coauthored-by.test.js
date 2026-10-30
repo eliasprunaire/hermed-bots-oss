@@ -120,3 +120,21 @@ test("a search command that only mentions Co-authored-by stays allowed", () => {
   assert.equal(commandHasCoAuthoredBy(command), false);
   assert.equal(decide({ command }).permission, "allow");
 });
+
+test("an attached-equals quoted --trailer Co-authored-by argument is denied", () => {
+  const command =
+    'git commit -m feat --trailer="Co-authored-by: Reviewer <reviewer@example.com>"';
+  assert.equal(decide({ command }).permission, "deny");
+});
+
+test("a combined -am Co-authored-by message is denied", () => {
+  const command =
+    'git commit -am "Co-authored-by: Reviewer <reviewer@example.com>"';
+  assert.equal(decide({ command }).permission, "deny");
+});
+
+test("a --trailer Co-authored-by value that uses = is denied", () => {
+  const command =
+    'git commit -m feat --trailer "Co-authored-by=Reviewer <reviewer@example.com>"';
+  assert.equal(decide({ command }).permission, "deny");
+});

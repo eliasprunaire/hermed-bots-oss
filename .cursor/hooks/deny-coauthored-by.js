@@ -60,6 +60,23 @@ function argvOf(command) {
     }
     let token = "";
     while (i < text.length && !/[ \t\n]/.test(text[i])) {
+      if (text[i] === '"' || text[i] === "'") {
+        const inner = text[i];
+        i += 1;
+        while (i < text.length && text[i] !== inner) {
+          if (inner === '"' && text[i] === "\\" && i + 1 < text.length) {
+            token += text[i + 1];
+            i += 2;
+            continue;
+          }
+          token += text[i];
+          i += 1;
+        }
+        if (i < text.length && text[i] === inner) {
+          i += 1;
+        }
+        continue;
+      }
       if (text[i] === "\\" && i + 1 < text.length) {
         token += text[i + 1];
         i += 2;
@@ -73,6 +90,18 @@ function argvOf(command) {
   return tokens;
 }
 
+function unquote(value) {
+  const text = String(value);
+  if (text.length >= 2) {
+    const start = text[0];
+    const end = text[text.length - 1];
+    if ((start === '"' && end === '"') || (start === "'" && end === "'")) {
+      return text.slice(1, -1);
+    }
+  }
+  return text;
+}
+
 function flagValues(tokens) {
   const values = [];
   for (let i = 0; i < tokens.length; i += 1) {
@@ -80,20 +109,32 @@ function flagValues(tokens) {
     if (token === "--trailer" || token === "-m" || token === "--message") {
       if (i + 1 < tokens.length) {
         i += 1;
-        values.push(tokens[i]);
+        values.push(unquote(tokens[i]));
       }
       continue;
     }
     if (token.startsWith("--trailer=")) {
-      values.push(token.slice("--trailer=".length));
+      values.push(unquote(token.slice("--trailer=".length)));
       continue;
     }
     if (token.startsWith("--message=")) {
-      values.push(token.slice("--message=".length));
+      values.push(unquote(token.slice("--message=".length)));
       continue;
     }
-    if (token.startsWith("-m") && token.length > 2) {
-      values.push(token.slice(2));
+    if (token.startsWith("-") && !token.startsWith("--")) {
+      const letters = token.slice(1);
+      const mAt = letters.indexOf("m");
+      if (mAt !== -1) {
+        const attached = letters.slice(mAt + 1);
+        if (attached === "") {
+          if (i + 1 < tokens.length) {
+            i += 1;
+            values.push(unquote(tokens[i]));
+          }
+        } else {
+          values.push(unquote(attached));
+        }
+      }
     }
   }
   return values;
@@ -104,7 +145,13 @@ function textHasCoAuthoredBy(text) {
   if (hitsIn(normalized).includes("Co-authored-by")) {
     return true;
   }
-  return normalized.split("\n").some((line) => isCoAuthoredByLine(line));
+  return normalized.split("\n").some((line) => {
+    const trimmed = line.replace(/\r$/, "");
+    return (
+      isCoAuthoredByLine(trimmed) ||
+      /^[ \t]*#*[ \t]*Co-authored-by[ \t]*=/i.test(trimmed)
+    );
+  });
 }
 
 function commandHasCoAuthoredBy(command) {
