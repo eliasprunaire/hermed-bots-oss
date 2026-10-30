@@ -19,7 +19,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "26"
           cache: npm
       - name: Install dependencies
         run: npm ci
@@ -50,7 +50,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "26"
       - name: Collect PR body, commit messages, and squash body
         env:
           PR_BODY: ${{ github.event.pull_request.body }}

@@ -19,6 +19,6 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: "26"
       - name: Scan event (diff, body, comment)
         run: node scripts/infra-guard-ci.js
