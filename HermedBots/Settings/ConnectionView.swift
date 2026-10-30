@@ -76,8 +76,7 @@ struct ConnectionView: View {
                 model.refreshPreview()
             }
             .onChange(of: model.authMode) {
-                model.persistEndpoint()
-                model.refreshPreview()
+                model.noteUserChoseAuthMode()
             }
             .onChange(of: model.wrapperPath) { model.persistEndpoint() }
             .onChange(of: model.keyCommandPath) {

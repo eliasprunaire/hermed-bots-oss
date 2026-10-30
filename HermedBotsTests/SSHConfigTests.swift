@@ -869,6 +869,31 @@ final class AppModelConnectTests: XCTestCase {
         }
     }
 
+    func testAnExternalIdentityAgentDefaultsToEphemeralModeUntilTheUserChooses() async {
+        let dump = SSHConfigDump(
+            stdout: """
+            user operator
+            hostname gateway.invalid
+            port 22
+            identityagent /tmp/fake-agent.invalid
+            identityfile /tmp/fake-id.invalid
+            proxyjump none
+            """
+        )
+        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump])
+        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], defaults: isolatedDefaults(), keychain: { InMemorySecretStore(apiKey: nil) })
+        let model = AppModel(environment: environment, sshResolver: resolver)
+        model.host = "lab.invalid"
+        model.refreshPreview()
+        await eventually { model.authMode == .ephemeralAgent }
+        XCTAssertEqual(model.preview?.identity, .agent)
+        model.authMode = .sessionAgent
+        model.authModeChosen = true
+        model.refreshPreview()
+        await eventually { model.preview?.identity == .file }
+        XCTAssertEqual(model.authMode, .sessionAgent)
+    }
+
     func testEphemeralPreviewOnAppModelShowsAgentNotFile() async {
         let dump = knownDump(hostname: "gateway.invalid")
         let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump])

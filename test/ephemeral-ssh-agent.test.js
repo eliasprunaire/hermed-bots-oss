@@ -90,8 +90,8 @@ function classify(stderr) {
 }
 
 function banner(kind) {
-  if (kind === "missingAgent") return "L'agent SSH est absent. La connexion s'arrête.";
-  if (kind === "missingKey") return "La clé SSH n'est pas chargée dans l'agent. La connexion s'arrête.";
+  if (kind === "missingAgent") return "L'agent SSH est absent. Démarre l'agent, puis réessaie.";
+  if (kind === "missingKey") return "La clé SSH n'est pas chargée dans l'agent. Charge une identité dans l'agent, puis réessaie.";
   return "";
 }
 
@@ -111,9 +111,12 @@ test("app Swift starts ssh-agent, loads the key on stdin, and never writes it", 
 
 test("a missing agent is classified before publickey", () => {
   const tunnel = readFileSync(TUNNEL, "utf8");
-  const start = tunnel.indexOf("static func classify");
-  const end = tunnel.indexOf("private static func lastLine");
-  const classifyFn = tunnel.slice(start, end);
+  const classification = readFileSync(
+    join(ROOT, "Packages/HermesAdapter/Sources/AppSettings/SSHExitClassification.swift"),
+    "utf8",
+  );
+  const start = classification.indexOf("public static func kind");
+  const classifyFn = classification.slice(start);
   assert.ok(classifyFn.indexOf("Error connecting to agent") < classifyFn.indexOf("Permission denied"));
   assert.match(tunnel, /case missingAgent/);
   assert.match(tunnel, /case missingKey/);

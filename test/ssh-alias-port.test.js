@@ -79,7 +79,7 @@ test("the displayed port comes from ssh -G and the launch still omits -p", () =>
   assert.match(status, /statusPort/);
 
   const model = readFileSync(join(ROOT, "HermedBots/App/AppModel.swift"), "utf8");
-  assert.match(model, /displayedPort = \.readOnly\(resolvedPort: next\.port\)/);
+  assert.match(model, /displayedPort = \.readOnly\(resolvedPort: session\.port\)/);
   assert.match(model, /displayedPort = \.readOnly\(resolvedPort: nil\)/);
 
   const tunnel = readFileSync(join(ROOT, "HermedBots/Transport/SSHTunnel.swift"), "utf8");

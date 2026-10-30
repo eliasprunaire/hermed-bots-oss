@@ -25,36 +25,23 @@ enum SSHFailure: Error, Equatable, Sendable {
     case wrongKey(String)
     case hostKeyChanged(String)
     case unreachable(String)
+    case tunnelClosed
 
     var retries: Bool {
         if case .unreachable = self { true } else { false }
     }
 
-    static func classify(stderr: String) -> SSHFailure {
-        let text = stderr
-        let last = lastLine(text)
-        if text.contains("Could not open a connection to your authentication agent")
-            || text.contains("Error connecting to agent") {
-            return .missingAgent
+    static func classify(stderr: String, status: Int32 = 255) -> SSHFailure {
+        switch SSHExitClassification.kind(stderr: stderr, status: status) {
+        case .agentUnavailable: return .missingAgent
+        case .missingKey: return .missingKey
+        case .agentEmpty: return .agentLockedOrEmpty("")
+        case .certificateExpired: return .certificateExpired("")
+        case .authRefused: return .wrongKey("")
+        case .hostKeyChanged: return .hostKeyChanged("")
+        case .tunnelClosed: return .tunnelClosed
+        case .hostUnreachable: return .unreachable("")
         }
-        if text.contains("The agent has no identities") {
-            return .missingKey
-        }
-        if text.localizedCaseInsensitiveContains("agent refused operation") {
-            return .agentLockedOrEmpty(last)
-        }
-        if text.localizedCaseInsensitiveContains("certificate invalid")
-            || text.localizedCaseInsensitiveContains("certificate expired")
-            || text.localizedCaseInsensitiveContains("certificate has expired") {
-            return .certificateExpired(last)
-        }
-        if text.contains("Permission denied") { return .wrongKey(last) }
-        if text.contains("REMOTE HOST IDENTIFICATION HAS CHANGED") || text.contains("Host key verification failed") { return .hostKeyChanged(last) }
-        return .unreachable(last)
-    }
-
-    private static func lastLine(_ text: String) -> String {
-        text.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
     }
 }
 
@@ -68,20 +55,16 @@ extension SSHFailure {
         case .invalidPort: String(localized: "Le port n'est pas valide.")
         case .unknownAlias: String(localized: "Cet alias SSH est inconnu.")
         case .unreadableConfig: String(localized: "ssh ne lit pas cette config SSH. L'alias est refusé.")
-        case .missingAgent: String(localized: "L'agent SSH est absent. La connexion s'arrête.")
-        case .missingKey: String(localized: "La clé SSH n'est pas chargée dans l'agent. La connexion s'arrête.")
-        case .missingWrapper: String(localized: "L'exécutable SSH configuré est introuvable.")
-        case .agentLockedOrEmpty(let detail): sshLine(detail) ?? String(localized: "L'agent SSH est verrouillé ou vide.")
-        case .certificateExpired(let detail): sshLine(detail) ?? String(localized: "Le certificat SSH a expiré.")
-        case .wrongKey(let detail): sshLine(detail) ?? String(localized: "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.")
-        case .hostKeyChanged(let detail): sshLine(detail) ?? String(localized: "La clé de l'hôte a changé. Le tunnel reste fermé.")
-        case .unreachable(let reason): reason.isEmpty ? String(localized: "Hôte injoignable.") : String(localized: "Hôte injoignable : \(reason)")
+        case .missingAgent: String(localized: "L'agent SSH est absent. Démarre l'agent, puis réessaie.")
+        case .missingKey: String(localized: "La clé SSH n'est pas chargée dans l'agent. Charge une identité dans l'agent, puis réessaie.")
+        case .missingWrapper: String(localized: "L'exécutable SSH configuré est introuvable. Vérifie le chemin dans Réglages.")
+        case .agentLockedOrEmpty: String(localized: "L'agent SSH est verrouillé ou vide. Déverrouille-le ou charge une identité, puis réessaie.")
+        case .certificateExpired: String(localized: "Le certificat SSH a expiré. Renouvelle-le, puis réessaie.")
+        case .wrongKey: String(localized: "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.")
+        case .hostKeyChanged: String(localized: "La clé de l'hôte a changé. Le tunnel reste fermé. Vérifie la clé d'hôte dans OpenSSH, hors de l'app.")
+        case .unreachable: String(localized: "Hôte injoignable. Vérifie le réseau, puis réessaie.")
+        case .tunnelClosed: String(localized: "Le serveur a fermé le tunnel. Réessaie la connexion.")
         }
-    }
-
-    private func sshLine(_ detail: String) -> String? {
-        let line = detail.trimmingCharacters(in: .whitespacesAndNewlines)
-        return line.isEmpty ? nil : line
     }
 }
 
@@ -639,10 +622,10 @@ final class SSHTunnel {
                 failures = 0
                 let exit = await session.exited()
                 guard generation == id else { return }
-                failure = SSHFailure.classify(stderr: exit.stderr)
+                failure = SSHFailure.classify(stderr: exit.stderr, status: exit.status)
             } catch {
                 guard generation == id else { return }
-                failure = error as? SSHFailure ?? .unreachable("\(error)")
+                failure = error as? SSHFailure ?? .unreachable("")
             }
             guard failure.retries else {
                 state = .failed(failure)
@@ -678,6 +661,7 @@ actor SystemSSHBackend: SSHBackend {
     private var closed = false
     private var agentDirectory: URL?
     private var ephemeral: EphemeralSSHAgent?
+    private var attachedIdentityAgent: String?
     private var identityLoadedAt: ContinuousClock.Instant?
 
     init(
@@ -702,7 +686,7 @@ actor SystemSSHBackend: SSHBackend {
         try ensureLive()
         let watchdog = try preparedWatchdog()
         do {
-            try await prepareIdentity(joining: watchdog.pid)
+            try await prepareIdentity(joining: watchdog.pid, alias: config.alias)
             try await revalidate(config, invocation: .tunnel)
             let localPort = try Self.freeLocalPort()
             let ssh: Child
@@ -720,7 +704,10 @@ actor SystemSSHBackend: SSHBackend {
             let deadline = ContinuousClock.now + .seconds(20)
             while ContinuousClock.now < deadline {
                 try ensureLive()
-                if ssh.hasExited { throw SSHFailure.classify(stderr: await ssh.finished().stderr) }
+                if ssh.hasExited {
+                    let output = await ssh.finished()
+                    throw SSHFailure.classify(stderr: output.stderr, status: output.status)
+                }
                 if Self.accepts(port: localPort) {
                     return SSHSession(localPort: localPort) {
                         let output = await ssh.finished()
@@ -741,7 +728,7 @@ actor SystemSSHBackend: SSHBackend {
     /// Lit `hermes profile list` sur l'hôte par un second ssh (décision S6) et rend sa sortie
     func readProfileList(_ config: SSHTunnelConfig) async throws -> String {
         try ensureLive()
-        guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
+        guard let watchdog else { throw SSHFailure.tunnelClosed }
         try await revalidate(config, invocation: .profileList)
         try await renewIdentityIfDue(joining: watchdog.pid)
         let output: Spawn.Output
@@ -759,7 +746,7 @@ actor SystemSSHBackend: SSHBackend {
             throw SSHFailure.unreachable("ssh ne démarre pas")
         }
         // 255 : ssh lui-même a échoué (identité refusée, hôte injoignable) ; tout autre code vient de la commande distante
-        if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr) }
+        if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr, status: output.status) }
         guard output.status == 0 else {
             throw RemoteCommandFailure(status: output.status, detail: output.stderr.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? "")
         }
@@ -769,7 +756,7 @@ actor SystemSSHBackend: SSHBackend {
     /// Lit `API_SERVER_KEY` du profil par le même ssh que le tunnel ; la valeur ne quitte pas cette fonction que vers l'appelant
     func readAPIKey(_ config: SSHTunnelConfig, profile: String) async throws -> String? {
         try ensureLive()
-        guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
+        guard let watchdog else { throw SSHFailure.tunnelClosed }
         let dump = try await resolver.dumpAPIKey(alias: config.alias, profile: profile, agentSocket: try launchSocket())
         try check(dump, against: config)
         try ensureLive()
@@ -790,14 +777,14 @@ actor SystemSSHBackend: SSHBackend {
         } catch {
             throw SSHFailure.unreachable("ssh ne démarre pas")
         }
-        if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr) }
+        if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr, status: output.status) }
         guard output.status == 0 else { return nil }
         return HermesAPIKey.parse(output.stdout)
     }
 
     func readProfileLocks(_ config: SSHTunnelConfig) async throws -> Data {
         try ensureLive()
-        guard let watchdog else { throw SSHFailure.unreachable("tunnel fermé") }
+        guard let watchdog else { throw SSHFailure.tunnelClosed }
         try await revalidate(config, invocation: .profileLocks)
         try await renewIdentityIfDue(joining: watchdog.pid)
         let output = try await Spawn.run(
@@ -833,19 +820,23 @@ actor SystemSSHBackend: SSHBackend {
         if client.authMode == .wrapper {
             return SSHChildEnvironment.forUserTool(environment)
         }
-        return SSHChildEnvironment.make(environment, agentSocket: ephemeral?.socketPath)
+        return SSHChildEnvironment.make(environment, agentSocket: identityAgentSocket)
+    }
+
+    private var identityAgentSocket: String? {
+        ephemeral?.socketPath ?? attachedIdentityAgent
     }
 
     private func launchArguments(_ arguments: [String]) -> [String] {
-        guard client.authMode == .ephemeralAgent, let socket = ephemeral?.socketPath else { return arguments }
+        guard client.authMode == .ephemeralAgent, let socket = identityAgentSocket else { return arguments }
         return SSHTunnelConfig.withIdentityAgent(arguments, socket: socket)
     }
 
-    /// Le socket de l'agent temporaire, que ssh recevra ; nil hors de ce mode
+    /// Le socket de l'agent temporaire ou de l'IdentityAgent résolu, que ssh recevra ; nil hors de ce mode
     /// Sans agent dans ce mode, ssh prendrait l'agent de la session : l'identité manquante est nommée avant tout lancement
     private func launchSocket() throws -> String? {
         guard client.authMode == .ephemeralAgent else { return nil }
-        guard let socket = ephemeral?.socketPath else { throw SSHFailure.missingAgent }
+        guard let socket = identityAgentSocket else { throw SSHFailure.missingAgent }
         return socket
     }
 
@@ -863,15 +854,31 @@ actor SystemSSHBackend: SSHBackend {
         _ = try SSHConnectionPlanner.config(from: preview, refuseTestHost: refuseTestHost, matching: config)
     }
 
-    private func prepareIdentity(joining leader: pid_t) async throws {
+    private func prepareIdentity(joining leader: pid_t, alias: String) async throws {
         switch client.authMode {
         case .sessionAgent:
             return
         case .wrapper:
             guard SSHLaunchPath.isExecutable(client.wrapperPath) else { throw SSHFailure.missingWrapper }
         case .ephemeralAgent:
-            try await startEphemeralAgent(joining: leader)
+            if client.keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                try await attachResolvedIdentityAgent(alias: alias)
+            } else {
+                try await startEphemeralAgent(joining: leader)
+            }
         }
+    }
+
+    private func attachResolvedIdentityAgent(alias: String) async throws {
+        if attachedIdentityAgent != nil { return }
+        let dump = try await resolver.dump(alias: alias, invocation: .tunnel)
+        let preview = SSHConfig.parse(dump, alias: alias, localUser: localUser)
+        guard let agent = preview.identityAgentValue, SSHLaunchIdentity.identityAgentIsExternal(agent) else {
+            throw SSHFailure.missingKey
+        }
+        let path = (agent as NSString).expandingTildeInPath
+        guard FileManager.default.fileExists(atPath: path) else { throw SSHFailure.missingAgent }
+        attachedIdentityAgent = path
     }
 
     private func startEphemeralAgent(joining leader: pid_t) async throws {
@@ -917,9 +924,13 @@ actor SystemSSHBackend: SSHBackend {
         if let agent = ephemeral {
             ephemeral = nil
             identityLoadedAt = nil
+            attachedIdentityAgent = nil
             kill(agent.child.pid, SIGKILL)
             _ = await agent.child.waitForExit()
             try? FileManager.default.removeItem(atPath: agent.socketPath)
+        }
+        if ephemeral == nil {
+            attachedIdentityAgent = nil
         }
         if !keepingWatchdog, let directory = agentDirectory {
             agentDirectory = nil
@@ -940,7 +951,9 @@ actor SystemSSHBackend: SSHBackend {
     private func preparedWatchdog() throws -> Child {
         if let watchdog { return watchdog }
         let directory: URL?
-        if client.authMode == .ephemeralAgent {
+        let privateAgent = client.authMode == .ephemeralAgent
+            && !client.keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if privateAgent {
             do {
                 directory = try EphemeralSSHAgent.makeDirectory()
                 agentDirectory = directory

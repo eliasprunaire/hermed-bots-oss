@@ -64,14 +64,15 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 | --- | --- |
 | Alias dont la forme n'est pas un nom SSH valide | L'alias SSH n'est pas valide. |
 | `ssh -G` sort en erreur (guillemet non fermé, option inconnue, argument manquant) | ssh ne lit pas cette config SSH. L'alias est refusé. |
-| Agent SSH absent (socket injoignable) | L'agent SSH est absent. La connexion s'arrête. |
-| Clé absente de l'agent | La clé SSH n'est pas chargée dans l'agent. La connexion s'arrête. |
-| Exécutable SSH configuré introuvable | L'exécutable SSH configuré est introuvable. |
-| Agent verrouillé | Dernière ligne stderr de ssh, ou « L'agent SSH est verrouillé ou vide. » si cette ligne est vide. |
-| Certificat expiré | Dernière ligne stderr de ssh, ou « Le certificat SSH a expiré. » si cette ligne est vide. |
-| Serveur refuse l'identité | Dernière ligne stderr de ssh, ou le bandeau français si cette ligne est vide. |
-| Clé d'hôte changée | Dernière ligne stderr de ssh, ou « La clé de l'hôte a changé. Le tunnel reste fermé. » si cette ligne est vide. |
-| Hôte injoignable | Dernière ligne stderr de ssh, précédée de « Hôte injoignable : » quand elle n'est pas vide. |
+| Agent SSH absent (socket injoignable) | L'agent SSH est absent. Démarre l'agent, puis réessaie. |
+| Clé absente de l'agent | La clé SSH n'est pas chargée dans l'agent. Charge une identité dans l'agent, puis réessaie. |
+| Exécutable SSH configuré introuvable | L'exécutable SSH configuré est introuvable. Vérifie le chemin dans Réglages. |
+| Agent verrouillé ou vide | L'agent SSH est verrouillé ou vide. Déverrouille-le ou charge une identité, puis réessaie. |
+| Certificat expiré | Le certificat SSH a expiré. Renouvelle-le, puis réessaie. |
+| Serveur refuse l'identité | Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie. |
+| Clé d'hôte changée | La clé de l'hôte a changé. Le tunnel reste fermé. Vérifie la clé d'hôte dans OpenSSH, hors de l'app. |
+| Hôte injoignable | Hôte injoignable. Vérifie le réseau, puis réessaie. |
+| Tunnel fermé par le serveur | Le serveur a fermé le tunnel. Réessaie la connexion. |
 | `example-host` en mode test, sur l'alias ou sur l'hôte résolu d'un lancement (tunnel, liste, détection, lecture de clé) ; l'alias tapé est refusé avant `ssh -G` | Cet hôte est refusé en mode test. |
 | `ProxyJump` ou `ProxyCommand`, quelle que soit la valeur (hors `none` entier ; `none,none` est une liste de sauts), vu par l'un des trois lancements ou par la lecture de clé ; tous les modes | Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte. |
 | Lecture de clé dont le hostname, l'utilisateur ou le port diffère du tunnel | Aucun bandeau propre. `APIKeyFetches.fetch` avale `routeMismatch`. Le bandeau 401 ou « clé introuvable » reste. La clé n'est pas stockée. |

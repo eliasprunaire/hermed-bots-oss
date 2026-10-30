@@ -155,6 +155,100 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(SSHLaunchIdentity.identityAgentIsExternal(nil))
     }
 
+    func testAuthModeChoicePrefersAnExplicitPickerValue() {
+        XCTAssertEqual(
+            SSHAuthModeChoice.selected(
+                userChose: true,
+                stored: .sessionAgent,
+                keyCommandSet: false,
+                hasExternalIdentityAgent: true
+            ),
+            .sessionAgent
+        )
+    }
+
+    func testAuthModeChoiceDefaultsToEphemeralWhenAnExternalAgentIsPresent() {
+        XCTAssertEqual(
+            SSHAuthModeChoice.selected(
+                userChose: false,
+                stored: .sessionAgent,
+                keyCommandSet: false,
+                hasExternalIdentityAgent: true
+            ),
+            .ephemeralAgent
+        )
+        XCTAssertEqual(
+            SSHAuthModeChoice.selected(
+                userChose: false,
+                stored: .sessionAgent,
+                keyCommandSet: false,
+                hasExternalIdentityAgent: false
+            ),
+            .sessionAgent
+        )
+    }
+
+    func testAuthModeChoiceKeepsEphemeralWhenAKeyCommandIsSet() {
+        XCTAssertEqual(
+            SSHAuthModeChoice.selected(
+                userChose: false,
+                stored: .ephemeralAgent,
+                keyCommandSet: true,
+                hasExternalIdentityAgent: false
+            ),
+            .ephemeralAgent
+        )
+    }
+
+    func testClassifyNamesTheFourFailuresFromStderrAndStatus() {
+        XCTAssertEqual(
+            SSHExitClassification.kind(
+                stderr: "ssh: connect to host gateway.invalid port 22: Connection refused\n",
+                status: 255
+            ),
+            .hostUnreachable
+        )
+        XCTAssertEqual(
+            SSHExitClassification.kind(
+                stderr: "operator@gateway.invalid: Permission denied (publickey).",
+                status: 255
+            ),
+            .authRefused
+        )
+        XCTAssertEqual(
+            SSHExitClassification.kind(
+                stderr: "Error connecting to agent: No such file or directory",
+                status: 255
+            ),
+            .agentUnavailable
+        )
+        XCTAssertEqual(
+            SSHExitClassification.kind(
+                stderr: "The agent has no identities.",
+                status: 255
+            ),
+            .missingKey
+        )
+        XCTAssertEqual(
+            SSHExitClassification.kind(
+                stderr: "Connection reset by peer",
+                status: 255
+            ),
+            .tunnelClosed
+        )
+        XCTAssertEqual(SSHExitClassification.kind(stderr: "", status: 1), .tunnelClosed)
+        XCTAssertEqual(SSHExitClassification.kind(stderr: "", status: 255), .hostUnreachable)
+    }
+
+    func testTenThousandClassificationsStayCheap() {
+        for _ in 0..<10_000 {
+            XCTAssertEqual(
+                SSHExitClassification.kind(stderr: "Permission denied (publickey).", status: 255),
+                .authRefused
+            )
+        }
+    }
+
     func testTenThousandOverlaysStayCheap() {
         for _ in 0..<10_000 {
             let launch = SSHLaunchIdentity.overlay(

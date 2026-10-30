@@ -22,6 +22,7 @@ final class AppModel {
     private(set) var version = Version.loading
     var host: String
     var authMode: SSHAuthMode
+    var authModeChosen: Bool
     var wrapperPath: String
     var keyCommandPath: String
     private(set) var preview: SSHConnectionPreview?
@@ -127,8 +128,15 @@ final class AppModel {
             host: trimmedHost,
             authMode: authMode,
             wrapperPath: wrapperPath.trimmingCharacters(in: .whitespacesAndNewlines),
-            keyCommandPath: keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            keyCommandPath: keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines),
+            authModeChosen: authModeChosen
         ).save(to: environment.defaults)
+    }
+
+    func noteUserChoseAuthMode() {
+        authModeChosen = true
+        persistEndpoint()
+        refreshPreview()
     }
 
     init(
@@ -148,6 +156,7 @@ final class AppModel {
         self.connector = SSHConnector(resolver: sshResolver)
         host = environment.ssh?.host ?? ""
         authMode = environment.ssh?.authMode ?? .sessionAgent
+        authModeChosen = environment.ssh?.authModeChosen ?? false
         wrapperPath = environment.ssh?.wrapperPath ?? ""
         keyCommandPath = environment.ssh?.keyCommandPath ?? ""
         #if DEBUG
@@ -232,7 +241,7 @@ final class AppModel {
             return data
         }
         #endif
-        throw SSHFailure.unreachable("tunnel fermé")
+        throw SSHFailure.tunnelClosed
     }
 
     func start() async {
@@ -271,9 +280,21 @@ final class AppModel {
             authMode: client.authMode,
             keyCommandSet: !client.keyCommandPath.isEmpty,
             opened: { [weak self] config, preview in
-            self?.preview = preview
-            self?.displayedPort = .readOnly(resolvedPort: preview.port)
-            self?.openTunnel(config, client: client)
+            guard let self else { return }
+            var launch = client
+            if !self.authModeChosen {
+                launch.authMode = SSHAuthModeChoice.selected(
+                    userChose: false,
+                    stored: client.authMode,
+                    keyCommandSet: !client.keyCommandPath.isEmpty,
+                    hasExternalIdentityAgent: preview.usesExternalIdentityAgent
+                )
+                self.authMode = launch.authMode
+            }
+            let shown = preview.matchingLaunch(mode: launch.authMode, keyCommandSet: !launch.keyCommandPath.isEmpty)
+            self.preview = shown
+            self.displayedPort = .readOnly(resolvedPort: shown.port)
+            self.openTunnel(config, client: launch)
         }, refused: { [weak self] failure, preview in
             guard let self else { return }
             if let preview {
@@ -298,15 +319,23 @@ final class AppModel {
     private func resolvePreview(alias: String, id: Int, mode: SSHAuthMode, keyCommandSet: Bool) async {
         do {
             let dump = try await sshResolver.dump(alias: alias, invocation: .tunnel)
-            let next = SSHConfig.parse(
+            let session = SSHConfig.parse(
                 dump,
                 alias: alias,
                 localUser: NSUserName(),
                 authSock: ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"]
-            ).matchingLaunch(mode: mode, keyCommandSet: keyCommandSet)
+            )
             guard id == previewGeneration else { return }
-            preview = next
-            displayedPort = .readOnly(resolvedPort: next.port)
+            if !authModeChosen {
+                authMode = SSHAuthModeChoice.selected(
+                    userChose: false,
+                    stored: mode,
+                    keyCommandSet: keyCommandSet,
+                    hasExternalIdentityAgent: session.usesExternalIdentityAgent
+                )
+            }
+            preview = session.matchingLaunch(mode: authMode, keyCommandSet: keyCommandSet)
+            displayedPort = .readOnly(resolvedPort: session.port)
         } catch {
             guard id == previewGeneration else { return }
             preview = nil
