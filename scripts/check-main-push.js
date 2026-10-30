@@ -101,16 +101,24 @@ function firstParent(body) {
   return { kind: "ok", sha: parent.sha.toLowerCase() };
 }
 
+const UNKNOWN = "UNKNOWN";
+const NONCOMPLIANT = "NONCOMPLIANT";
+
+function fail(io, status, message) {
+  io.stderr(`${status}: ${message}`);
+  return 1;
+}
+
 async function readJson(io, url, token, version, failMessage) {
   let response;
   try {
     response = await io.fetch(url, { headers: headers(token, version) });
   } catch {
-    io.stderr(failMessage);
+    fail(io, UNKNOWN, failMessage);
     return { ok: false };
   }
   if (response == null || response.ok !== true) {
-    io.stderr(failMessage);
+    fail(io, UNKNOWN, failMessage);
     return { ok: false };
   }
   try {
@@ -149,22 +157,18 @@ async function main(io = defaultIo()) {
     "",
   );
   if (typeof repository !== "string" || !REPOSITORY.test(repository)) {
-    io.stderr("GITHUB_REPOSITORY must be owner/repo");
-    return 1;
+    return fail(io, UNKNOWN, "GITHUB_REPOSITORY must be owner/repo");
   }
   if (typeof sha !== "string" || !HEX_SHA.test(sha)) {
-    io.stderr("GITHUB_SHA must be 40 hex digits");
-    return 1;
+    return fail(io, UNKNOWN, "GITHUB_SHA must be 40 hex digits");
   }
   sha = sha.toLowerCase();
   if (typeof before !== "string" || !HEX_SHA.test(before) || before.toLowerCase() === ZERO_SHA) {
-    io.stderr("GITHUB_BEFORE must be a non-zero sha");
-    return 1;
+    return fail(io, UNKNOWN, "GITHUB_BEFORE must be a non-zero sha");
   }
   before = before.toLowerCase();
   if (typeof token !== "string" || token === "") {
-    io.stderr("GITHUB_TOKEN is required");
-    return 1;
+    return fail(io, UNKNOWN, "GITHUB_TOKEN is required");
   }
   const [owner, repo] = repository.split("/");
   const encoded = `${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
@@ -181,13 +185,11 @@ async function main(io = defaultIo()) {
     return 1;
   }
   if (pulls.jsonFailed) {
-    io.stderr("malformed pull request list");
-    return 1;
+    return fail(io, UNKNOWN, "malformed pull request list");
   }
   const listed = classify(pulls.body, sha);
   if (listed.kind === "malformed") {
-    io.stderr("malformed pull request list");
-    return 1;
+    return fail(io, UNKNOWN, "malformed pull request list");
   }
   let merged = listed.kind === "merged";
   if (listed.kind === "lookup") {
@@ -203,13 +205,11 @@ async function main(io = defaultIo()) {
         return 1;
       }
       if (detail.jsonFailed) {
-        io.stderr("malformed pull request");
-        return 1;
+        return fail(io, UNKNOWN, "malformed pull request");
       }
       const match = matchesMergeCommit(detail.body, sha);
       if (match === "malformed") {
-        io.stderr("malformed pull request");
-        return 1;
+        return fail(io, UNKNOWN, "malformed pull request");
       }
       if (match === "merged") {
         merged = true;
@@ -218,8 +218,7 @@ async function main(io = defaultIo()) {
     }
   }
   if (!merged) {
-    io.stderr(`no merged pull request for ${sha}`);
-    return 1;
+    return fail(io, NONCOMPLIANT, `no merged pull request for ${sha}`);
   }
   const commit = await readJson(
     io,
@@ -232,22 +231,19 @@ async function main(io = defaultIo()) {
     return 1;
   }
   if (commit.jsonFailed) {
-    io.stderr("malformed commit");
-    return 1;
+    return fail(io, UNKNOWN, "malformed commit");
   }
   const parent = firstParent(commit.body);
   if (parent.kind === "malformed") {
-    io.stderr("malformed commit");
-    return 1;
+    return fail(io, UNKNOWN, "malformed commit");
   }
   if (parent.kind !== "ok" || parent.sha !== before) {
-    io.stderr("before sha is not the first parent");
-    return 1;
+    return fail(io, NONCOMPLIANT, "before sha is not the first parent");
   }
   return 0;
 }
 
-module.exports = { main };
+module.exports = { main, UNKNOWN, NONCOMPLIANT };
 
 if (require.main === module) {
   main()

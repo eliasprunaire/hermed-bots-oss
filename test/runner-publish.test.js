@@ -10,7 +10,7 @@ const { test } = require("node:test");
 const helper = path.resolve(__dirname, "..", "scripts", "dev-lead-runner", "publish.sh");
 
 // Runs a zsh snippet with stub log/notify/gh and a stub app-token.sh in a temp runner dir
-function run(snippet, { token = "ok", ghReply = "77 app-pilote-verifier[bot]", ghRc = 0, files = {}, ghPost = "stub" } = {}) {
+function run(snippet, { token = "ok", ghReply = "77 app-pilote-verifier[bot]", ghRc = 0, files = {}, ghPost = "stub", headSha = SHA, headRc = 0 } = {}) {
   const R = fs.mkdtempSync(path.join(os.tmpdir(), "runner-publish-"));
   const S = path.join(R, "state");
   fs.mkdirSync(S);
@@ -30,7 +30,7 @@ function run(snippet, { token = "ok", ghReply = "77 app-pilote-verifier[bot]", g
 R=${R}; S=${S}; NAME=demo; REPO=o/demo; LOG=${R}/log
 log(){ print -r -- "$*" >> "$LOG"; }
 notify(){ print -r -- "$*" >> "$R/notified"; }
-gh(){ print -r -- "$*" >> "$R/gh-calls"; case "$*" in *DELETE*) return 0;; esac; print -r -- ${JSON.stringify(ghReply)}; return ${ghRc}; }
+gh(){ print -r -- "$*" >> "$R/gh-calls"; case "$*" in *DELETE*) return 0;; *"pulls/"*) print -r -- ${JSON.stringify(headSha)}; return ${headRc};; *) print -r -- ${JSON.stringify(ghReply)}; return ${ghRc};; esac; }
 ${ghPostStub}
 source ${helper}
 ${snippet}
@@ -148,4 +148,37 @@ whence -w gh_post; publish_verdict 61 ${SHA} $S/${SHA}.verdict; print rc=$?`, { 
   assert.match(t.res.stdout, /gh_post: function/);
   assert.match(t.res.stdout, /rc=0/);
   assert.match(t.read("ghpost-calls"), /issues\/61\/comments/);
+});
+
+test("publish_verdict is STALE and posts nothing when the PR head moved", () => {
+  const t = run(`
+publish_verdict 61 ${SHA} $S/${SHA}.verdict; print rc=$?`, {
+    headSha: "b".repeat(40),
+    files: { [`${SHA}.verdict`]: good },
+  });
+  assert.match(t.res.stdout, /STALE/);
+  assert.match(t.res.stdout, /rc=2/);
+  assert.ok(t.has(`${SHA}.verdict`));
+  assert.ok(!t.has(`${SHA}.posted`));
+  assert.ok(!t.has(`${SHA}.transient-until`));
+  assert.ok(!fs.existsSync(path.join(t.R, "PAUSE-demo")));
+  assert.match(t.read("ghpost-calls"), /api repos\/o\/demo\/pulls\/61/);
+  assert.equal(t.read("gh-calls").includes("issues/61/comments"), false);
+  assert.match(t.read("log"), /STALE/);
+});
+
+test("publish_verdict is UNKNOWN and posts nothing when the current head cannot be read", () => {
+  const t = run(`
+publish_verdict 61 ${SHA} $S/${SHA}.verdict; print rc=$?`, {
+    headRc: 1,
+    headSha: "",
+    files: { [`${SHA}.verdict`]: good },
+  });
+  assert.match(t.res.stdout, /UNKNOWN: cannot read current PR head/);
+  assert.match(t.res.stdout, /rc=1/);
+  assert.ok(t.has(`${SHA}.verdict`));
+  assert.ok(!t.has(`${SHA}.posted`));
+  assert.ok(t.has(`${SHA}.transient-until`));
+  assert.ok(!fs.existsSync(path.join(t.R, "PAUSE-demo")));
+  assert.equal(t.read("gh-calls").includes("issues/61/comments"), false);
 });

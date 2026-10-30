@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const { main } = require("../scripts/check-main-push.js");
+const { main, UNKNOWN, NONCOMPLIANT } = require("../scripts/check-main-push.js");
 
 const SHA = "a".repeat(40);
 const BEFORE = "c".repeat(40);
@@ -338,4 +338,35 @@ test("a zero before sha exits 1", async () => {
   io.env.GITHUB_BEFORE = "0".repeat(40);
   assert.equal(await main(io), 1);
   assert.match(stderr.join("\n"), /GITHUB_BEFORE must be a non-zero sha/);
+});
+
+test("API unreadability is UNKNOWN and a missing merge is NONCOMPLIANT", async () => {
+  const unread = harness(async () => response(503, { message: "unavailable" }));
+  assert.equal(await main(unread.io), 1);
+  assert.equal(unread.stderr.join("\n"), `${UNKNOWN}: could not read pull requests for the commit`);
+
+  const unmatched = harness(async () => response(200, []));
+  assert.equal(await main(unmatched.io), 1);
+  assert.equal(
+    unmatched.stderr.join("\n"),
+    `${NONCOMPLIANT}: no merged pull request for ${SHA}`,
+  );
+});
+
+test("missing context is UNKNOWN and a non-parent before sha is NONCOMPLIANT", async () => {
+  const missing = harness(async () => {
+    throw new Error("fetch");
+  });
+  missing.io.env.GITHUB_TOKEN = "";
+  assert.equal(await main(missing.io), 1);
+  assert.equal(missing.stderr.join("\n"), `${UNKNOWN}: GITHUB_TOKEN is required`);
+
+  const parent = harness(
+    routeFetch({
+      pulls: async () => response(200, [mergedPull()]),
+      commit: async () => response(200, { parents: [{ sha: "d".repeat(40) }] }),
+    }),
+  );
+  assert.equal(await main(parent.io), 1);
+  assert.equal(parent.stderr.join("\n"), `${NONCOMPLIANT}: before sha is not the first parent`);
 });
