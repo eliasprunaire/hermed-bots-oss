@@ -13,10 +13,24 @@ transient_retry(){ # $1 pr $2 sha $3 type d'alerte $4 détail ; pose $S/$2.trans
   [ $tn -ge 3 ] && notify "$REPO" "$3" "$1" "" "$2" "$4 ($tn échecs de suite)"
   return 0; }
 
-publish_verdict(){ # $1 pr $2 sha $3 fichier verdict -> 0 publié ; 1 erreur passagère (jeton ou API), réessai posé, fichier gardé ; exit 1 si le commentaire n'a pas l'auteur de l'app
-  local vt res rc
+publish_verdict(){ # $1 pr $2 sha $3 fichier verdict -> 0 publié ; 1 UNKNOWN ou erreur passagère (jeton ou API), réessai posé, fichier gardé ; 2 STALE (tête PR déplacée, aucun verdict) ; exit 1 si le commentaire n'a pas l'auteur de l'app
+  local vt res rc head hrc
   vt=$("$R/app-token.sh" 2>/dev/null) || { transient_retry $1 $2 token-transient "PR #$1 : jeton app indisponible, verdict non publié @ $2"
     log "PR #$1 jeton app indisponible (erreur passagère n°$tn), publication du verdict retentée dans $((dl/60)) min"; return 1; }
+  head=$(GH_TOKEN=$vt gh_post api repos/$REPO/pulls/$1 -q .head.sha 2>>"$LOG"); hrc=$?
+  if [ $hrc -ne 0 ] || ! print -r -- "$head" | grep -qiE '^[0-9a-f]{40}$'; then
+    unset vt
+    print -r -- "UNKNOWN: cannot read current PR head"
+    transient_retry $1 $2 token-transient "PR #$1 : tête PR illisible, verdict non publié @ $2"
+    log "PR #$1 UNKNOWN: cannot read current PR head (erreur passagère n°$tn), verdict non publié @ $2"
+    return 1
+  fi
+  if [ "${(L)head}" != "${(L)2}" ]; then
+    unset vt
+    print -r -- "STALE"
+    log "PR #$1 STALE: verified $2, current head $head, verdict not published"
+    return 2
+  fi
   res=$(GH_TOKEN=$vt gh_post api repos/$REPO/issues/$1/comments -F body=@"$3" -q '"\(.id) \(.user.login)"' 2>>"$LOG"); rc=$?; unset vt
   if [ $rc -ne 0 ] || [ -z "$res" ]; then transient_retry $1 $2 token-transient "PR #$1 : publication du verdict refusée par l'API @ $2"
     log "PR #$1 publication du verdict en échec côté API (rc=$rc, erreur passagère n°$tn), nouvel essai dans $((dl/60)) min"; return 1; fi
