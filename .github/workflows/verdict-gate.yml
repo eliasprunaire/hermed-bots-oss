@@ -18,12 +18,13 @@ jobs:
   record-verdict:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    # issue_comment: only trusted authors (OWNER, MEMBER, COLLABORATOR) or the verifier App
-    # (login in the repository variable VERIFIER_APP_LOGIN, e.g. my-verifier[bot]).
+    # issue_comment: only trusted authors (OWNER, MEMBER, COLLABORATOR), cursor[bot],
+    # or the verifier App (login in VERIFIER_APP_LOGIN, e.g. my-verifier[bot]).
     if: >-
       github.event_name == 'pull_request' ||
       (github.event.issue.pull_request != null &&
        (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) ||
+        (github.event.comment.user.type == 'Bot' && github.event.comment.user.login == 'cursor[bot]') ||
         (github.event.comment.user.type == 'Bot' && vars.VERIFIER_APP_LOGIN != '' && github.event.comment.user.login == vars.VERIFIER_APP_LOGIN)))
     permissions:
       contents: read

@@ -985,6 +985,12 @@ test("the workflow records a status from record-verdict", () => {
   assert.match(job, /fetch-depth:\s*0/);
   assert.match(job, /persist-credentials:\s*false/);
   assert.equal(yaml.includes("pull_request_target"), false);
+  assert.match(
+    job,
+    /github\.event\.comment\.user\.type == 'Bot' && github\.event\.comment\.user\.login == 'cursor\[bot]'/,
+  );
+  assert.equal(job.includes("*[bot]"), false);
+  assert.equal(job.includes("'[bot]'"), false);
 });
 
 function initGitDir() {
@@ -2015,6 +2021,7 @@ test("issue_comment fails closed when the comment or the pull has no login", asy
 
 const THIRD_USER = { login: "mallory-evil", type: "User" };
 const THIRD_BOT = { login: "mallory-evil[bot]", type: "Bot" };
+const CURSOR_BOT = { login: "cursor[bot]", type: "Bot" };
 const NOT_RECORDED = {
   kind: "fail",
   reason: { code: "none", headSha: HEAD, hint: "neither" },
@@ -2047,6 +2054,60 @@ test("a listed Bot passes with PASS and PASS+NOTES", () => {
   }
 });
 
+test("cursor[bot] with a marked PASS on the head passes", () => {
+  for (const verdict of ["PASS", "PASS+NOTES"]) {
+    const decision = decide({
+      headSha: HEAD,
+      comments: [comment("1", 1, marked(verdict, HEAD), CURSOR_BOT)],
+    });
+    assert.deepEqual(decision, {
+      kind: "pass",
+      verdict,
+      sha: HEAD,
+      commentId: "1",
+      description: `VERDICT ${verdict} @ ${HEAD}`,
+    });
+  }
+});
+
+test("cursor[bot] without the marker is refused", () => {
+  const decision = decide({
+    headSha: HEAD,
+    comments: [comment("1", 1, `VERDICT: PASS @ ${HEAD}`, CURSOR_BOT)],
+  });
+  assert.deepEqual(decision, {
+    kind: "fail",
+    reason: { code: "none", headSha: HEAD, hint: "line-without-marker" },
+    description: `VERDICT line missing ${MARKER} for ${HEAD}`,
+  });
+});
+
+test("an unknown bot is refused even with a marked PASS on the head", () => {
+  const decision = decide({
+    headSha: HEAD,
+    comments: [comment("1", 1, marked("PASS", HEAD), THIRD_BOT)],
+  });
+  assert.deepEqual(decision, NOT_RECORDED);
+});
+
+test("cursor[bot] as pull request author is refused", () => {
+  const decision = decide({
+    headSha: HEAD,
+    authorLogin: "cursor[bot]",
+    comments: [comment("1", 1, marked("PASS", HEAD), CURSOR_BOT)],
+  });
+  assert.deepEqual(decision, {
+    kind: "fail",
+    reason: {
+      code: "author-match",
+      headSha: HEAD,
+      commentId: "1",
+      authorLogin: "cursor[bot]",
+    },
+    description: "author cursor[bot] wrote the marked VERDICT",
+  });
+});
+
 test("a login or type that is not exactly the listed pair fails", () => {
   const users = [
     { login: "app-pilote-verifier", type: "User" },
@@ -2060,6 +2121,9 @@ test("a login or type that is not exactly the listed pair fails", () => {
     { login: "App-Pilote-Verifier[bot]", type: "Bot" },
     { login: VERIFIER.toUpperCase(), type: "Bot" },
     { login: `${VERIFIER} `, type: "Bot" },
+    { login: "cursor[bot]", type: "User" },
+    { login: "Cursor[bot]", type: "Bot" },
+    { login: "cursor", type: "Bot" },
   ];
   for (const user of users) {
     const decision = decide({
