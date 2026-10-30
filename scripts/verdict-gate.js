@@ -32,6 +32,8 @@ const FORCE_PUSH_QUERY = `query($owner:String!,$name:String!,$number:Int!,$commi
 }`;
 const VERIFIERS = Object.freeze([
   Object.freeze({ login: "app-pilote-verifier[bot]", type: "Bot" }),
+]);
+const SIGNALERS = Object.freeze([
   Object.freeze({ login: "cursor[bot]", type: "Bot" }),
 ]);
 
@@ -298,12 +300,62 @@ function usableVerifiers(verifiers) {
   return verifiers;
 }
 
-function isVerifier(comment, verifiers) {
+function isListed(comment, list) {
   if (comment == null || comment.user == null) {
     return false;
   }
   const { login, type } = comment.user;
-  return verifiers.some((entry) => entry.login === login && entry.type === type);
+  return list.some((entry) => entry.login === login && entry.type === type);
+}
+
+function isVerifier(comment, verifiers) {
+  return isListed(comment, verifiers);
+}
+
+function readableComment(comment) {
+  return (
+    comment != null &&
+    typeof comment.id === "string" &&
+    /^[0-9]+$/.test(comment.id) &&
+    typeof comment.createdAtMs === "number" &&
+    Number.isFinite(comment.createdAtMs) &&
+    typeof comment.body === "string"
+  );
+}
+
+function signalVerdict(comments, headSha, onPull, ids) {
+  let newest = null;
+  let verdict = null;
+  for (const comment of comments) {
+    if (!isListed(comment, SIGNALERS) || !readableComment(comment)) {
+      continue;
+    }
+    if (!plainMarker(comment.body)) {
+      continue;
+    }
+    const match = verdictLines(comment.body).find(
+      (line) => qualifies(line.sha, headSha, onPull, ids) != null,
+    );
+    if (match == null) {
+      continue;
+    }
+    if (newest == null || isNewer(comment, newest)) {
+      newest = comment;
+      verdict = match.verdict;
+    }
+  }
+  return verdict;
+}
+
+function attachSignal(decision, signal) {
+  if (signal == null || decision.kind !== "fail" || decision.reason.code !== "none") {
+    return decision;
+  }
+  const next = `${decision.description}; cursor[bot] ${signal}`;
+  if (next.length > DESCRIPTION_MAX) {
+    return decision;
+  }
+  return { ...decision, description: next };
 }
 
 function foldLogin(value) {
@@ -470,11 +522,14 @@ function decide(input) {
     } else if (seenMarker) {
       hint = "marker-without-line";
     }
-    return {
-      kind: "fail",
-      reason: { code: "none", headSha, hint },
-      description: render(noneDescription(hint, headSha)),
-    };
+    return attachSignal(
+      {
+        kind: "fail",
+        reason: { code: "none", headSha, hint },
+        description: render(noneDescription(hint, headSha)),
+      },
+      signalVerdict(input.comments, headSha, onPull, ids),
+    );
   }
 
   const first = winner.lines[0];
