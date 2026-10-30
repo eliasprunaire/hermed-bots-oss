@@ -814,6 +814,38 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertEqual(started, ["a.invalid"])
     }
 
+    func testConnectKeepsTheCapturedAuthModeWhenModeChangesDuringDump() async {
+        let dump = SSHConfigDump(
+            stdout: """
+            user operator
+            hostname 127.0.0.1
+            port 1
+            identityfile /tmp/fake-id.invalid
+            proxyjump none
+            """
+        )
+        let resolver = GatedSSHResolver(dumps: ["lab.invalid": dump])
+        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], defaults: isolatedDefaults(), keychain: { InMemorySecretStore(apiKey: nil) })
+        let model = AppModel(environment: environment, sshResolver: resolver)
+        model.host = "lab.invalid"
+        model.authMode = .sessionAgent
+        model.connect()
+        await eventually { await resolver.started == ["lab.invalid"] }
+        model.authMode = .wrapper
+        model.wrapperPath = "/tmp/example-wrapper.invalid"
+        await resolver.release("lab.invalid")
+        await eventually { model.preview?.identity == .file }
+        XCTAssertEqual(model.preview?.identity, .file)
+        await eventually {
+            if case .failed = model.tunnel.state { true } else { false }
+        }
+        if case .failed(let failure) = model.tunnel.state {
+            XCTAssertNotEqual(failure, .missingWrapper)
+        } else {
+            XCTFail("attendu un échec de lancement, obtenu \(model.tunnel.state)")
+        }
+    }
+
     func testExampleHostOnAppModelNeverDumpsOrOpens() async {
         let resolver = GatedSSHResolver(dumps: [
             "example-host.invalid": knownDump(hostname: "example-host.invalid"),
