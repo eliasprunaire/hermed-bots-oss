@@ -28,8 +28,8 @@ final class EphemeralSSHAgentTests: XCTestCase {
             case "$arg" in
               IdentityAgent=*)
                 agent="${arg#IdentityAgent=}"
-                agent="${agent#\"}"
-                agent="${agent%\"}"
+                agent="${agent#\\"}"
+                agent="${agent%\\"}"
                 ;;
             esac
           fi
@@ -143,8 +143,10 @@ final class EphemeralSSHAgentTests: XCTestCase {
         )
         let session = try await backend.open(config)
         XCTAssertTrue((1...65535).contains(session.localPort))
-        XCTAssertNil(await backend.temporaryAgentPID())
-        XCTAssertNil(await backend.temporaryAgentSocketPath())
+        let pid = await backend.temporaryAgentPID()
+        let socket = await backend.temporaryAgentSocketPath()
+        XCTAssertNil(pid)
+        XCTAssertNil(socket)
         let listed = try await Spawn.run(
             "/usr/bin/ssh-add",
             ["-l"],
