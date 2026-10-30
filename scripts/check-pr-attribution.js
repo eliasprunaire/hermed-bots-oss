@@ -2,6 +2,8 @@
 
 const { readFileSync } = require("node:fs");
 
+const CO_AUTHORED_LINE = /^[ \t]*#*[ \t]*Co-authored-by[ \t]*:/i;
+
 const FORBIDDEN = [
   { id: "Co-authored-by", re: /^[ \t]*#*[ \t]*Co-authored-by[ \t]*:/im },
   { id: "Open in Cursor", re: /\bOpen in Cursor\b/i },
@@ -53,6 +55,17 @@ function authoredPrBody(text) {
     body = body.replace(pattern, "");
   }
   return body;
+}
+
+function isCoAuthoredByLine(line) {
+  return CO_AUTHORED_LINE.test(String(line).replace(/\r$/, ""));
+}
+
+function stripCoAuthoredBy(text) {
+  return String(text ?? "")
+    .split("\n")
+    .filter((line) => !isCoAuthoredByLine(line))
+    .join("\n");
 }
 
 function hitsIn(text) {
@@ -234,6 +247,8 @@ function main(argv = process.argv.slice(2)) {
 module.exports = {
   authoredPrBody,
   hitsIn,
+  isCoAuthoredByLine,
+  stripCoAuthoredBy,
   checkSources,
   explicitSquashBody,
   main,

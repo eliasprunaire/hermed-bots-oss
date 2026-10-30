@@ -58,6 +58,16 @@ test("a Co-authored-by trailer is rejected", () => {
   assert.match(err, /commit message contains Co-authored-by/);
 });
 
+test("a human Co-authored-by trailer is rejected with no allowlist", () => {
+  const file = messageFile(
+    "human-trailer",
+    "feat: add the commit-msg hook\n\nCo-authored-by: Human Reviewer <human@example.com>\n",
+  );
+  const { code, err } = runMain([file]);
+  assert.equal(code, 1);
+  assert.match(err, /commit message contains Co-authored-by/);
+});
+
 test("an Open in Cursor footer is rejected", () => {
   const file = messageFile("footer", "See Open in Cursor for the session.\n");
   const { code, err } = runMain([file]);
