@@ -175,7 +175,10 @@ function runBelongsToPr(run, headSha, number) {
     }
   }
   const title = typeof run.displayTitle === "string" ? run.displayTitle : "";
-  return typeof number === "number" && title.includes(`pr-${number}`);
+  return (
+    typeof number === "number" &&
+    new RegExp(`(?:^|\\s)pr-${number}(?![0-9])`).test(title)
+  );
 }
 
 function identitiesOf(message) {
@@ -381,11 +384,15 @@ async function loadRuns(io, token, owner, repo, headSha) {
     token,
     `https://api.github.com/repos/${owner}/${repo}/actions/runs?head_sha=${headSha}&per_page=100`,
   );
-  const byComment = await loadRunPages(
-    io,
-    token,
-    `https://api.github.com/repos/${owner}/${repo}/actions/workflows/verdict-gate.yml/runs?event=issue_comment&per_page=100`,
-  );
+  const byComment = [];
+  for (const status of ACTIVE_RUN) {
+    const page = await loadRunPages(
+      io,
+      token,
+      `https://api.github.com/repos/${owner}/${repo}/actions/workflows/verdict-gate.yml/runs?event=issue_comment&status=${status}&per_page=100`,
+    );
+    byComment.push(...page);
+  }
   const seen = new Set();
   const runs = [];
   for (const run of [...byHead, ...byComment]) {

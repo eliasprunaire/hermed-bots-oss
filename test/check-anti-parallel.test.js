@@ -94,6 +94,30 @@ test("a second in-progress verifier run for the head SHA fails", () => {
   assert.equal(decision.description, `concurrent verifier runs for ${HEAD}`);
 });
 
+test("a comment run titled pr-70 is not counted for PR 7", () => {
+  const decision = decideVerifier({
+    headSha: HEAD,
+    number: 7,
+    comments: [],
+    runs: [
+      {
+        headSha: HEAD,
+        status: "in_progress",
+        path: VERIFIER_PATH,
+        event: "pull_request",
+      },
+      {
+        headSha: OTHER,
+        status: "queued",
+        path: VERIFIER_PATH,
+        event: "issue_comment",
+        displayTitle: "verdict-gate pr-70",
+      },
+    ],
+  });
+  assert.equal(decision.kind, "pass");
+});
+
 test("an issue_comment verifier run for the same PR is counted", () => {
   const decision = decideVerifier({
     headSha: HEAD,
