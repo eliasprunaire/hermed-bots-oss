@@ -514,7 +514,8 @@ test("15. every facade error fits the Error schema, and oneOf means exactly one 
 
 test("16. a 408 of Hermes on a write passes through with its Retry-After and does not keep the key", async () => {
   const writes = PRODUCT.filter(needsKey);
-  assert.equal(writes.length, 6);
+  assert.deepEqual(writes.map((op) => op.operationId).sort(), facade.ROUTES.filter((r) => r.kind === "write").map((r) => r.name).sort());
+  assert.ok(writes.length > 0);
   for (const op of writes) assert.ok(op.responses["408"], `${op.operationId}: 408 is not declared`);
 
   const upstreamHandler = (req, res) => {
