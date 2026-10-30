@@ -8,6 +8,7 @@ const {
   checkSources,
   explicitSquashBody,
   hitsIn,
+  stripCoAuthoredBy,
   main,
 } = require("../scripts/check-pr-attribution.js");
 
@@ -330,6 +331,29 @@ test("detects a co-author trailer with space or tab before the colon", () => {
   assert.deepEqual(hitsIn("cO-aUtHoReD-bY : Bot bot@example.com"), [
     "Co-authored-by",
   ]);
+});
+
+test("stripCoAuthoredBy drops every trailer line and has no allowlist", () => {
+  const kept = stripCoAuthoredBy(
+    [
+      "feat: land the merge",
+      "Do not paste a Co-authored-by trailer.",
+      "Co-authored-by: Cursor Agent <cursoragent@cursor.com>",
+      "Co-authored-by: Human Reviewer <human@example.com>",
+      "# Co-authored-by: Hidden <hidden@example.com>",
+      "Co-authored-by : Spaced colon bot@example.com",
+      "body stays",
+    ].join("\n"),
+  );
+  assert.equal(
+    kept,
+    [
+      "feat: land the merge",
+      "Do not paste a Co-authored-by trailer.",
+      "body stays",
+    ].join("\n"),
+  );
+  assert.deepEqual(hitsIn(kept), []);
 });
 
 test("a comment-prefixed co-author trailer is rejected", () => {
