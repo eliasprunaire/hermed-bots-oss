@@ -90,10 +90,21 @@ function classify(stderr) {
 }
 
 function banner(kind) {
-  if (kind === "missingAgent") return "L'agent SSH est absent. La connexion s'arrête.";
-  if (kind === "missingKey") return "La clé SSH n'est pas chargée dans l'agent. La connexion s'arrête.";
+  if (kind === "missingAgent") return "L'agent SSH est absent. Démarre l'agent, puis réessaie.";
+  if (kind === "missingKey") return "La clé SSH n'est pas chargée dans l'agent. Charge une identité dans l'agent, puis réessaie.";
   return "";
 }
+
+test("an empty key command does not construct a command private key source", () => {
+  const app = readFileSync(join(ROOT, "HermedBots/App/AppModel.swift"), "utf8");
+  const start = app.indexOf("private func ephemeralKeySource");
+  assert.notEqual(start, -1);
+  const fn = app.slice(start, app.indexOf("private static func apiMessage", start));
+  const afterEndif = fn.slice(fn.lastIndexOf("#endif"));
+  const nilAt = afterEndif.indexOf("return nil");
+  const commandAt = afterEndif.indexOf("CommandPrivateKeySource");
+  assert.ok(nilAt !== -1 && commandAt !== -1 && nilAt < commandAt, afterEndif);
+});
 
 test("app Swift starts ssh-agent, loads the key on stdin, and never writes it", () => {
   const agent = readFileSync(AGENT, "utf8");
@@ -111,9 +122,12 @@ test("app Swift starts ssh-agent, loads the key on stdin, and never writes it", 
 
 test("a missing agent is classified before publickey", () => {
   const tunnel = readFileSync(TUNNEL, "utf8");
-  const start = tunnel.indexOf("static func classify");
-  const end = tunnel.indexOf("private static func lastLine");
-  const classifyFn = tunnel.slice(start, end);
+  const classification = readFileSync(
+    join(ROOT, "Packages/HermesAdapter/Sources/AppSettings/SSHExitClassification.swift"),
+    "utf8",
+  );
+  const start = classification.indexOf("public static func kind");
+  const classifyFn = classification.slice(start);
   assert.ok(classifyFn.indexOf("Error connecting to agent") < classifyFn.indexOf("Permission denied"));
   assert.match(tunnel, /case missingAgent/);
   assert.match(tunnel, /case missingKey/);

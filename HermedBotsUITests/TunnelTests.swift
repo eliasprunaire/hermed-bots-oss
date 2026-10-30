@@ -96,16 +96,18 @@ final class TunnelTests: XCTestCase {
     func testARefusedIdentityShowsOneClearMessageAndStopsWithoutARetryLoop() throws {
         try XCTSkipIf(environment["HV_SSH_REFUSED"] != "1", "HV_SSH_REFUSED absent : pas de serveur qui refuse l'identité")
         let app = launch()
-        let banner = wait(for: .bannerError, in: app, toContain: "Permission denied")
-        XCTAssertTrue(banner.contains("Permission denied"), banner)
+        let banner = wait(for: .bannerError, in: app, toContain: "refuse l'identité")
+        XCTAssertTrue(banner.contains("refuse l'identité"), banner)
         XCTAssertFalse(banner.contains("Trousseau"), banner)
+        XCTAssertFalse(banner.contains("Permission denied"), banner)
         sleep(6)
-        XCTAssertTrue(text(of: element(.bannerError, in: app)).contains("Permission denied"))
+        XCTAssertTrue(text(of: element(.bannerError, in: app)).contains("refuse l'identité"))
         XCTAssertEqual(text(of: element(.statusVersion, in: app)), "inconnue")
         HVShot.capture("hd07-wrong-key", app)
         openConnection(app)
         XCTAssertEqual(text(of: element(.connectionTunnelState, in: app)), "en échec")
-        XCTAssertTrue(text(of: element(.connectionMessage, in: app)).contains("Permission denied"))
+        XCTAssertTrue(text(of: element(.connectionMessage, in: app)).contains("refuse l'identité"))
+        XCTAssertFalse(text(of: element(.connectionMessage, in: app)).contains("Permission denied"))
     }
 
     func testAHostThatNamesExampleHostIsRefusedBeforeAnyConnection() throws {

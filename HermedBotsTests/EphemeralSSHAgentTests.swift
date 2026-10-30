@@ -26,7 +26,11 @@ final class EphemeralSSHAgentTests: XCTestCase {
         for arg in "$@"; do
           if [ "$prev" = "-o" ]; then
             case "$arg" in
-              IdentityAgent=*) agent="${arg#IdentityAgent=}" ;;
+              IdentityAgent=*)
+                agent="${arg#IdentityAgent=}"
+                agent="${agent#\\"}"
+                agent="${agent%\\"}"
+                ;;
             esac
           fi
           if [ "$prev" = "-L" ]; then
@@ -87,9 +91,9 @@ final class EphemeralSSHAgentTests: XCTestCase {
     }
 
     func testAMissingAgentIsNamedInsteadOfPublickey() {
-        XCTAssertEqual(SSHFailure.classify(stderr: "Error connecting to agent: No such file or directory"), .missingAgent)
-        XCTAssertEqual(SSHFailure.classify(stderr: "user@example.invalid: Permission denied (publickey)."), .wrongKey("user@example.invalid: Permission denied (publickey)."))
-        XCTAssertEqual(SSHFailure.missingAgent.message, "L'agent SSH est absent. La connexion s'arrête.")
+        XCTAssertEqual(SSHFailure.classify(stderr: "Error connecting to agent: No such file or directory", status: 255), .missingAgent)
+        XCTAssertEqual(SSHFailure.classify(stderr: "user@example.invalid: Permission denied (publickey).", status: 255), .wrongKey(""))
+        XCTAssertEqual(SSHFailure.missingAgent.message, "L'agent SSH est absent. Démarre l'agent, puis réessaie.")
     }
 
     func testTheTunnelOpensWhenTheTemporaryAgentHoldsTheKey() async throws {
@@ -110,6 +114,46 @@ final class EphemeralSSHAgentTests: XCTestCase {
         )
         let session = try await backend.open(config)
         XCTAssertTrue((1...65535).contains(session.localPort))
+        await backend.close()
+    }
+
+    func testAnEmptyKeyCommandAttachesToTheResolvedIdentityAgentWithoutAPrivateAgent() async throws {
+        let watchdog = try Spawn.startWatchdog()
+        addTeardownBlock {
+            watchdog.closeStdin()
+            killpg(watchdog.group, SIGKILL)
+        }
+        let directory = try EphemeralSSHAgent.makeDirectory()
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let agent = try await EphemeralSSHAgent.start(joining: watchdog.pid, directory: directory)
+        try await agent.addKey(OpenSSHFixture.ed25519(), joining: watchdog.pid)
+        let backend = SystemSSHBackend(
+            environment: ["PATH": "/usr/bin:/bin", "HOME": "/tmp/example-home", "USER": "user", "LOGNAME": "user"],
+            resolver: AgreeingSSHResolver(identityAgent: agent.socketPath),
+            client: SSHClientSettings(authMode: .ephemeralAgent, sshBinary: try installDouble()),
+            keySource: nil
+        )
+        addTeardownBlock { await backend.close() }
+        let config = try SSHTunnelConfig(
+            alias: "lab.invalid",
+            hostname: "example.invalid",
+            user: "user",
+            sshPort: 2200,
+            refuseTestHost: true
+        )
+        let session = try await backend.open(config)
+        XCTAssertTrue((1...65535).contains(session.localPort))
+        let pid = await backend.temporaryAgentPID()
+        let socket = await backend.temporaryAgentSocketPath()
+        XCTAssertNil(pid)
+        XCTAssertNil(socket)
+        let listed = try await Spawn.run(
+            "/usr/bin/ssh-add",
+            ["-l"],
+            environment: SSHChildEnvironment.make(["SSH_AUTH_SOCK": agent.socketPath]),
+            timeout: .seconds(5)
+        )
+        XCTAssertEqual(listed.status, 0)
         await backend.close()
     }
 
@@ -142,7 +186,7 @@ final class EphemeralSSHAgentTests: XCTestCase {
         XCTAssertTrue(failed, "\(tunnel.state)")
         guard case .failed(let failure) = tunnel.state else { return }
         XCTAssertFalse(failure.retries)
-        XCTAssertEqual(failure, .wrongKey("user@example.invalid: Permission denied (publickey)."))
+        XCTAssertEqual(failure, .wrongKey(""))
         let agentGone = await Self.gone(pid!)
         XCTAssertTrue(agentGone)
         let after = try await Spawn.run(
@@ -316,7 +360,15 @@ final class EphemeralSSHAgentTests: XCTestCase {
 
 /// `ssh -G` d'un alias qui reste sur la route du tunnel de ces tests
 private struct AgreeingSSHResolver: SSHConfigResolving {
-    private let dump = SSHConfigDump(stdout: "hostname example.invalid\nuser user\nport 2200\n")
+    private let dump: SSHConfigDump
+
+    init(identityAgent: String? = nil) {
+        var stdout = "hostname example.invalid\nuser user\nport 2200\n"
+        if let identityAgent {
+            stdout += "identityagent \(identityAgent)\n"
+        }
+        dump = SSHConfigDump(stdout: stdout)
+    }
 
     func dump(alias: String, invocation: SSHInvocation, agentSocket: String?) async throws -> SSHConfigDump { dump }
 

@@ -41,6 +41,9 @@ struct SSHConnectionPreview: Equatable, Sendable {
     let identity: SSHIdentityKind
     let identityPresent: Bool
     let usesExternalIdentityAgent: Bool
+    let identityAgentValue: String?
+    let sessionKind: SSHLaunchIdentityKind
+    let sessionPresent: Bool
 
     var identityPresentLabel: String {
         if identity == .certificate {
@@ -56,8 +59,8 @@ struct SSHConnectionPreview: Equatable, Sendable {
     func matchingLaunch(mode: SSHAuthMode, keyCommandSet: Bool) -> SSHConnectionPreview {
         let launch = SSHLaunchIdentity.overlay(
             mode: mode,
-            sessionKind: identity.launchKind,
-            sessionPresent: identityPresent,
+            sessionKind: sessionKind,
+            sessionPresent: sessionPresent,
             keyCommandSet: keyCommandSet,
             hasExternalIdentityAgent: usesExternalIdentityAgent
         )
@@ -69,7 +72,10 @@ struct SSHConnectionPreview: Equatable, Sendable {
             hasRelay: hasRelay,
             identity: SSHIdentityKind(launch.kind),
             identityPresent: launch.present,
-            usesExternalIdentityAgent: usesExternalIdentityAgent
+            usesExternalIdentityAgent: usesExternalIdentityAgent,
+            identityAgentValue: identityAgentValue,
+            sessionKind: sessionKind,
+            sessionPresent: sessionPresent
         )
     }
 }
@@ -210,7 +216,10 @@ enum SSHConfig {
             hasRelay: hasRelay,
             identity: identity,
             identityPresent: present,
-            usesExternalIdentityAgent: SSHLaunchIdentity.identityAgentIsExternal(agent)
+            usesExternalIdentityAgent: SSHLaunchIdentity.identityAgentIsExternal(agent),
+            identityAgentValue: agent,
+            sessionKind: identity.launchKind,
+            sessionPresent: present
         )
     }
 
