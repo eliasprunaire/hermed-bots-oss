@@ -35,7 +35,13 @@ struct ConnectionView: View {
         VStack(spacing: 0) {
             Form {
                 TextField("Alias SSH", text: $model.host).accessibilityID(.connectionHost)
-                Picker("Mode SSH", selection: $model.authMode) {
+                Picker("Mode SSH", selection: Binding(
+                    get: { model.authMode },
+                    set: { mode in
+                        model.authMode = mode
+                        model.noteUserChoseAuthMode()
+                    }
+                )) {
                     ForEach(SSHAuthMode.allCases, id: \.self) { mode in
                         Text(mode.label).tag(mode)
                     }
@@ -74,9 +80,6 @@ struct ConnectionView: View {
             .onChange(of: model.host) {
                 model.persistEndpoint()
                 model.refreshPreview()
-            }
-            .onChange(of: model.authMode) {
-                model.noteUserChoseAuthMode()
             }
             .onChange(of: model.wrapperPath) { model.persistEndpoint() }
             .onChange(of: model.keyCommandPath) {

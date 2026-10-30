@@ -132,12 +132,14 @@ struct SSHTunnelConfig: Equatable, Sendable {
     }
 
     /// Place `IdentityAgent` en tête des `-o` : ssh retient la première valeur, donc l'agent temporaire l'emporte
+    /// La valeur est entre guillemets : un chemin avec des espaces reste un seul argument pour OpenSSH
     static func withIdentityAgent(_ arguments: [String], socket: String) -> [String] {
         var args = arguments
+        let option = "IdentityAgent=\"\(socket)\""
         if let index = args.firstIndex(of: "-T") {
-            args.insert(contentsOf: ["-o", "IdentityAgent=\(socket)"], at: index + 1)
+            args.insert(contentsOf: ["-o", option], at: index + 1)
         } else {
-            args.insert(contentsOf: ["-o", "IdentityAgent=\(socket)"], at: 0)
+            args.insert(contentsOf: ["-o", option], at: 0)
         }
         return args
     }
@@ -861,10 +863,10 @@ actor SystemSSHBackend: SSHBackend {
         case .wrapper:
             guard SSHLaunchPath.isExecutable(client.wrapperPath) else { throw SSHFailure.missingWrapper }
         case .ephemeralAgent:
-            if client.keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                try await attachResolvedIdentityAgent(alias: alias)
-            } else {
+            if usesPrivateEphemeralAgent {
                 try await startEphemeralAgent(joining: leader)
+            } else {
+                try await attachResolvedIdentityAgent(alias: alias)
             }
         }
     }
@@ -948,12 +950,15 @@ actor SystemSSHBackend: SSHBackend {
         watchdog.closeStdin()
     }
 
+    private var usesPrivateEphemeralAgent: Bool {
+        client.authMode == .ephemeralAgent
+            && (keySource != nil || !client.keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
     private func preparedWatchdog() throws -> Child {
         if let watchdog { return watchdog }
         let directory: URL?
-        let privateAgent = client.authMode == .ephemeralAgent
-            && !client.keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        if privateAgent {
+        if usesPrivateEphemeralAgent {
             do {
                 directory = try EphemeralSSHAgent.makeDirectory()
                 agentDirectory = directory

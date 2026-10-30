@@ -26,7 +26,11 @@ final class EphemeralSSHAgentTests: XCTestCase {
         for arg in "$@"; do
           if [ "$prev" = "-o" ]; then
             case "$arg" in
-              IdentityAgent=*) agent="${arg#IdentityAgent=}" ;;
+              IdentityAgent=*)
+                agent="${arg#IdentityAgent=}"
+                agent="${agent#\"}"
+                agent="${agent%\"}"
+                ;;
             esac
           fi
           if [ "$prev" = "-L" ]; then

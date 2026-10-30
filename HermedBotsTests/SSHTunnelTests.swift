@@ -22,8 +22,18 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertFalse(args.contains { $0.hasPrefix("UserKnownHostsFile=") })
         XCTAssertFalse(args.contains("IdentitiesOnly=yes"))
         let ephemeral = SSHTunnelConfig.withIdentityAgent(args, socket: "/tmp/example-agent.invalid")
-        XCTAssertEqual(ephemeral.indices.filter { ephemeral[$0] == "-o" }.map { ephemeral[$0 + 1] }.first, "IdentityAgent=/tmp/example-agent.invalid")
+        XCTAssertEqual(ephemeral.indices.filter { ephemeral[$0] == "-o" }.map { ephemeral[$0 + 1] }.first, "IdentityAgent=\"/tmp/example-agent.invalid\"")
         XCTAssertEqual(ephemeral.last, "lab.invalid")
+    }
+
+    func testIdentityAgentQuotesASocketPathThatContainsSpaces() throws {
+        let args = try config().arguments(localPort: 1)
+        let socket = "/tmp/example agent.invalid/a"
+        let quoted = SSHTunnelConfig.withIdentityAgent(args, socket: socket)
+        XCTAssertEqual(
+            quoted.indices.filter { quoted[$0] == "-o" }.map { quoted[$0 + 1] }.first,
+            "IdentityAgent=\"\(socket)\""
+        )
     }
 
     func testANonDefaultResolvedPortIsNotPassedAsDashP() throws {
@@ -521,12 +531,23 @@ final class SSHTunnelSupervisorTests: XCTestCase {
         XCTAssertEqual(opens, 1)
     }
 
-    func testADroppedTunnelReopensWithoutUserAction() async {
+    func testADroppedTunnelStaysClosedWhenTheServerStops() async {
         let backend = FakeBackend([.session(port: 40001), .session(port: 40002)])
         let tunnel = SSHTunnel(delays: [.milliseconds(10)])
         tunnel.start(config, backend: backend)
         await eventually("open(40001)") { tunnel.state == .open(localPort: 40001) }
         await backend.drop(stderr: "Connection reset by peer")
+        await eventually("failed(tunnelClosed)") { tunnel.state == .failed(.tunnelClosed) }
+        let opens = await backend.opens
+        XCTAssertEqual(opens, 1)
+    }
+
+    func testADroppedTunnelReopensWithoutUserAction() async {
+        let backend = FakeBackend([.session(port: 40001), .session(port: 40002)])
+        let tunnel = SSHTunnel(delays: [.milliseconds(10)])
+        tunnel.start(config, backend: backend)
+        await eventually("open(40001)") { tunnel.state == .open(localPort: 40001) }
+        await backend.drop(stderr: "ssh: connect to host gateway.invalid port 22: Connection refused\n")
         await eventually("open(40002)") { tunnel.state == .open(localPort: 40002) }
         let opens = await backend.opens
         XCTAssertEqual(opens, 2)
