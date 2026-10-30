@@ -1,6 +1,5 @@
 import Foundation
 
-/// Outcome of a failed ssh, from stderr and the process status. No host, path, or key.
 public enum SSHExitKind: String, Sendable, Equatable {
     case hostUnreachable
     case authRefused

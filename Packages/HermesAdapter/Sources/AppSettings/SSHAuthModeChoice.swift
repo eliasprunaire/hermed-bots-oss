@@ -1,6 +1,5 @@
 import Foundation
 
-/// Picks the SSH mode when the user has not chosen one in the picker.
 public enum SSHAuthModeChoice: Sendable {
     public static func selected(
         userChose: Bool,
