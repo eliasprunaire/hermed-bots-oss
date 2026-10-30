@@ -35,23 +35,34 @@ function pullNumber(item) {
     : null;
 }
 
+function readableBaseRef(base) {
+  return (
+    base != null &&
+    typeof base === "object" &&
+    !Array.isArray(base) &&
+    typeof base.ref === "string" &&
+    base.ref !== ""
+  );
+}
+
 function targetsMain(item) {
-  const base = item.base;
-  if (base != null && (typeof base !== "object" || Array.isArray(base))) {
+  if (!Object.hasOwn(item, "base") || item.base == null) {
+    return "other";
+  }
+  if (!readableBaseRef(item.base)) {
     return "malformed";
   }
-  return base != null && base.ref === "main" ? "main" : "other";
+  return item.base.ref === "main" ? "main" : "other";
 }
 
 function detailBase(item) {
   if (!Object.hasOwn(item, "base") || item.base == null) {
     return "malformed";
   }
-  const base = item.base;
-  if (typeof base !== "object" || Array.isArray(base)) {
+  if (!readableBaseRef(item.base)) {
     return "malformed";
   }
-  return base.ref === "main" ? "main" : "other";
+  return item.base.ref === "main" ? "main" : "other";
 }
 
 function mergeCommitField(item) {
@@ -69,10 +80,13 @@ function mergeCommitField(item) {
 }
 
 function mergedAtField(item) {
-  if (!Object.hasOwn(item, "merged_at") || item.merged_at == null || item.merged_at === "") {
+  if (!Object.hasOwn(item, "merged_at")) {
+    return "missing";
+  }
+  if (item.merged_at == null) {
     return "absent";
   }
-  if (typeof item.merged_at !== "string") {
+  if (typeof item.merged_at !== "string" || item.merged_at === "") {
     return "malformed";
   }
   return "present";
@@ -89,7 +103,7 @@ function classify(body, sha) {
       return { kind: "malformed" };
     }
     const mergedAt = mergedAtField(item);
-    if (mergedAt === "malformed") {
+    if (mergedAt === "malformed" || mergedAt === "missing") {
       return { kind: "malformed" };
     }
     const baseKind = targetsMain(item);
@@ -187,7 +201,7 @@ function matchesMergeCommit(body, sha) {
     return "malformed";
   }
   const mergedAt = mergedAtField(body);
-  if (mergedAt === "malformed") {
+  if (mergedAt === "malformed" || mergedAt === "missing") {
     return "malformed";
   }
   if (
