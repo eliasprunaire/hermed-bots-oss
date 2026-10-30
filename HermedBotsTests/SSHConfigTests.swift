@@ -515,7 +515,7 @@ private actor AliasDumpResolver: SSHConfigResolving {
 
 private actor GatedSSHResolver: SSHConfigResolving {
     private let dumps: [String: SSHConfigDump]
-    private var gates: [String: CheckedContinuation<Void, Never>] = [:]
+    private var gates: [String: [CheckedContinuation<Void, Never>]] = [:]
     private(set) var started: [String] = []
 
     init(dumps: [String: SSHConfigDump]) {
@@ -525,7 +525,9 @@ private actor GatedSSHResolver: SSHConfigResolving {
     func dump(alias: String, invocation: SSHInvocation, agentSocket: String?) async throws -> SSHConfigDump {
         if invocation == .tunnel {
             started.append(alias)
-            await withCheckedContinuation { gates[alias] = $0 }
+            await withCheckedContinuation { continuation in
+                gates[alias, default: []].append(continuation)
+            }
         }
         return dumps[alias] ?? SSHConfigDump(stdout: "")
     }
@@ -535,8 +537,17 @@ private actor GatedSSHResolver: SSHConfigResolving {
     }
 
     func release(_ alias: String) {
-        gates[alias]?.resume()
+        let waiting = gates[alias] ?? []
         gates[alias] = nil
+        for waiter in waiting { waiter.resume() }
+    }
+
+    func releaseFirst(_ alias: String) {
+        var waiting = gates[alias] ?? []
+        guard !waiting.isEmpty else { return }
+        let first = waiting.removeFirst()
+        gates[alias] = waiting
+        first.resume()
     }
 }
 
@@ -828,6 +839,34 @@ final class AppModelConnectTests: XCTestCase {
         }
         let started = await resolver.started
         XCTAssertEqual(started, ["a.invalid"])
+    }
+
+    func testRefreshPreviewDuringConnectKeepsEphemeralLaunchIdentity() async {
+        let dump = knownDump(hostname: "gateway.invalid")
+        let resolver = GatedSSHResolver(dumps: ["lab.invalid": dump])
+        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], defaults: isolatedDefaults(), keychain: { InMemorySecretStore(apiKey: nil) })
+        let model = AppModel(environment: environment, sshResolver: resolver)
+        model.host = "lab.invalid"
+        model.authMode = .ephemeralAgent
+        model.authModeChosen = true
+        model.keyCommandPath = "/tmp/example-key-command.invalid"
+        model.connect()
+        await eventually { await resolver.started == ["lab.invalid"] }
+        model.authMode = .sessionAgent
+        model.refreshPreview()
+        await eventually { await resolver.started.count == 2 }
+        await resolver.releaseFirst("lab.invalid")
+        await eventually { model.launchClient?.authMode == .ephemeralAgent }
+        XCTAssertEqual(model.launchClient?.authMode, .ephemeralAgent)
+        XCTAssertEqual(model.preview?.identity, .agent)
+        XCTAssertEqual(model.preview?.identity.label, "agent SSH")
+        await resolver.release("lab.invalid")
+        await eventually { model.preview?.identity == .agent && model.launchClient?.authMode == .ephemeralAgent }
+        XCTAssertEqual(model.preview?.identity, .agent)
+        XCTAssertEqual(model.preview?.identity.label, "agent SSH")
+        XCTAssertEqual(model.launchClient?.authMode, .ephemeralAgent)
+        XCTAssertNotEqual(model.preview?.identity, .file)
+        await model.tunnel.stop()
     }
 
     func testConnectKeepsTheCapturedAuthModeWhenModeChangesDuringDump() async {
