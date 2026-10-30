@@ -985,9 +985,9 @@ test("the workflow records a status from record-verdict", () => {
   assert.match(job, /fetch-depth:\s*0/);
   assert.match(job, /persist-credentials:\s*false/);
   assert.equal(yaml.includes("pull_request_target"), false);
-  assert.match(
-    job,
-    /github\.event\.comment\.user\.type == 'Bot' && github\.event\.comment\.user\.login == 'cursor\[bot]'/,
+  assert.equal(
+    /github\.event\.comment\.user\.login == 'cursor\[bot]'/.test(job),
+    false,
   );
   assert.equal(job.includes("*[bot]"), false);
   assert.equal(job.includes("'[bot]'"), false);
@@ -2054,20 +2054,32 @@ test("a listed Bot passes with PASS and PASS+NOTES", () => {
   }
 });
 
-test("cursor[bot] with a marked PASS on the head passes", () => {
+test("cursor[bot] with a marked PASS on the head leaves the gate red", () => {
   for (const verdict of ["PASS", "PASS+NOTES"]) {
     const decision = decide({
       headSha: HEAD,
       comments: [comment("1", 1, marked(verdict, HEAD), CURSOR_BOT)],
     });
     assert.deepEqual(decision, {
-      kind: "pass",
-      verdict,
-      sha: HEAD,
-      commentId: "1",
-      description: `VERDICT ${verdict} @ ${HEAD}`,
+      kind: "fail",
+      reason: { code: "none", headSha: HEAD, hint: "neither" },
+      description: `no marked VERDICT for ${HEAD}; cursor[bot] ${verdict}`,
     });
   }
+});
+
+test("app-pilote-verifier[bot] with a marked PASS on the head turns the gate green", () => {
+  const decision = decide({
+    headSha: HEAD,
+    comments: [comment("1", 1, marked("PASS", HEAD))],
+  });
+  assert.deepEqual(decision, {
+    kind: "pass",
+    verdict: "PASS",
+    sha: HEAD,
+    commentId: "1",
+    description: `VERDICT PASS @ ${HEAD}`,
+  });
 });
 
 test("cursor[bot] without the marker is refused", () => {
@@ -2075,11 +2087,7 @@ test("cursor[bot] without the marker is refused", () => {
     headSha: HEAD,
     comments: [comment("1", 1, `VERDICT: PASS @ ${HEAD}`, CURSOR_BOT)],
   });
-  assert.deepEqual(decision, {
-    kind: "fail",
-    reason: { code: "none", headSha: HEAD, hint: "line-without-marker" },
-    description: `VERDICT line missing ${MARKER} for ${HEAD}`,
-  });
+  assert.deepEqual(decision, NOT_RECORDED);
 });
 
 test("an unknown bot is refused even with a marked PASS on the head", () => {
@@ -2090,11 +2098,11 @@ test("an unknown bot is refused even with a marked PASS on the head", () => {
   assert.deepEqual(decision, NOT_RECORDED);
 });
 
-test("cursor[bot] as pull request author is refused", () => {
+test("a listed verifier that is the pull request author is still refused", () => {
   const decision = decide({
     headSha: HEAD,
-    authorLogin: "cursor[bot]",
-    comments: [comment("1", 1, marked("PASS", HEAD), CURSOR_BOT)],
+    authorLogin: VERIFIER,
+    comments: [comment("1", 1, marked("PASS", HEAD))],
   });
   assert.deepEqual(decision, {
     kind: "fail",
@@ -2102,10 +2110,20 @@ test("cursor[bot] as pull request author is refused", () => {
       code: "author-match",
       headSha: HEAD,
       commentId: "1",
-      authorLogin: "cursor[bot]",
+      authorLogin: VERIFIER,
     },
-    description: "author cursor[bot] wrote the marked VERDICT",
+    description: `author ${VERIFIER} wrote the marked VERDICT`,
   });
+});
+
+test("cursor[bot] as pull request author never turns the gate green", () => {
+  const decision = decide({
+    headSha: HEAD,
+    authorLogin: "cursor[bot]",
+    comments: [comment("1", 1, marked("PASS", HEAD), CURSOR_BOT)],
+  });
+  assert.equal(decision.kind, "fail");
+  assert.equal(decision.reason.code, "none");
 });
 
 test("a login or type that is not exactly the listed pair fails", () => {
