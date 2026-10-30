@@ -878,9 +878,33 @@ actor SystemSSHBackend: SSHBackend {
         guard let agent = preview.identityAgentValue, SSHLaunchIdentity.identityAgentIsExternal(agent) else {
             throw SSHFailure.missingKey
         }
-        let path = (agent as NSString).expandingTildeInPath
+        let path = resolvedIdentityAgentPath(agent)
         guard FileManager.default.fileExists(atPath: path) else { throw SSHFailure.missingAgent }
         attachedIdentityAgent = path
+    }
+
+    /// `ssh -G` peut laisser `IdentityAgent` sous la forme `$SSH_AUTH_SOCK` ou `${VAR}` : ssh lit la variable, pas un chemin
+    private func resolvedIdentityAgentPath(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let sshEnv = SSHChildEnvironment.make(environment)
+        if let name = Self.identityAgentEnvironmentName(trimmed), let socket = sshEnv[name], !socket.isEmpty {
+            return (socket as NSString).expandingTildeInPath
+        }
+        return (trimmed as NSString).expandingTildeInPath
+    }
+
+    private static func identityAgentEnvironmentName(_ value: String) -> String? {
+        if value == "SSH_AUTH_SOCK" { return "SSH_AUTH_SOCK" }
+        guard value.first == "$" else { return nil }
+        let body = String(value.dropFirst())
+        let name: String
+        if body.count >= 2, body.first == "{", body.last == "}" {
+            name = String(body.dropFirst().dropLast())
+        } else {
+            name = body
+        }
+        guard name.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil else { return nil }
+        return name
     }
 
     private func startEphemeralAgent(joining leader: pid_t) async throws {
