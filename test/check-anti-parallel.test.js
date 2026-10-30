@@ -1,13 +1,15 @@
 "use strict";
 
 const assert = require("node:assert/strict");
-const { readFileSync } = require("node:fs");
+const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
 
 const {
   decideExecutor,
   decideVerifier,
+  main,
 } = require("../scripts/check-anti-parallel.js");
 
 const MARKER = "<!-- dev-lead-verifier -->";
@@ -224,4 +226,144 @@ test("workflows key verifier concurrency on the PR number", () => {
     /group: executor-\$\{\{ github\.event\.pull_request\.number \|\| github\.run_id \}\}/,
   );
   assert.match(ci, /cancel-in-progress:\s*false/);
+});
+
+function jsonResponse(body, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    json: async () => body,
+    headers: {
+      get() {
+        return null;
+      },
+    },
+  };
+}
+
+test("an issue_comment fail posts a head status and exits 0", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "anti-parallel-"));
+  const eventPath = join(dir, "event.json");
+  writeFileSync(
+    eventPath,
+    JSON.stringify({
+      issue: { number: 70, pull_request: { url: "https://api.github.com/repos/acme/app/pulls/70" } },
+    }),
+  );
+  const posted = [];
+  const stderr = [];
+  const io = {
+    env: {
+      GITHUB_TOKEN: "test-token",
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_REPOSITORY: "acme/app",
+      GITHUB_EVENT_NAME: "issue_comment",
+    },
+    readFile(path) {
+      return readFileSync(path, "utf8");
+    },
+    stderr(line) {
+      stderr.push(line);
+    },
+    async fetch(url, init) {
+      const href = String(url);
+      if (href.endsWith("/pulls/70") && (init == null || init.method == null)) {
+        return jsonResponse({
+          number: 70,
+          head: { sha: HEAD },
+          base: { sha: OTHER },
+        });
+      }
+      if (href.includes("/issues/70/comments")) {
+        return jsonResponse([
+          {
+            body: marked("PASS", HEAD),
+            user: { login: "app-pilote-verifier[bot]" },
+          },
+          {
+            body: marked("FAIL", HEAD),
+            user: { login: "app-pilote-verifier[bot]" },
+          },
+        ]);
+      }
+      if (href.includes("/actions/") && href.includes("/runs")) {
+        return jsonResponse({ workflow_runs: [] });
+      }
+      if (href.includes(`/statuses/${HEAD}`) && init && init.method === "POST") {
+        posted.push(JSON.parse(init.body));
+        return jsonResponse({}, 201);
+      }
+      throw new Error(`unexpected url ${href}`);
+    },
+  };
+  try {
+    assert.equal(await main([], io), 0);
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].state, "failure");
+    assert.equal(posted[0].context, "anti-parallel");
+    assert.match(stderr.join("\n"), /multiple marked VERDICT comments/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a pull_request fail posts a head status and exits 1", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "anti-parallel-"));
+  const eventPath = join(dir, "event.json");
+  writeFileSync(
+    eventPath,
+    JSON.stringify({
+      pull_request: {
+        number: 70,
+        head: { sha: HEAD },
+        base: { sha: OTHER },
+      },
+    }),
+  );
+  const posted = [];
+  const io = {
+    env: {
+      GITHUB_TOKEN: "test-token",
+      GITHUB_EVENT_PATH: eventPath,
+      GITHUB_REPOSITORY: "acme/app",
+      GITHUB_EVENT_NAME: "pull_request",
+    },
+    readFile(path) {
+      return readFileSync(path, "utf8");
+    },
+    stderr() {},
+    run() {
+      return { status: 0, stdout: "" };
+    },
+    async fetch(url, init) {
+      const href = String(url);
+      if (href.includes("/issues/70/comments")) {
+        return jsonResponse([
+          {
+            body: marked("PASS", HEAD),
+            user: { login: "app-pilote-verifier[bot]" },
+          },
+          {
+            body: marked("FAIL", HEAD),
+            user: { login: "app-pilote-verifier[bot]" },
+          },
+        ]);
+      }
+      if (href.includes("/actions/") && href.includes("/runs")) {
+        return jsonResponse({ workflow_runs: [] });
+      }
+      if (href.includes(`/statuses/${HEAD}`) && init && init.method === "POST") {
+        posted.push(JSON.parse(init.body));
+        return jsonResponse({}, 201);
+      }
+      throw new Error(`unexpected url ${href}`);
+    },
+  };
+  try {
+    assert.equal(await main([], io), 1);
+    assert.equal(posted.length, 1);
+    assert.equal(posted[0].state, "failure");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -543,6 +543,9 @@ async function report(io, token, owner, repo, sha, decision) {
   if (posted !== 0) {
     return 1;
   }
+  if (io.env.GITHUB_EVENT_NAME === "issue_comment") {
+    return 0;
+  }
   return decision.kind === "pass" ? 0 : 1;
 }
 
