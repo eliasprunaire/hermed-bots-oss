@@ -1,13 +1,11 @@
 import Foundation
 
-/// Kind shown in Connexion after overlaying the selected SSH mode on a session dump.
 public enum SSHLaunchIdentityKind: String, Sendable, Equatable {
     case agent
     case certificate
     case file
 }
 
-/// Identité Connect will use. Session `ssh -G` can list default files while ephemeral mode uses an agent.
 public struct SSHLaunchIdentity: Equatable, Sendable {
     public var kind: SSHLaunchIdentityKind
     public var present: Bool
@@ -17,7 +15,6 @@ public struct SSHLaunchIdentity: Equatable, Sendable {
         self.present = present
     }
 
-    /// `identityagent` is external when it is set, not `none`, and not only `SSH_AUTH_SOCK`.
     public static func identityAgentIsExternal(_ value: String?) -> Bool {
         guard let value else { return false }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
