@@ -75,9 +75,15 @@ struct ConnectionView: View {
                 model.persistEndpoint()
                 model.refreshPreview()
             }
-            .onChange(of: model.authMode) { model.persistEndpoint() }
+            .onChange(of: model.authMode) {
+                model.persistEndpoint()
+                model.refreshPreview()
+            }
             .onChange(of: model.wrapperPath) { model.persistEndpoint() }
-            .onChange(of: model.keyCommandPath) { model.persistEndpoint() }
+            .onChange(of: model.keyCommandPath) {
+                model.persistEndpoint()
+                model.refreshPreview()
+            }
             HStack {
                 Button("Tester la connexion") { Task { await model.refreshVersion() } }
                     .accessibilityID(.connectionCheck)

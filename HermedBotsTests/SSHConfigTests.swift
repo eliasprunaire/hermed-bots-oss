@@ -116,6 +116,17 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertNoThrow(try SSHConnectionPlanner.config(from: preview, refuseTestHost: true))
     }
 
+    func testEphemeralModeShowsAgentInsteadOfDefaultIdentityFiles() {
+        let session = parse(defaultDump, alias: "unknown-alias.invalid")
+        XCTAssertEqual(session.identity, .file)
+        let launch = session.matchingLaunch(mode: .ephemeralAgent, keyCommandSet: true)
+        XCTAssertEqual(launch.identity, .agent)
+        XCTAssertEqual(launch.identity.label, "agent SSH")
+        XCTAssertTrue(launch.identityPresent)
+        XCTAssertFalse(launch.identity.label.contains("/tmp"))
+        XCTAssertEqual(session.matchingLaunch(mode: .sessionAgent, keyCommandSet: false).identity, .file)
+    }
+
     func testAPresentPublicKeyIsOnlyALabel() {
         let dump = """
             user hermes
@@ -407,6 +418,23 @@ final class SSHConnectorTests: XCTestCase {
         XCTAssertEqual(opened, [])
         let startedAfterInvalid = await resolver.started
         XCTAssertEqual(startedAfterInvalid, ["a.invalid"])
+    }
+
+    func testAnEphemeralConnectPreviewIsAgentWhenTheDumpListsFiles() async {
+        let dump = knownDump(hostname: "gateway.invalid")
+        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump, .profileList: dump, .profileLocks: dump])
+        let connector = SSHConnector(resolver: resolver, localUser: "operator")
+        var identity: SSHIdentityKind?
+        connector.begin(
+            alias: "lab.invalid",
+            refuseTestHost: true,
+            authMode: .ephemeralAgent,
+            keyCommandSet: true,
+            opened: { _, preview in identity = preview.identity },
+            refused: { _, _ in }
+        )
+        await eventually { identity != nil }
+        XCTAssertEqual(identity, .agent)
     }
 
     func testEverySshInvocationIsDumpedAndAValidAliasOpensWithTheTunnelPreview() async {
@@ -786,6 +814,38 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertEqual(started, ["a.invalid"])
     }
 
+    func testConnectKeepsTheCapturedAuthModeWhenModeChangesDuringDump() async {
+        let dump = SSHConfigDump(
+            stdout: """
+            user operator
+            hostname 127.0.0.1
+            port 1
+            identityfile /tmp/fake-id.invalid
+            proxyjump none
+            """
+        )
+        let resolver = GatedSSHResolver(dumps: ["lab.invalid": dump])
+        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], defaults: isolatedDefaults(), keychain: { InMemorySecretStore(apiKey: nil) })
+        let model = AppModel(environment: environment, sshResolver: resolver)
+        model.host = "lab.invalid"
+        model.authMode = .sessionAgent
+        model.connect()
+        await eventually { await resolver.started == ["lab.invalid"] }
+        model.authMode = .wrapper
+        model.wrapperPath = "/tmp/example-wrapper.invalid"
+        await resolver.release("lab.invalid")
+        await eventually { model.preview?.identity == .file }
+        XCTAssertEqual(model.preview?.identity, .file)
+        await eventually {
+            if case .failed = model.tunnel.state { true } else { false }
+        }
+        if case .failed(let failure) = model.tunnel.state {
+            XCTAssertNotEqual(failure, .missingWrapper)
+        } else {
+            XCTFail("attendu un échec de lancement, obtenu \(model.tunnel.state)")
+        }
+    }
+
     func testExampleHostOnAppModelNeverDumpsOrOpens() async {
         let resolver = GatedSSHResolver(dumps: [
             "example-host.invalid": knownDump(hostname: "example-host.invalid"),
@@ -807,6 +867,20 @@ final class AppModelConnectTests: XCTestCase {
         } else {
             XCTFail("\(model.tunnel.state)")
         }
+    }
+
+    func testEphemeralPreviewOnAppModelShowsAgentNotFile() async {
+        let dump = knownDump(hostname: "gateway.invalid")
+        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump])
+        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], defaults: isolatedDefaults(), keychain: { InMemorySecretStore(apiKey: nil) })
+        let model = AppModel(environment: environment, sshResolver: resolver)
+        model.host = "lab.invalid"
+        model.authMode = .ephemeralAgent
+        model.keyCommandPath = "/tmp/example-key-command.invalid"
+        model.refreshPreview()
+        await eventually { model.preview?.identity == .agent }
+        XCTAssertEqual(model.preview?.identity.label, "agent SSH")
+        XCTAssertTrue(model.preview?.identityPresent ?? false)
     }
 
     func testAnAliasWithANonDefaultPortShowsTheResolvedPortFromSSHConfig() async {

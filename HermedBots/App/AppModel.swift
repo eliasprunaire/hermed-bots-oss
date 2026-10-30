@@ -98,6 +98,7 @@ final class AppModel {
     // de quoi lire la liste des profils par un second ssh : le même alias que le tunnel
     private var sshBackend: SystemSSHBackend?
     private var sshConfig: SSHTunnelConfig?
+    private var launchClient: SSHClientSettings?
     /// Une relecture SSH par profil et par 401/403, puis le message d'échec ; « Réessayer » la rouvre
     private let apiKeyFetches = APIKeyFetches()
     /// Le profil dont le refus affiche `apiError` : « Réessayer » relit sa clé, pas celle du profil à l'écran
@@ -254,17 +255,25 @@ final class AppModel {
             displayedPort = nil
             return
         }
-        Task { await resolvePreview(alias: alias, id: id) }
+        let mode = authMode
+        let keyCommandSet = !keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        Task { await resolvePreview(alias: alias, id: id, mode: mode, keyCommandSet: keyCommandSet) }
     }
 
     /// Ouvre le tunnel vers l'alias saisi ; un alias vide, invalide ou refusé invalide la génération en cours sans lancer ssh
     func connect() {
         apiKeyFetches.reset()
         persistEndpoint()
-        connector.begin(alias: host, refuseTestHost: environment.refuseTestHost, opened: { [weak self] config, preview in
+        let client = capturedClientSettings()
+        connector.begin(
+            alias: host,
+            refuseTestHost: environment.refuseTestHost,
+            authMode: client.authMode,
+            keyCommandSet: !client.keyCommandPath.isEmpty,
+            opened: { [weak self] config, preview in
             self?.preview = preview
             self?.displayedPort = .readOnly(resolvedPort: preview.port)
-            self?.openTunnel(config)
+            self?.openTunnel(config, client: client)
         }, refused: { [weak self] failure, preview in
             guard let self else { return }
             if let preview {
@@ -283,10 +292,10 @@ final class AppModel {
 
     func reconnectAfterWake() {
         guard let config = sshConfig else { return }
-        openTunnel(config)
+        openTunnel(config, client: launchClient ?? capturedClientSettings())
     }
 
-    private func resolvePreview(alias: String, id: Int) async {
+    private func resolvePreview(alias: String, id: Int, mode: SSHAuthMode, keyCommandSet: Bool) async {
         do {
             let dump = try await sshResolver.dump(alias: alias, invocation: .tunnel)
             let next = SSHConfig.parse(
@@ -294,7 +303,7 @@ final class AppModel {
                 alias: alias,
                 localUser: NSUserName(),
                 authSock: ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"]
-            )
+            ).matchingLaunch(mode: mode, keyCommandSet: keyCommandSet)
             guard id == previewGeneration else { return }
             preview = next
             displayedPort = .readOnly(resolvedPort: next.port)
@@ -305,19 +314,24 @@ final class AppModel {
         }
     }
 
-    private func openTunnel(_ config: SSHTunnelConfig) {
+    private func capturedClientSettings() -> SSHClientSettings {
+        SSHClientSettings(
+            authMode: authMode,
+            wrapperPath: wrapperPath.trimmingCharacters(in: .whitespacesAndNewlines),
+            keyCommandPath: keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+    }
+
+    private func openTunnel(_ config: SSHTunnelConfig, client: SSHClientSettings) {
         let backend = SystemSSHBackend(
             resolver: sshResolver,
             refuseTestHost: environment.refuseTestHost,
-            client: SSHClientSettings(
-                authMode: authMode,
-                wrapperPath: wrapperPath.trimmingCharacters(in: .whitespacesAndNewlines),
-                keyCommandPath: keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines)
-            ),
-            keySource: ephemeralKeySource()
+            client: client,
+            keySource: ephemeralKeySource(client)
         )
         sshBackend = backend
         sshConfig = config
+        launchClient = client
         tunnel.start(config, backend: backend)
     }
 
@@ -469,8 +483,8 @@ final class AppModel {
         return false
     }
 
-    private func ephemeralKeySource() -> (any SSHPrivateKeySource)? {
-        guard authMode == .ephemeralAgent else { return nil }
+    private func ephemeralKeySource(_ client: SSHClientSettings) -> (any SSHPrivateKeySource)? {
+        guard client.authMode == .ephemeralAgent else { return nil }
         #if DEBUG
         if environment.isTestMode {
             let material = ProcessInfo.processInfo.environment["HV_TEST_SSH_KEY"] ?? ""
@@ -478,7 +492,7 @@ final class AppModel {
         }
         #endif
         return CommandPrivateKeySource(
-            path: keyCommandPath.trimmingCharacters(in: .whitespacesAndNewlines),
+            path: client.keyCommandPath,
             environment: ProcessInfo.processInfo.environment
         )
     }
