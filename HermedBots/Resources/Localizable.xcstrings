@@ -66,6 +66,12 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "No parameters." } }
       }
     },
+    "Aucune identité SSH n'est disponible. Charge une clé dans l'agent ou indique une commande de clé dans Réglages, puis réessaie." : {
+      "localizations" : {
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "Aucune identité SSH n'est disponible. Charge une clé dans l'agent ou indique une commande de clé dans Réglages, puis réessaie." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No SSH identity is available. Load a key into the agent or set a key command in Settings, then try again." } }
+      }
+    },
     "Certificat" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Certificate" } }
@@ -199,6 +205,12 @@
     "L'alias SSH n'est pas valide." : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The SSH alias is not valid." } }
+      }
+    },
+    "L'exécutable SSH a échoué : %@ (code %@). Le tunnel reste fermé." : {
+      "localizations" : {
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "L'exécutable SSH a échoué : %@ (code %@). Le tunnel reste fermé." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The SSH executable failed: %@ (code %@). The tunnel stays closed." } }
       }
     },
     "L'hôte n'est pas valide." : {

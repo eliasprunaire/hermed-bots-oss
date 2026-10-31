@@ -380,6 +380,8 @@ final class SSHConnector {
                     .matchingLaunch(mode: authMode, keyCommandSet: keyCommandSet)
                 preview = preview ?? next
                 let config = try SSHConnectionPlanner.config(from: next, refuseTestHost: refuseTestHost)
+                // `next` porte l'identité du mode de lancement ; le mode Exécutable apporte la sienne
+                if authMode != .wrapper, !next.identityPresent { throw SSHFailure.noIdentity }
                 tunnel = tunnel ?? (config, next)
             }
             guard id == generation, !Task.isCancelled, let tunnel else { return }

@@ -210,23 +210,59 @@ final class SSHTunnelConfigTests: XCTestCase {
     }
 
     func testOnlyAnUnreachableHostIsRetried() {
-        XCTAssertEqual(SSHFailure.classify(stderr: "operator@gateway.invalid: Permission denied (publickey).", status: 255), .wrongKey(""))
-        XCTAssertEqual(SSHFailure.classify(stderr: "sign_and_send_pubkey: signing failed for ed25519 from agent: agent refused operation", status: 255), .agentLockedOrEmpty(""))
+        XCTAssertEqual(SSHFailure.classify(stderr: "operator@gateway.invalid: Permission denied (publickey).", status: 255), .wrongKey("operator@gateway.invalid: Permission denied (publickey)."))
+        XCTAssertEqual(SSHFailure.classify(stderr: "sign_and_send_pubkey: signing failed for ed25519 from agent: agent refused operation", status: 255), .agentLockedOrEmpty("sign_and_send_pubkey: signing failed for ed25519 from agent: agent refused operation"))
         XCTAssertEqual(SSHFailure.classify(stderr: "Could not open a connection to your authentication agent", status: 255), .missingAgent)
         XCTAssertEqual(SSHFailure.classify(stderr: "Error connecting to agent: No such file or directory", status: 255), .missingAgent)
         XCTAssertEqual(SSHFailure.classify(stderr: "The agent has no identities.", status: 255), .missingKey)
-        XCTAssertEqual(SSHFailure.classify(stderr: "Certificate invalid: expired", status: 255), .certificateExpired(""))
-        XCTAssertEqual(SSHFailure.classify(stderr: "Host key verification failed.", status: 255), .hostKeyChanged(""))
-        XCTAssertEqual(SSHFailure.classify(stderr: "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@", status: 255), .hostKeyChanged(""))
-        XCTAssertEqual(SSHFailure.classify(stderr: "ssh: connect to host gateway.invalid port 22: Connection refused\n", status: 255), .unreachable(""))
+        XCTAssertEqual(SSHFailure.classify(stderr: "Certificate invalid: expired", status: 255), .certificateExpired("Certificate invalid: expired"))
+        XCTAssertEqual(SSHFailure.classify(stderr: "Host key verification failed.", status: 255), .hostKeyChanged("Host key verification failed."))
+        XCTAssertEqual(SSHFailure.classify(stderr: "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@", status: 255), .hostKeyChanged("@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@"))
+        XCTAssertEqual(SSHFailure.classify(stderr: "ssh: connect to host gateway.invalid port 22: Connection refused\n", status: 255), .unreachable("ssh: connect to host gateway.invalid port 22: Connection refused"))
         XCTAssertEqual(SSHFailure.classify(stderr: "", status: 255), .unreachable(""))
         XCTAssertEqual(SSHFailure.classify(stderr: "Connection reset by peer", status: 255), .tunnelClosed)
         XCTAssertEqual(SSHFailure.classify(stderr: "", status: 1), .tunnelClosed)
+        XCTAssertEqual(SSHFailure.classify(stderr: "gate-wrapper_failure=17\n", status: 255), .wrapperFailure(name: "gate-wrapper", code: "17"))
         let retried = [SSHFailure.unreachable("")].filter(\.retries)
         XCTAssertEqual(retried.count, 1)
-        for terminal in [SSHFailure.wrongKey(""), .hostKeyChanged(""), .unknownAlias, .unreadableConfig, .missingAgent, .missingKey, .missingWrapper, .agentLockedOrEmpty(""), .certificateExpired(""), .forbiddenHost, .relayRefused, .routeMismatch, .invalidHost, .invalidPort, .tunnelClosed] {
+        for terminal in [SSHFailure.wrongKey(""), .hostKeyChanged(""), .unknownAlias, .unreadableConfig, .missingAgent, .missingKey, .missingWrapper, .noIdentity, .wrapperFailure(name: "gate-wrapper", code: "17"), .agentLockedOrEmpty(""), .certificateExpired(""), .forbiddenHost, .relayRefused, .routeMismatch, .invalidHost, .invalidPort, .tunnelClosed] {
             XCTAssertFalse(terminal.retries, "\(terminal)")
         }
+    }
+
+    func testStderrIsKeptInTheShownError() {
+        let refused = "ssh: connect to host gateway.invalid port 22: Connection refused\n"
+        let shown = SSHFailure.classify(stderr: refused, status: 255).message
+        XCTAssertEqual(shown, SSHFailure.unreachable("").message + "\nssh: connect to host gateway.invalid port 22: Connection refused")
+        XCTAssertTrue(shown.hasPrefix("Hôte injoignable. Vérifie le réseau, puis réessaie."))
+        // sans sortie d'erreur, le message reste celui d'avant : rien n'est inventé
+        XCTAssertEqual(SSHFailure.classify(stderr: " \n\n", status: 255).message, SSHFailure.unreachable("").message)
+        XCTAssertEqual(SSHFailure.unreachable("").message, "Hôte injoignable. Vérifie le réseau, puis réessaie.")
+        // le détail est borné : les trois dernières lignes, 400 caractères, sans caractère de contrôle
+        let noisy = (1...10).map { "ligne \($0)" }.joined(separator: "\n") + "\n"
+        XCTAssertEqual(SSHFailure.classify(stderr: noisy, status: 255), .unreachable("ligne 8\nligne 9\nligne 10"))
+        let long = String(repeating: "x", count: 5_000)
+        guard case .unreachable(let detail) = SSHFailure.classify(stderr: long, status: 255) else { return XCTFail("attendu unreachable") }
+        XCTAssertEqual(detail.count, 400)
+        XCTAssertTrue(detail.hasPrefix("…"))
+        XCTAssertEqual(SSHFailure.classify(stderr: "boom\u{1B}[31m rouge\u{7}\n", status: 255), .unreachable("boom[31m rouge"))
+        // les cas à message fixe n'affichent aucun détail
+        XCTAssertEqual(SSHFailure.classify(stderr: "Error connecting to agent: No such file or directory", status: 255).message, SSHFailure.missingAgent.message)
+    }
+
+    func testAWrapperFailureLineGivesANamedMessage() {
+        let failure = SSHFailure.classify(stderr: "debug: start\ngate-wrapper_failure=17\n", status: 255)
+        XCTAssertEqual(failure, .wrapperFailure(name: "gate-wrapper", code: "17"))
+        XCTAssertFalse(failure.retries)
+        XCTAssertEqual(failure.message, "L'exécutable SSH a échoué : gate-wrapper (code 17). Le tunnel reste fermé.")
+    }
+
+    func testNoIdentityMessageNamesTheWayOut() {
+        XCTAssertEqual(
+            SSHFailure.noIdentity.message,
+            "Aucune identité SSH n'est disponible. Charge une clé dans l'agent ou indique une commande de clé dans Réglages, puis réessaie."
+        )
+        XCTAssertFalse(SSHFailure.noIdentity.message.contains("publickey"))
     }
 
     func testTheRelayRefusalBannerNamesTheRelayKeywordsAndNoMode() {
@@ -510,6 +546,10 @@ final class SSHTunnelSupervisorTests: XCTestCase {
         XCTFail("condition jamais vraie : \(what)")
     }
 
+    private func failureMessage(of tunnel: SSHTunnel) -> String? {
+        if case .failed(let failure) = tunnel.state { failure.message } else { nil }
+    }
+
     func testAWrongKeyStopsAfterOneAttempt() async {
         let backend = FakeBackend([.fail(.wrongKey(""))])
         let tunnel = SSHTunnel(delays: [.milliseconds(10)])
@@ -577,8 +617,54 @@ final class SSHTunnelSupervisorTests: XCTestCase {
         tunnel.start(config, backend: backend)
         await eventually("open") { tunnel.state == .open(localPort: 40005) }
         await backend.drop(stderr: "hvssh@h: Permission denied (publickey).")
-        await eventually("failed(wrongKey)") { tunnel.state == .failed(.wrongKey("")) }
+        await eventually("failed(wrongKey)") { tunnel.state == .failed(.wrongKey("hvssh@h: Permission denied (publickey).")) }
         await eventually("backend closed") { await backend.closes == 1 }
+        XCTAssertEqual(
+            failureMessage(of: tunnel),
+            "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.\nhvssh@h: Permission denied (publickey)."
+        )
+    }
+
+    func testAnUnreachableOpenStopsAtTheReopenCap() async {
+        // huit issues prévues, six ouvertures : le plafond arrête avant les deux dernières
+        let fail = FakeBackend.Step.fail(.unreachable("down"))
+        let backend = FakeBackend([FakeBackend.Step](repeating: fail, count: 8))
+        let tunnel = SSHTunnel(delays: [.milliseconds(5)])
+        tunnel.start(config, backend: backend)
+        await eventually("failed(unreachable)") { tunnel.state == .failed(.unreachable("down")) }
+        try? await Task.sleep(for: .milliseconds(200))
+        let (opens, closes) = await (backend.opens, backend.closes)
+        XCTAssertEqual(SSHTunnel.maxConsecutiveFailures, 6)
+        XCTAssertEqual(opens, 6)
+        XCTAssertEqual(closes, 1)
+        XCTAssertEqual(tunnel.state, .failed(.unreachable("down")))
+    }
+
+    func testTheReopenCapCountsOnlyConsecutiveFailures() async {
+        // quatre échecs, une ouverture, la chute, quatre échecs, une ouverture : neuf échecs en tout, jamais six de suite
+        let fail = FakeBackend.Step.fail(.unreachable("down"))
+        let backend = FakeBackend([FakeBackend.Step](repeating: fail, count: 4) + [.session(port: 40021)] + [FakeBackend.Step](repeating: fail, count: 4) + [.session(port: 40022)])
+        let tunnel = SSHTunnel(delays: [.milliseconds(5)])
+        tunnel.start(config, backend: backend)
+        await eventually("open(40021)") { tunnel.state == .open(localPort: 40021) }
+        await backend.drop(stderr: "ssh: connect to host gateway.invalid port 22: Connection refused\n")
+        await eventually("open(40022)") { tunnel.state == .open(localPort: 40022) }
+        let opens = await backend.opens
+        XCTAssertEqual(opens, 10)
+    }
+
+    func testWrapperFailureLineIsNamedAndNotRetried() async {
+        let backend = FakeBackend([.session(port: 40023), .session(port: 40024)])
+        let tunnel = SSHTunnel(delays: [.milliseconds(5)])
+        tunnel.start(config, backend: backend)
+        await eventually("open(40023)") { tunnel.state == .open(localPort: 40023) }
+        await backend.drop(stderr: "gate-wrapper_failure=17\n")
+        await eventually("failed(wrapperFailure)") { tunnel.state == .failed(.wrapperFailure(name: "gate-wrapper", code: "17")) }
+        try? await Task.sleep(for: .milliseconds(150))
+        let (opens, closes) = await (backend.opens, backend.closes)
+        XCTAssertEqual(opens, 1)
+        XCTAssertEqual(closes, 1)
+        XCTAssertEqual(failureMessage(of: tunnel), "L'exécutable SSH a échoué : gate-wrapper (code 17). Le tunnel reste fermé.")
     }
 
     func testStopClosesTheBackendAndNothingReopens() async {

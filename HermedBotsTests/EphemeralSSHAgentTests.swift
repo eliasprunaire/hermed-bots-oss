@@ -92,7 +92,7 @@ final class EphemeralSSHAgentTests: XCTestCase {
 
     func testAMissingAgentIsNamedInsteadOfPublickey() {
         XCTAssertEqual(SSHFailure.classify(stderr: "Error connecting to agent: No such file or directory", status: 255), .missingAgent)
-        XCTAssertEqual(SSHFailure.classify(stderr: "user@example.invalid: Permission denied (publickey).", status: 255), .wrongKey(""))
+        XCTAssertEqual(SSHFailure.classify(stderr: "user@example.invalid: Permission denied (publickey).", status: 255), .wrongKey("user@example.invalid: Permission denied (publickey)."))
         XCTAssertEqual(SSHFailure.missingAgent.message, "L'agent SSH est absent. Démarre l'agent, puis réessaie.")
     }
 
@@ -232,7 +232,7 @@ final class EphemeralSSHAgentTests: XCTestCase {
         XCTAssertTrue(failed, "\(tunnel.state)")
         guard case .failed(let failure) = tunnel.state else { return }
         XCTAssertFalse(failure.retries)
-        XCTAssertEqual(failure, .wrongKey(""))
+        XCTAssertEqual(failure, .wrongKey("user@example.invalid: Permission denied (publickey)."))
         let agentGone = await Self.gone(pid!)
         XCTAssertTrue(agentGone)
         let after = try await Spawn.run(
@@ -382,6 +382,25 @@ final class EphemeralSSHAgentTests: XCTestCase {
         } catch let failure as SSHFailure {
             XCTAssertEqual(failure, .missingWrapper)
             XCTAssertFalse(failure.message.contains("publickey"))
+        }
+        await backend.close()
+    }
+
+    func testAnEphemeralLaunchWithoutKeyCommandOrAgentIsNamedBeforeAnySpawn() async throws {
+        // ni source de clé, ni commande de clé, ni IdentityAgent dans le dump : ssh ne doit pas partir, sinon il prendrait l'agent de la session
+        let backend = SystemSSHBackend(
+            environment: ["PATH": "/usr/bin:/bin"],
+            resolver: AgreeingSSHResolver(),
+            client: SSHClientSettings(authMode: .ephemeralAgent, sshBinary: "/tmp/example-ssh-never-spawned.invalid"),
+            keySource: nil
+        )
+        let config = try SSHTunnelConfig(alias: "lab.invalid", hostname: "example.invalid", user: "user", sshPort: 2200, refuseTestHost: true)
+        do {
+            _ = try await backend.open(config)
+            XCTFail("open() a réussi sans identité")
+        } catch let failure as SSHFailure {
+            XCTAssertEqual(failure, .noIdentity)
+            XCTAssertFalse(failure.retries)
         }
         await backend.close()
     }

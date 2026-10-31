@@ -9,6 +9,7 @@ import os
 
 /// Pourquoi le tunnel ne s'ouvre pas ou s'est fermé
 /// Seul `unreachable` donne lieu à une réouverture : une clé refusée ou un hôte changé ne se règle pas en réessayant
+/// Les cas à détail de texte gardent les dernières lignes de la sortie d'erreur de ssh, que `message` affiche
 enum SSHFailure: Error, Equatable, Sendable {
     case forbiddenHost
     case relayRefused
@@ -20,6 +21,10 @@ enum SSHFailure: Error, Equatable, Sendable {
     case missingAgent
     case missingKey
     case missingWrapper
+    /// Aucune identité à présenter : refusé avant tout lancement de ssh, sauf en mode Exécutable
+    case noIdentity
+    /// L'exécutable SSH a écrit `<nom>_failure=<code>` : son échec est nommé et ne se réessaie pas
+    case wrapperFailure(name: String, code: String)
     case agentLockedOrEmpty(String)
     case certificateExpired(String)
     case wrongKey(String)
@@ -32,21 +37,50 @@ enum SSHFailure: Error, Equatable, Sendable {
     }
 
     static func classify(stderr: String, status: Int32 = 255) -> SSHFailure {
+        let detail = Self.detail(of: stderr)
         switch SSHExitClassification.kind(stderr: stderr, status: status) {
         case .agentUnavailable: return .missingAgent
         case .missingKey: return .missingKey
-        case .agentEmpty: return .agentLockedOrEmpty("")
-        case .certificateExpired: return .certificateExpired("")
-        case .authRefused: return .wrongKey("")
-        case .hostKeyChanged: return .hostKeyChanged("")
+        case .agentEmpty: return .agentLockedOrEmpty(detail)
+        case .certificateExpired: return .certificateExpired(detail)
+        case .authRefused: return .wrongKey(detail)
+        case .hostKeyChanged: return .hostKeyChanged(detail)
         case .tunnelClosed: return .tunnelClosed
-        case .hostUnreachable: return .unreachable("")
+        case .hostUnreachable: return .unreachable(detail)
+        case .wrapperFailure:
+            let found = SSHExitClassification.wrapperFailure(stderr: stderr)
+            return .wrapperFailure(name: found?.name ?? "", code: found?.code ?? "")
         }
+    }
+
+    static let detailLines = 3
+    static let detailLimit = 400
+
+    /// Les dernières lignes de la sortie d'erreur, sans caractère de contrôle et bornées : c'est ce que l'utilisateur voit de la cause
+    static func detail(of stderr: String) -> String {
+        let lines = stderr.split(whereSeparator: \.isNewline)
+            .map { String($0.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let text = lines.suffix(detailLines).joined(separator: "\n")
+        return text.count > detailLimit ? "…" + text.suffix(detailLimit - 1) : text
     }
 }
 
 extension SSHFailure {
+    /// Le texte de la cause, puis le détail de ssh quand il existe
     var message: String {
+        guard let detail, !detail.isEmpty else { return summary }
+        return summary + "\n" + detail
+    }
+
+    private var detail: String? {
+        switch self {
+        case .agentLockedOrEmpty(let text), .certificateExpired(let text), .wrongKey(let text), .hostKeyChanged(let text), .unreachable(let text): text
+        default: nil
+        }
+    }
+
+    private var summary: String {
         switch self {
         case .forbiddenHost: String(localized: "Cet hôte est refusé en mode test.")
         case .relayRefused: String(localized: "Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte.")
@@ -58,6 +92,8 @@ extension SSHFailure {
         case .missingAgent: String(localized: "L'agent SSH est absent. Démarre l'agent, puis réessaie.")
         case .missingKey: String(localized: "La clé SSH n'est pas chargée dans l'agent. Charge une identité dans l'agent, puis réessaie.")
         case .missingWrapper: String(localized: "L'exécutable SSH configuré est introuvable. Vérifie le chemin dans Réglages.")
+        case .noIdentity: String(localized: "Aucune identité SSH n'est disponible. Charge une clé dans l'agent ou indique une commande de clé dans Réglages, puis réessaie.")
+        case .wrapperFailure(let name, let code): String(localized: "L'exécutable SSH a échoué : \(name) (code \(code)). Le tunnel reste fermé.")
         case .agentLockedOrEmpty: String(localized: "L'agent SSH est verrouillé ou vide. Déverrouille-le ou charge une identité, puis réessaie.")
         case .certificateExpired: String(localized: "Le certificat SSH a expiré. Renouvelle-le, puis réessaie.")
         case .wrongKey: String(localized: "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.")
@@ -570,6 +606,10 @@ final class SSHTunnel {
         case failed(SSHFailure)
     }
 
+    /// Échecs consécutifs, depuis la dernière ouverture réussie, après lesquels le superviseur s'arrête sur la dernière erreur
+    /// La chute d'un tunnel ouvert compte pour le premier : après elle, cinq réouvertures ratées arrêtent la boucle
+    static let maxConsecutiveFailures = 6
+
     private(set) var state = State.idle
     private let delays: [Duration]
     private var generation = 0
@@ -629,13 +669,13 @@ final class SSHTunnel {
                 guard generation == id else { return }
                 failure = error as? SSHFailure ?? .unreachable("")
             }
-            guard failure.retries else {
+            failures += 1
+            guard failure.retries, failures < Self.maxConsecutiveFailures else {
                 state = .failed(failure)
                 await backend.close()
                 return
             }
-            let delay = delays[min(failures, delays.count - 1)]
-            failures += 1
+            let delay = delays[min(failures - 1, delays.count - 1)]
             attempt += 1
             try? await Task.sleep(for: delay)
         }
@@ -876,7 +916,7 @@ actor SystemSSHBackend: SSHBackend {
         let dump = try await resolver.dump(alias: alias, invocation: .tunnel)
         let preview = SSHConfig.parse(dump, alias: alias, localUser: localUser)
         guard let agent = preview.identityAgentValue, SSHLaunchIdentity.identityAgentIsExternal(agent) else {
-            throw SSHFailure.missingKey
+            throw SSHFailure.noIdentity
         }
         let path = resolvedIdentityAgentPath(agent)
         guard FileManager.default.fileExists(atPath: path) else { throw SSHFailure.missingAgent }

@@ -349,6 +349,12 @@ final class SSHConfigTests: XCTestCase {
     }
 }
 
+/// Un fichier qui existe sur tout hôte : l'aperçu ne teste que sa présence, ssh ne le lit pas dans ces tests
+private let existingIdentityFile = "/dev/null"
+
+/// Un fichier d'identité qui n'existe pas : l'aperçu le donne pour absent
+private let missingIdentityFile = "/tmp/fake-id.invalid"
+
 @MainActor
 final class SSHConnectorTests: XCTestCase {
     private func knownDump(hostname: String) -> SSHConfigDump {
@@ -357,7 +363,7 @@ final class SSHConnectorTests: XCTestCase {
             user operator
             hostname \(hostname)
             port 22
-            identityfile /tmp/fake-id.invalid
+            identityfile \(existingIdentityFile)
             proxyjump none
             """
         )
@@ -473,6 +479,73 @@ final class SSHConnectorTests: XCTestCase {
                 XCTAssertEqual(opened, [], "\(invocation) refuse=\(refuse)")
             }
         }
+    }
+
+    private struct Outcome {
+        var opened: [String] = []
+        var refused: [SSHFailure] = []
+        var preview: SSHConnectionPreview?
+    }
+
+    private func outcome(of dump: SSHConfigDump, authMode: SSHAuthMode, keyCommandSet: Bool = false) async -> Outcome {
+        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump, .profileList: dump, .profileLocks: dump])
+        let connector = SSHConnector(resolver: resolver, localUser: "operator", authSock: nil)
+        var result = Outcome()
+        connector.begin(
+            alias: "lab.invalid",
+            refuseTestHost: true,
+            authMode: authMode,
+            keyCommandSet: keyCommandSet,
+            opened: { config, preview in
+                result.opened.append(config.alias)
+                result.preview = preview
+            },
+            refused: { failure, preview in
+                result.refused.append(failure)
+                result.preview = preview
+            }
+        )
+        await eventually { !result.opened.isEmpty || !result.refused.isEmpty }
+        return result
+    }
+
+    private func dump(identityFile: String, extra: String = "") -> SSHConfigDump {
+        SSHConfigDump(stdout: "user operator\nhostname gateway.invalid\nport 22\n\(extra)identityfile \(identityFile)\nproxyjump none\n")
+    }
+
+    func testNoIdentityIsRefusedBeforeLaunchInSessionMode() async {
+        let missing = await outcome(of: dump(identityFile: missingIdentityFile), authMode: .sessionAgent)
+        XCTAssertEqual(missing.refused, [.noIdentity])
+        XCTAssertEqual(missing.opened, [])
+        XCTAssertEqual(missing.preview?.identityPresent, false, "l'aperçu reste affiché avec l'identité absente")
+        // une identité présente laisse ouvrir
+        let present = await outcome(of: dump(identityFile: existingIdentityFile), authMode: .sessionAgent)
+        XCTAssertEqual(present.refused, [])
+        XCTAssertEqual(present.opened, ["lab.invalid"])
+        // le mode Exécutable porte sa propre identité : aucune garde
+        let wrapper = await outcome(of: dump(identityFile: missingIdentityFile), authMode: .wrapper)
+        XCTAssertEqual(wrapper.refused, [])
+        XCTAssertEqual(wrapper.opened, ["lab.invalid"])
+    }
+
+    func testEphemeralWithoutKeyCommandOrAgentIsRefusedBeforeLaunch() async {
+        // le fichier d'identité du dump ne compte pas : l'agent temporaire n'en lit aucun
+        let files = dump(identityFile: existingIdentityFile)
+        let none = await outcome(of: files, authMode: .ephemeralAgent, keyCommandSet: false)
+        XCTAssertEqual(none.refused, [.noIdentity])
+        XCTAssertEqual(none.opened, [])
+        let command = await outcome(of: files, authMode: .ephemeralAgent, keyCommandSet: true)
+        XCTAssertEqual(command.refused, [])
+        XCTAssertEqual(command.opened, ["lab.invalid"])
+        let agent = await outcome(of: dump(identityFile: existingIdentityFile, extra: "identityagent /tmp/fake-agent.invalid\n"), authMode: .ephemeralAgent, keyCommandSet: false)
+        XCTAssertEqual(agent.refused, [])
+        XCTAssertEqual(agent.opened, ["lab.invalid"])
+    }
+
+    func testARelayIsRefusedBeforeTheIdentityIsChecked() async {
+        let relayWithoutIdentity = SSHConfigDump(stdout: "user operator\nhostname gateway.invalid\nport 22\nidentityfile \(missingIdentityFile)\nproxyjump bastion.invalid\n")
+        let result = await outcome(of: relayWithoutIdentity, authMode: .sessionAgent)
+        XCTAssertEqual(result.refused, [.relayRefused])
     }
 
     func testExampleHostIsRefusedWithoutDumpingTheConfig() async {
@@ -808,7 +881,7 @@ final class AppModelConnectTests: XCTestCase {
             user operator
             hostname \(hostname)
             port 22
-            identityfile /tmp/fake-id.invalid
+            identityfile \(existingIdentityFile)
             proxyjump none
             """
         )
@@ -875,7 +948,7 @@ final class AppModelConnectTests: XCTestCase {
             user operator
             hostname 127.0.0.1
             port 1
-            identityfile /tmp/fake-id.invalid
+            identityfile \(existingIdentityFile)
             proxyjump none
             """
         )
