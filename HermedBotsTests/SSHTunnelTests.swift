@@ -301,11 +301,16 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(SSHFailure.certificateExpired("").message, "Le certificat SSH a expiré. Renouvelle-le, puis réessaie.")
         XCTAssertTrue(SSHFailure.wrongKey("").message.contains("refuse l'identité"))
         XCTAssertFalse(SSHFailure.wrongKey("").message.contains("Trousseau"))
+        // le texte fixe ne nomme aucune machine ; seul le détail repris de ssh peut en nommer une
+        for fixed in [SSHFailure.wrongKey(""), .unreachable(""), .hostKeyChanged(""), .certificateExpired(""), .agentLockedOrEmpty(""), .noIdentity] {
+            XCTAssertFalse(fixed.message.contains("gateway.invalid"), "\(fixed)")
+            XCTAssertFalse(fixed.message.contains("Trousseau"), "\(fixed)")
+            XCTAssertFalse(fixed.message.contains("/"), "\(fixed)")
+        }
         let denied = SSHFailure.classify(stderr: "operator@gateway.invalid: Permission denied (publickey).", status: 255)
-        XCTAssertEqual(denied, .wrongKey(""))
-        XCTAssertFalse(denied.message.contains("gateway.invalid"))
+        XCTAssertEqual(denied, .wrongKey("operator@gateway.invalid: Permission denied (publickey)."))
+        XCTAssertEqual(denied.message, SSHFailure.wrongKey("").message + "\noperator@gateway.invalid: Permission denied (publickey).")
         XCTAssertFalse(denied.message.contains("Trousseau"))
-        XCTAssertFalse(denied.message.contains("/"))
         XCTAssertEqual(SSHFailure.tunnelClosed.message, "Le serveur a fermé le tunnel. Réessaie la connexion.")
         XCTAssertEqual(SSHFailure.unreachable("").message, "Hôte injoignable. Vérifie le réseau, puis réessaie.")
     }

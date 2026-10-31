@@ -948,7 +948,7 @@ final class AppModelConnectTests: XCTestCase {
             user operator
             hostname 127.0.0.1
             port 1
-            identityfile \(existingIdentityFile)
+            identityfile \(missingIdentityFile)
             proxyjump none
             """
         )
@@ -967,10 +967,11 @@ final class AppModelConnectTests: XCTestCase {
         await eventually {
             if case .failed = model.tunnel.state { true } else { false }
         }
+        // le mode capturé est la session : sans identité, le connecteur refuse avant tout lancement ; le mode Exécutable (sans garde) donnerait missingWrapper
         if case .failed(let failure) = model.tunnel.state {
-            XCTAssertNotEqual(failure, .missingWrapper)
+            XCTAssertEqual(failure, .noIdentity)
         } else {
-            XCTFail("attendu un échec de lancement, obtenu \(model.tunnel.state)")
+            XCTFail("attendu un refus noIdentity, obtenu \(model.tunnel.state)")
         }
     }
 
