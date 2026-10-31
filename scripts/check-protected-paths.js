@@ -12,6 +12,8 @@ const GATE_FILES = [
   "scripts/check-protected-paths.js",
 ];
 const GATE_LABEL = "gate-change-approved";
+const GATE_VERIFIER_LOGIN = "app-pilote-verifier[bot]";
+const HEAD_PUSH_EVENTS = new Set(["committed", "head_ref_force_pushed"]);
 
 function posix(file) {
   return String(file).replace(/\\/g, "/").toLowerCase();
@@ -145,22 +147,6 @@ function readLogin(user) {
   return user.login;
 }
 
-function readType(user) {
-  if (user == null || typeof user !== "object" || typeof user.type !== "string") {
-    return null;
-  }
-  return user.type;
-}
-
-function isBot(user) {
-  const type = readType(user);
-  const login = readLogin(user);
-  if (type === "Bot") {
-    return true;
-  }
-  return typeof login === "string" && /\[bot\]$/i.test(login);
-}
-
 function labelName(raw) {
   if (raw == null || typeof raw !== "object") {
     return null;
@@ -171,46 +157,55 @@ function labelName(raw) {
   return raw.name;
 }
 
+function eventTimeMs(event) {
+  if (event == null || typeof event !== "object") {
+    return null;
+  }
+  if (typeof event.created_at !== "string" || event.created_at === "") {
+    return null;
+  }
+  const ms = Date.parse(event.created_at);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 // latest labeled/unlabeled event for GATE_LABEL wins; presence of the label on the
-// pull payload is ignored
-function gateApprovalFromEvents(events, { ownerLogin, authorLogin }) {
+// pull payload is ignored. stale-label: labeled.created_at must be strictly after
+// the latest committed or head_ref_force_pushed created_at in the issue timeline.
+function gateApprovalFromEvents(events) {
   if (!Array.isArray(events)) {
     return { ok: false, reason: "unreadable-events" };
   }
   let actor = null;
+  let labeledAt = null;
+  let headAt = null;
   for (const event of events) {
     if (event == null || typeof event !== "object") {
       continue;
+    }
+    const at = eventTimeMs(event);
+    if (HEAD_PUSH_EVENTS.has(event.event) && at != null && (headAt == null || at > headAt)) {
+      headAt = at;
     }
     if (labelName(event.label) !== GATE_LABEL) {
       continue;
     }
     if (event.event === "labeled") {
       actor = event.actor;
+      labeledAt = at;
     } else if (event.event === "unlabeled") {
       actor = null;
+      labeledAt = null;
     }
   }
   if (actor == null) {
     return { ok: false, reason: "no-label" };
   }
-  if (isBot(actor)) {
-    return { ok: false, reason: "bot" };
-  }
   const actorLogin = foldLogin(readLogin(actor));
-  if (actorLogin == null) {
-    return { ok: false, reason: "no-actor" };
+  if (actorLogin !== GATE_VERIFIER_LOGIN) {
+    return { ok: false, reason: "not-verifier" };
   }
-  if (readType(actor) !== "User") {
-    return { ok: false, reason: "not-user" };
-  }
-  const author = foldLogin(authorLogin);
-  if (author != null && actorLogin === author) {
-    return { ok: false, reason: "author" };
-  }
-  const owner = foldLogin(ownerLogin);
-  if (owner == null || actorLogin !== owner) {
-    return { ok: false, reason: "not-owner" };
+  if (labeledAt == null || headAt == null || labeledAt <= headAt) {
+    return { ok: false, reason: "stale-label" };
   }
   return { ok: true, login: actorLogin };
 }
@@ -253,7 +248,7 @@ async function githubGet(io, token, url) {
 
 async function loadEvents(io, token, owner, repo, number) {
   const events = [];
-  let url = `https://api.github.com/repos/${owner}/${repo}/issues/${number}/events?per_page=100`;
+  let url = `https://api.github.com/repos/${owner}/${repo}/issues/${number}/timeline?per_page=100`;
   while (url) {
     const response = await githubGet(io, token, url);
     const page = await response.json();
@@ -280,7 +275,7 @@ function repositoryParts(repository) {
 function writeHits(kind, hits) {
   const label =
     kind === "gate"
-      ? `protected gate files changed (${GATE_FILES.join(", ")}). owner User label ${GATE_LABEL} required`
+      ? `protected gate files changed (${GATE_FILES.join(", ")}). ${GATE_VERIFIER_LOGIN} label ${GATE_LABEL} required`
       : "protected agent config changed (.claude/, .codex/, .mcp.json, or a symlink or submodule at them)";
   process.stderr.write(
     `${label}:\n${hits.map((hit) => `  ${hit}`).join("\n")}\n`,
@@ -291,22 +286,9 @@ async function ownerApproval(io) {
   const token = io.env.GITHUB_TOKEN;
   const repository = io.env.GITHUB_REPOSITORY;
   const number = io.env.PR_NUMBER;
-  const authorLogin = io.env.PR_AUTHOR_LOGIN;
   const names = repositoryParts(repository);
   if (!token || names == null || !number) {
     return { ok: false, reason: "missing-context" };
-  }
-  const repoUrl = `https://api.github.com/repos/${names.owner}/${names.repo}`;
-  let ownerLogin = names.owner;
-  try {
-    const repoResponse = await githubGet(io, token, repoUrl);
-    const repo = await repoResponse.json();
-    const login = readLogin(repo && repo.owner);
-    if (login) {
-      ownerLogin = login;
-    }
-  } catch {
-    return { ok: false, reason: "unreadable-repo" };
   }
   let events;
   try {
@@ -314,7 +296,7 @@ async function ownerApproval(io) {
   } catch {
     return { ok: false, reason: "unreadable-events" };
   }
-  return gateApprovalFromEvents(events, { ownerLogin, authorLogin });
+  return gateApprovalFromEvents(events);
 }
 
 function collectHits(base, head) {

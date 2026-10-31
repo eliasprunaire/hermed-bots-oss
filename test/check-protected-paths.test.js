@@ -403,7 +403,7 @@ test("a pull that disables its own workflow and checker is still refused by the 
   assert.match(result.stderr, new RegExp(GATE_LABEL));
 });
 
-test("changing a gate file exits 1 without an owner label", () => {
+test("changing a gate file exits 1 without a verifier label", () => {
   for (const file of GATE_FILES) {
     const result = scenario({ [file]: "changed\n" });
     assert.equal(result.status, 1, file);
@@ -422,66 +422,65 @@ test("classifyHits splits agent config from gate files", () => {
   );
 });
 
+const VERIFIER = { login: "app-pilote-verifier[bot]", type: "Bot" };
 const OWNER = { login: "repo-owner", type: "User" };
 const AUTHOR = { login: "pr-author", type: "User" };
-const BOT = { login: "approver[bot]", type: "Bot" };
+const CURSOR_BOT = { login: "cursor[bot]", type: "Bot" };
+const HEAD_AT = "2026-10-31T11:00:00Z";
+const LABEL_AT = "2026-10-31T12:00:00Z";
 
-function labeled(actor) {
-  return { event: "labeled", label: { name: GATE_LABEL }, actor };
+function committed(createdAt) {
+  return { event: "committed", created_at: createdAt };
 }
 
-test("gate-change-approved counts only when the owner User applied it", () => {
-  assert.deepEqual(
-    gateApprovalFromEvents([labeled(OWNER)], {
-      ownerLogin: "repo-owner",
-      authorLogin: "pr-author",
-    }),
-    { ok: true, login: "repo-owner" },
-  );
+function labeled(actor, createdAt = LABEL_AT) {
+  return { event: "labeled", label: { name: GATE_LABEL }, actor, created_at: createdAt };
+}
+
+function afterHead(actor = VERIFIER) {
+  return [committed(HEAD_AT), labeled(actor, LABEL_AT)];
+}
+
+test("gate-change-approved counts only when app-pilote-verifier[bot] applied it after the head", () => {
+  assert.deepEqual(gateApprovalFromEvents(afterHead()), {
+    ok: true,
+    login: "app-pilote-verifier[bot]",
+  });
 });
 
 test("the label on the pull is ignored; only issue events count", () => {
-  const decision = gateApprovalFromEvents([], {
-    ownerLogin: "repo-owner",
-    authorLogin: "pr-author",
-    labels: [GATE_LABEL],
-  });
+  const decision = gateApprovalFromEvents([], { labels: [GATE_LABEL] });
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "no-label");
 });
 
-test("a label from the pull author or a bot is refused", () => {
-  assert.equal(
-    gateApprovalFromEvents([labeled(AUTHOR)], {
-      ownerLogin: "repo-owner",
-      authorLogin: "pr-author",
-    }).reason,
-    "author",
-  );
-  assert.equal(
-    gateApprovalFromEvents([labeled(BOT)], {
-      ownerLogin: "repo-owner",
-      authorLogin: "pr-author",
-    }).reason,
-    "bot",
-  );
-  assert.equal(
-    gateApprovalFromEvents([labeled({ login: "other", type: "User" })], {
-      ownerLogin: "repo-owner",
-      authorLogin: "pr-author",
-    }).reason,
-    "not-owner",
-  );
+test("a label from a human is refused", () => {
+  assert.equal(gateApprovalFromEvents(afterHead(OWNER)).reason, "not-verifier");
 });
 
-test("unlabeling clears a previous owner approval", () => {
-  const decision = gateApprovalFromEvents(
-    [
-      labeled(OWNER),
-      { event: "unlabeled", label: { name: GATE_LABEL }, actor: OWNER },
-    ],
-    { ownerLogin: "repo-owner", authorLogin: "pr-author" },
-  );
+test("a label from the pull author is refused", () => {
+  assert.equal(gateApprovalFromEvents(afterHead(AUTHOR)).reason, "not-verifier");
+});
+
+test("a label from cursor[bot] is refused", () => {
+  assert.equal(gateApprovalFromEvents(afterHead(CURSOR_BOT)).reason, "not-verifier");
+});
+
+test("a verifier label older than the head is refused", () => {
+  for (const later of [committed(LABEL_AT), { event: "head_ref_force_pushed", created_at: LABEL_AT }]) {
+    assert.equal(
+      gateApprovalFromEvents([labeled(VERIFIER, HEAD_AT), later]).reason,
+      "stale-label",
+      later.event,
+    );
+  }
+});
+
+test("unlabeling clears a previous verifier approval", () => {
+  const decision = gateApprovalFromEvents([
+    ...afterHead(),
+    { event: "unlabeled", label: { name: GATE_LABEL }, actor: VERIFIER, created_at: "2026-10-31T13:00:00Z" },
+  ]);
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "no-label");
 });
@@ -526,7 +525,9 @@ async function withGateHead(run) {
   }
 }
 
-test("an owner labeled event allows a gate file change", async () => {
+const TIMELINE_URL = "https://api.github.com/repos/acme/app/issues/7/timeline?per_page=100";
+
+test("a verifier labeled event after the head allows a gate file change", async () => {
   await withGateHead(async (base, head) => {
     const code = await main(["--base", base, "--head", head], {
       env: {
@@ -536,11 +537,8 @@ test("an owner labeled event allows a gate file change", async () => {
         PR_AUTHOR_LOGIN: "pr-author",
       },
       fetch: async (url) => {
-        if (url === "https://api.github.com/repos/acme/app") {
-          return jsonResponse({ owner: OWNER });
-        }
-        if (url === "https://api.github.com/repos/acme/app/issues/7/events?per_page=100") {
-          return jsonResponse([labeled(OWNER)]);
+        if (url === TIMELINE_URL) {
+          return jsonResponse(afterHead());
         }
         throw new Error(`unexpected GET ${url}`);
       },
@@ -559,11 +557,8 @@ test("a gate change stays blocked when the author applied the label", async () =
         PR_AUTHOR_LOGIN: "pr-author",
       },
       fetch: async (url) => {
-        if (url === "https://api.github.com/repos/acme/app") {
-          return jsonResponse({ owner: OWNER });
-        }
-        if (url === "https://api.github.com/repos/acme/app/issues/7/events?per_page=100") {
-          return jsonResponse([labeled(AUTHOR)]);
+        if (url === TIMELINE_URL) {
+          return jsonResponse(afterHead(AUTHOR));
         }
         throw new Error(`unexpected GET ${url}`);
       },
@@ -572,7 +567,7 @@ test("a gate change stays blocked when the author applied the label", async () =
   });
 });
 
-test("an owner label does not waive an agent-config change", () => {
+test("a verifier label does not waive an agent-config change", () => {
   const result = scenario({ ".mcp.json": "{}\n" });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /\.mcp\.json/);
