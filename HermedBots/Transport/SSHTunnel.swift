@@ -236,6 +236,49 @@ enum SSHChildEnvironment {
     }
 }
 
+/// PATH d'un outil lancé par l'utilisateur (l'exécutable SSH) : celui de son shell de connexion
+/// Une app ouverte depuis le Finder ne reçoit que le PATH minimal de launchd, sans Homebrew ni dossier bin personnel
+struct LoginPath: Sendable {
+    /// nil : le shell de connexion du compte
+    let shell: String?
+    let timeout: Duration
+
+    init(shell: String? = nil, timeout: Duration = .seconds(5)) {
+        self.shell = shell
+        self.timeout = timeout
+    }
+
+    static let usualDirectories = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin"]
+
+    /// Le PATH du shell de connexion, sinon le repli ; ne lève jamais : un shell lent, absent ou en échec ne bloque pas le tunnel
+    func resolve(session: [String: String]) async -> String {
+        let shell = shell ?? Self.accountShell()
+        guard SSHLaunchPath.isExecutable(shell),
+              let output = try? await Spawn.runGuarded(shell, ["-l", "-c", #"printf '%s\n' "$PATH""#], environment: SSHChildEnvironment.forUserTool(session), timeout: timeout),
+              output.status == 0,
+              // un rc peut écrire avant : le PATH est la dernière ligne
+              let line = output.stdout.split(whereSeparator: \.isNewline).last.map({ $0.trimmingCharacters(in: .whitespaces) }),
+              !line.isEmpty, line.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
+        else { return Self.fallback(session: session) }
+        return line
+    }
+
+    /// Le PATH de l'app suivi des emplacements usuels, sans doublon
+    static func fallback(session: [String: String]) -> String {
+        var entries = (session["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin").split(separator: ":").map(String.init)
+        var extra = usualDirectories
+        if let home = session["HOME"], !home.isEmpty { extra += [home + "/.local/bin", home + "/bin"] }
+        for directory in extra where !entries.contains(directory) { entries.append(directory) }
+        return entries.joined(separator: ":")
+    }
+
+    /// `SHELL` n'existe pas toujours dans l'environnement d'une app ouverte depuis le Finder : le compte nomme son shell
+    private static func accountShell() -> String {
+        guard let entry = getpwuid(getuid()), let shell = entry.pointee.pw_shell else { return "/bin/zsh" }
+        return String(cString: shell)
+    }
+}
+
 // MARK: - Processus enfants
 
 /// Un processus lancé par `posix_spawn`, avec la fin de la sortie d'erreur gardée en mémoire (8 Kio au plus) et la sortie standard gardée en entier
@@ -693,6 +736,9 @@ actor SystemSSHBackend: SSHBackend {
     private let client: SSHClientSettings
     private let keySource: (any SSHPrivateKeySource)?
     private let identityLifetime: Int
+    private let loginPath: LoginPath
+    /// lu une fois par backend, au premier lancement de l'exécutable
+    private var userToolPath: String?
     private var watchdog: Child?
     /// le gardien en préparation, que `close()` arrête sans attendre la fin de l'ouverture
     private var preparing: Child?
@@ -709,7 +755,8 @@ actor SystemSSHBackend: SSHBackend {
         localUser: String = NSUserName(),
         client: SSHClientSettings = SSHClientSettings(),
         keySource: (any SSHPrivateKeySource)? = nil,
-        identityLifetime: Int = EphemeralSSHAgent.lifetimeSeconds
+        identityLifetime: Int = EphemeralSSHAgent.lifetimeSeconds,
+        loginPath: LoginPath = LoginPath()
     ) {
         self.environment = environment
         self.resolver = resolver
@@ -718,6 +765,7 @@ actor SystemSSHBackend: SSHBackend {
         self.client = client
         self.keySource = keySource
         self.identityLifetime = identityLifetime
+        self.loginPath = loginPath
     }
 
     func open(_ config: SSHTunnelConfig) async throws -> SSHSession {
@@ -856,7 +904,9 @@ actor SystemSSHBackend: SSHBackend {
 
     private var sshEnvironment: [String: String] {
         if client.authMode == .wrapper {
-            return SSHChildEnvironment.forUserTool(environment)
+            var tool = SSHChildEnvironment.forUserTool(environment)
+            tool["PATH"] = userToolPath ?? LoginPath.fallback(session: environment)
+            return tool
         }
         return SSHChildEnvironment.make(environment, agentSocket: identityAgentSocket)
     }
@@ -898,6 +948,7 @@ actor SystemSSHBackend: SSHBackend {
             return
         case .wrapper:
             guard SSHLaunchPath.isExecutable(client.wrapperPath) else { throw SSHFailure.missingWrapper }
+            if userToolPath == nil { userToolPath = await loginPath.resolve(session: environment) }
         case .ephemeralAgent:
             if usesPrivateEphemeralAgent {
                 try await startEphemeralAgent(joining: leader)

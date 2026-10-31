@@ -785,6 +785,87 @@ final class SystemSSHBackendTests: XCTestCase {
     }
 }
 
+/// Le mode Exécutable lance l'exécutable avec le PATH du shell de connexion de l'utilisateur : une app ouverte depuis le Finder ne reçoit que le PATH minimal de launchd
+final class WrapperLoginPathTests: XCTestCase {
+    private let config = try! SSHTunnelConfig(alias: "lab.invalid", hostname: "example.invalid", user: "operator", sshPort: 2200, refuseTestHost: true)
+    private let home = "/tmp/example-home"
+    private let launchdPath = "/usr/bin:/bin:/usr/sbin:/sbin"
+
+    private func script(_ body: String, name: String = "tool") throws -> String {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hb-login-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent(name).path
+        try "#!/bin/sh\n\(body)\n".write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+        return path
+    }
+
+    /// Un exécutable qui écrit son PATH sur la sortie d'erreur puis échoue : `open()` rend ce PATH dans le détail de `unreachable`
+    private func pathSeenByWrapper(_ backend: SystemSSHBackend) async throws -> String {
+        defer { addTeardownBlock { await backend.close() } }
+        do {
+            _ = try await backend.open(config)
+            XCTFail("open() a réussi avec un exécutable qui échoue")
+        } catch let failure as SSHFailure {
+            guard case .unreachable(let detail) = failure else { XCTFail("\(failure)"); return "" }
+            return detail
+        }
+        return ""
+    }
+
+    private func backend(wrapper: String, loginShell: String?, timeout: Duration = .seconds(5)) -> SystemSSHBackend {
+        SystemSSHBackend(
+            environment: ["PATH": launchdPath, "HOME": home, "USER": "operator", "LOGNAME": "operator"],
+            client: SSHClientSettings(authMode: .wrapper, wrapperPath: wrapper),
+            loginPath: LoginPath(shell: loginShell, timeout: timeout)
+        )
+    }
+
+    func testWrapperGetsALoginPath() async throws {
+        let wrapper = try script(#"printf '%s\n' "$PATH" >&2; exit 255"#)
+        // le shell écrit du bruit avant le PATH (un rc qui affiche) et refuse d'être lancé sans `-l`
+        let shell = try script(#"[ "$1" = "-l" ] || exit 9; echo 'message du rc'; printf '%s\n' '/opt/example-login/bin:/usr/bin:/bin'"#, name: "login-shell")
+        let seen = try await pathSeenByWrapper(backend(wrapper: wrapper, loginShell: shell))
+        XCTAssertEqual(seen, "/opt/example-login/bin:/usr/bin:/bin")
+    }
+
+    func testWrapperPathFallsBackWhenLoginShellFails() async throws {
+        let wrapper = try script(#"printf '%s\n' "$PATH" >&2; exit 255"#)
+        let expected = launchdPath + ":/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:\(home)/.local/bin:\(home)/bin"
+        let failing = try script("exit 1", name: "failing-shell")
+        let silent = try script("printf ''", name: "silent-shell")
+        let hanging = try script("sleep 30", name: "hanging-shell")
+        for (name, shell) in [("échec", failing), ("sortie vide", silent), ("absent", "/tmp/example-shell.invalid")] {
+            let seen = try await pathSeenByWrapper(backend(wrapper: wrapper, loginShell: shell))
+            XCTAssertEqual(seen, expected, name)
+        }
+        // un shell qui ne rend pas la main est tué au délai
+        let started = ContinuousClock.now
+        let seen = try await pathSeenByWrapper(backend(wrapper: wrapper, loginShell: hanging, timeout: .milliseconds(300)))
+        XCTAssertEqual(seen, expected, "délai")
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(10))
+    }
+
+    func testTheLoginPathIsReadOncePerBackend() async throws {
+        let counter = FileManager.default.temporaryDirectory.appendingPathComponent("hb-login-count-\(UUID().uuidString.prefix(8))")
+        addTeardownBlock { try? FileManager.default.removeItem(at: counter) }
+        let shell = try script("echo run >> '\(counter.path)'; printf '%s\\n' '/opt/example-login/bin'", name: "counting-shell")
+        let wrapper = try script(#"printf '%s\n' "$PATH" >&2; exit 255"#)
+        let backend = backend(wrapper: wrapper, loginShell: shell)
+        _ = try await pathSeenByWrapper(backend)
+        let second = try await pathSeenByWrapper(backend)
+        XCTAssertEqual(second, "/opt/example-login/bin")
+        let runs = try String(contentsOf: counter, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(runs.count, 1)
+    }
+
+    func testTheSessionModeKeepsItsFixedPath() {
+        let environment = SSHChildEnvironment.make(["PATH": "/opt/example-login/bin", "HOME": home])
+        XCTAssertEqual(environment["PATH"], "/usr/bin:/bin")
+    }
+}
+
 private actor FakeBackend: SSHBackend {
     enum Step {
         case fail(SSHFailure)
