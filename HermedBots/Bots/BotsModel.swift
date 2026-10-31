@@ -16,6 +16,8 @@ final class BotsModel {
         case loading
         case ready
         case failed(String)
+        /// `hermes` manque sur l'hôte : un message à part, car Hermes n'a pas été interrogé
+        case toolNotFound(String)
     }
 
     enum Threads: Equatable {
@@ -83,7 +85,7 @@ final class BotsModel {
         } catch {
             if Task.isCancelled { return }
             // une liste déjà affichée reste : la panne passagère d'une relecture ne la remplace pas
-            if hosts[host, default: Host()].list.shown == nil { hosts[host, default: Host()].phase = .failed(Self.message(error)) }
+            if hosts[host, default: Host()].list.shown == nil { hosts[host, default: Host()].phase = Self.failure(error) }
         }
     }
 
@@ -136,6 +138,11 @@ final class BotsModel {
         guard read == hosts[host, default: Host()].issued[id] else { return }
         hosts[host, default: Host()].threads[id] = result
         if case .loaded = result { hosts[host, default: Host()].reads[id] = read }
+    }
+
+    private static func failure(_ error: Error) -> Phase {
+        if case SSHFailure.remoteToolNotFound = error { return .toolNotFound(SSHFailure.remoteToolNotFound.message) }
+        return .failed(message(error))
     }
 
     private static func message(_ error: Error) -> String {

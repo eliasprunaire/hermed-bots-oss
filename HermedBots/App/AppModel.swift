@@ -398,6 +398,9 @@ final class AppModel {
                 case .failed:
                     version = .unknown
                     apiError = String(localized: "Hermes ne répond pas. Vérifiez la liaison puis réessayez.")
+                case .toolNotFound(let message):
+                    version = .unknown
+                    apiError = message
                 }
             }
             return

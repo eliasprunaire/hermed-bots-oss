@@ -25,6 +25,8 @@ enum SSHFailure: Error, Equatable, Sendable {
     case noIdentity
     /// L'exécutable SSH a écrit `<nom>_failure=<code>` : son échec est nommé et ne se réessaie pas
     case wrapperFailure(name: String, code: String)
+    /// La commande distante a rendu 127 : `hermes` n'est pas dans le PATH du shell de connexion de l'hôte ; un nouvel essai ne le règle pas
+    case remoteToolNotFound
     case agentLockedOrEmpty(String)
     case certificateExpired(String)
     case wrongKey(String)
@@ -86,6 +88,7 @@ extension SSHFailure {
         case .missingWrapper: String(localized: "L'exécutable SSH configuré est introuvable. Vérifie le chemin dans Réglages.")
         case .noIdentity: String(localized: "Aucune identité SSH n'est disponible. Charge une clé dans l'agent ou indique une commande de clé dans Réglages, puis réessaie.")
         case .wrapperFailure(let name, let code): String(localized: "L'exécutable SSH a échoué : \(name) (code \(code)). Le tunnel reste fermé.")
+        case .remoteToolNotFound: String(localized: "Outil introuvable sur l'hôte : la commande hermes n'est pas dans le PATH du shell de connexion. Ajoute son dossier au profil de connexion de l'hôte, puis réessaie.")
         case .agentLockedOrEmpty: String(localized: "L'agent SSH est verrouillé ou vide. Déverrouille-le ou charge une identité, puis réessaie.")
         case .certificateExpired: String(localized: "Le certificat SSH a expiré. Renouvelle-le, puis réessaie.")
         case .wrongKey: String(localized: "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.")
@@ -105,6 +108,21 @@ enum SSHInvocation: CaseIterable, Sendable {
     case tunnel
     case profileList
     case profileLocks
+}
+
+/// La commande distante dans un shell de connexion
+/// Pour `ssh hôte commande`, sshd lance le shell du compte sans connexion : le PATH que le profil ajoute (dossier bin personnel) n'y est pas, et un outil installé là rend 127
+enum RemoteShell {
+    /// Un mot sûr reste lisible ; tout autre est entre apostrophes, l'apostrophe devenant `'\''`
+    static func quote(_ word: String) -> String {
+        if !word.isEmpty, word.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "_-./".contains($0)) }) { return word }
+        return "'" + word.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
+    }
+
+    /// L'unique argument que ssh envoie après l'alias : `sh -lc '<mots>'`, chaque mot cité deux fois (pour `sh -c`, puis pour le shell du compte)
+    static func loginCommand(_ words: [String]) -> String {
+        "sh -lc " + quote(words.map(quote).joined(separator: " "))
+    }
 }
 
 /// Là où le tunnel se connecte et ce qu'il redirige : un port local vers `127.0.0.1:remotePort` de l'hôte
@@ -156,7 +174,7 @@ struct SSHTunnelConfig: Equatable, Sendable {
     }
 
     static func apiKeyLaunchArguments(alias: String, profile: String) throws -> [String] {
-        common([]) + [alias] + HermesAPIKey.remoteCommand(profile: try HermesAPIKey.validate(profile))
+        common([]) + [alias, RemoteShell.loginCommand(HermesAPIKey.remoteCommand(profile: try HermesAPIKey.validate(profile)))]
     }
 
     /// Place `IdentityAgent` en tête des `-o` : ssh retient la première valeur, donc l'agent temporaire l'emporte
@@ -175,7 +193,7 @@ struct SSHTunnelConfig: Equatable, Sendable {
     static func arguments(_ invocation: SSHInvocation, alias: String, localPort: Int = 1, remotePort: Int = 8642) -> [String] {
         switch invocation {
         case .tunnel: common(["-N"]) + ["-L", "127.0.0.1:\(localPort):127.0.0.1:\(remotePort)", alias]
-        case .profileList: common([]) + [alias, "hermes", "profile", "list"]
+        case .profileList: common([]) + [alias, RemoteShell.loginCommand(["hermes", "profile", "list"])]
         case .profileLocks: common([]) + [alias, ProfileLock.command]
         }
     }
@@ -831,8 +849,9 @@ actor SystemSSHBackend: SSHBackend {
         } catch {
             throw SSHFailure.unreachable("ssh ne démarre pas")
         }
-        // 255 : ssh lui-même a échoué (identité refusée, hôte injoignable) ; tout autre code vient de la commande distante
+        // 255 : ssh lui-même a échoué (identité refusée, hôte injoignable) ; 127 : l'outil manque sur l'hôte ; tout autre code vient de la commande distante
         if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr, status: output.status) }
+        if output.status == 127 { throw SSHFailure.remoteToolNotFound }
         guard output.status == 0 else {
             throw RemoteCommandFailure(status: output.status, detail: output.stderr.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? "")
         }
@@ -864,6 +883,7 @@ actor SystemSSHBackend: SSHBackend {
             throw SSHFailure.unreachable("ssh ne démarre pas")
         }
         if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr, status: output.status) }
+        if output.status == 127 { throw SSHFailure.remoteToolNotFound }
         guard output.status == 0 else { return nil }
         return HermesAPIKey.parse(output.stdout)
     }

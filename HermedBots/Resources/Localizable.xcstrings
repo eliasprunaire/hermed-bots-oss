@@ -87,6 +87,11 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "This SSH alias is unknown." } }
       }
     },
+    "Outil introuvable sur l'hôte : la commande hermes n'est pas dans le PATH du shell de connexion. Ajoute son dossier au profil de connexion de l'hôte, puis réessaie." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Tool not found on the host: the hermes command is not in the login shell PATH. Add its directory to the host login profile, then try again." } }
+      }
+    },
     "ssh ne lit pas cette config SSH. L'alias est refusé." : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "ssh cannot read this SSH config. The alias is refused." } }

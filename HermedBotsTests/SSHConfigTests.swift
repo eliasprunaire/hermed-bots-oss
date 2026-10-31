@@ -472,8 +472,9 @@ final class SSHConfigTests: XCTestCase {
         let args = try SystemSSHConfigResolver.apiKeyArguments(alias: "lab.invalid", profile: "hv-bot-a")
         XCTAssertEqual(args.first, "-G")
         XCTAssertFalse(args.contains("-vv"))
-        XCTAssertEqual(Array(args.suffix(7)), ["hermes", "-p", "hv-bot-a", "config", "get", "API_SERVER_KEY", "--raw"])
-        XCTAssertEqual(try SystemSSHConfigResolver.apiKeyArguments(alias: "lab.invalid", profile: "hv-bot-b").suffix(7).contains("hv-bot-a"), false)
+        // la résolution reçoit la même commande distante que le lancement : une chaîne, le shell de connexion
+        XCTAssertEqual(Array(args.suffix(2)), ["lab.invalid", "sh -lc 'hermes -p hv-bot-a config get API_SERVER_KEY --raw'"])
+        XCTAssertEqual(try SystemSSHConfigResolver.apiKeyArguments(alias: "lab.invalid", profile: "hv-bot-b").last?.contains("hv-bot-a"), false)
     }
 
     func testAnAPIKeyDumpThatAddsARelayIsRefused() {
@@ -1086,7 +1087,7 @@ final class RealSshConfigTests: XCTestCase {
     func testAnAPIKeyMatchCommandThatAddsARelayIsRefused() async throws {
         try await skipUnlessMatchCommand()
         let config = """
-            Match command hermes*
+            Match command "sh -lc*"
               ProxyJump bastion.invalid
             Host lab.invalid
               User operator
@@ -1102,7 +1103,7 @@ final class RealSshConfigTests: XCTestCase {
     func testAnAPIKeyMatchCommandThatResolvesExampleHostIsRefused() async throws {
         try await skipUnlessMatchCommand()
         let config = """
-            Match command hermes*
+            Match command "sh -lc*"
               Hostname example-host.invalid
             Host lab.invalid
               User operator
@@ -1118,7 +1119,7 @@ final class RealSshConfigTests: XCTestCase {
     func testAnAPIKeyMatchCommandThatChangesTheTunnelDestinationIsRefused() async throws {
         try await skipUnlessMatchCommand()
         let config = """
-            Match command hermes*
+            Match command "sh -lc*"
               Hostname other.example.invalid
             Host lab.invalid
               User operator
@@ -1159,7 +1160,7 @@ final class RealSshConfigTests: XCTestCase {
     private func skipUnlessMatchCommand() async throws {
         let probe = try await apiKeyFailure(
             """
-            Match command hermes*
+            Match command "sh -lc*"
               User operator
               Hostname gateway.example.invalid
             """
