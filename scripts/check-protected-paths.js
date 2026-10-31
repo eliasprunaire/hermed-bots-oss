@@ -8,8 +8,10 @@ const PROTECTED_FILES = [".mcp.json"];
 const GATE_FILES = [
   ".github/workflows/verdict-gate.yml",
   ".github/workflows/protected-paths.yml",
+  ".github/workflows/anti-parallel.yml",
   "scripts/verdict-gate.js",
   "scripts/check-protected-paths.js",
+  "scripts/check-anti-parallel.js",
 ];
 const GATE_LABEL = "gate-change-approved";
 const GATE_VERIFIER_LOGIN = "app-pilote-verifier[bot]";
