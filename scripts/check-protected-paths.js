@@ -12,8 +12,12 @@ const GATE_FILES = [
   "scripts/verdict-gate.js",
   "scripts/check-protected-paths.js",
   "scripts/check-anti-parallel.js",
+  "scripts/verdict-prose.js",
 ];
 const GATE_LABEL = "gate-change-approved";
+const GATE_VERIFIER_LOGIN = "app-pilote-verifier[bot]";
+const VERDICT_CONTEXT = "verdict-gate";
+const HEX_SHA = /^[0-9a-fA-F]{40}$/;
 
 function posix(file) {
   return String(file).replace(/\\/g, "/").toLowerCase();
@@ -147,22 +151,6 @@ function readLogin(user) {
   return user.login;
 }
 
-function readType(user) {
-  if (user == null || typeof user !== "object" || typeof user.type !== "string") {
-    return null;
-  }
-  return user.type;
-}
-
-function isBot(user) {
-  const type = readType(user);
-  const login = readLogin(user);
-  if (type === "Bot") {
-    return true;
-  }
-  return typeof login === "string" && /\[bot\]$/i.test(login);
-}
-
 function labelName(raw) {
   if (raw == null || typeof raw !== "object") {
     return null;
@@ -173,13 +161,49 @@ function labelName(raw) {
   return raw.name;
 }
 
+function resolveHeadSha(head) {
+  const sha = git(["rev-parse", "--verify", `${head}^{commit}`]).toString("utf8").trim();
+  if (!HEX_SHA.test(sha)) {
+    throw new Error("head is not a commit");
+  }
+  return sha.toLowerCase();
+}
+
+function isoTimeMs(raw, key) {
+  if (raw == null || typeof raw !== "object") {
+    return null;
+  }
+  if (typeof raw[key] !== "string" || raw[key] === "") {
+    return null;
+  }
+  const ms = Date.parse(raw[key]);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function verdictGateStatus(payload) {
+  if (payload == null || typeof payload !== "object" || !Array.isArray(payload.statuses)) {
+    return null;
+  }
+  for (const status of payload.statuses) {
+    if (status == null || typeof status !== "object") {
+      continue;
+    }
+    if (status.context === VERDICT_CONTEXT) {
+      return status;
+    }
+  }
+  return null;
+}
+
 // latest labeled/unlabeled event for GATE_LABEL wins; presence of the label on the
-// pull payload is ignored
-function gateApprovalFromEvents(events, { ownerLogin, authorLogin }) {
+// pull payload is ignored. verdict-gate must be success on this head; the label
+// created_at must be strictly after that status updated_at (never a commit date).
+function gateApprovalFromEvents(events, { verdict } = {}) {
   if (!Array.isArray(events)) {
     return { ok: false, reason: "unreadable-events" };
   }
   let actor = null;
+  let labeledAt = null;
   for (const event of events) {
     if (event == null || typeof event !== "object") {
       continue;
@@ -189,30 +213,25 @@ function gateApprovalFromEvents(events, { ownerLogin, authorLogin }) {
     }
     if (event.event === "labeled") {
       actor = event.actor;
+      labeledAt = isoTimeMs(event, "created_at");
     } else if (event.event === "unlabeled") {
       actor = null;
+      labeledAt = null;
     }
   }
   if (actor == null) {
     return { ok: false, reason: "no-label" };
   }
-  if (isBot(actor)) {
-    return { ok: false, reason: "bot" };
-  }
   const actorLogin = foldLogin(readLogin(actor));
-  if (actorLogin == null) {
-    return { ok: false, reason: "no-actor" };
+  if (actorLogin !== GATE_VERIFIER_LOGIN) {
+    return { ok: false, reason: "not-verifier" };
   }
-  if (readType(actor) !== "User") {
-    return { ok: false, reason: "not-user" };
+  if (verdict == null || verdict.state !== "success") {
+    return { ok: false, reason: "no-verdict-gate" };
   }
-  const author = foldLogin(authorLogin);
-  if (author != null && actorLogin === author) {
-    return { ok: false, reason: "author" };
-  }
-  const owner = foldLogin(ownerLogin);
-  if (owner == null || actorLogin !== owner) {
-    return { ok: false, reason: "not-owner" };
+  const greenAt = isoTimeMs(verdict, "updated_at") ?? isoTimeMs(verdict, "created_at");
+  if (labeledAt == null || greenAt == null || labeledAt <= greenAt) {
+    return { ok: false, reason: "stale-label" };
   }
   return { ok: true, login: actorLogin };
 }
@@ -253,19 +272,36 @@ async function githubGet(io, token, url) {
   throw new Error("GET failed");
 }
 
-async function loadEvents(io, token, owner, repo, number) {
-  const events = [];
-  let url = `https://api.github.com/repos/${owner}/${repo}/issues/${number}/events?per_page=100`;
+async function loadPages(io, token, startUrl) {
+  const items = [];
+  let url = startUrl;
   while (url) {
     const response = await githubGet(io, token, url);
     const page = await response.json();
     if (!Array.isArray(page)) {
-      throw new Error("event page is unreadable");
+      throw new Error("page is unreadable");
     }
-    events.push(...page);
+    items.push(...page);
     url = nextUrl(response.headers.get("link"));
   }
-  return events;
+  return items;
+}
+
+async function loadEvents(io, token, owner, repo, number) {
+  return loadPages(
+    io,
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/issues/${number}/timeline?per_page=100`,
+  );
+}
+
+async function loadCommitStatus(io, token, owner, repo, sha) {
+  const response = await githubGet(
+    io,
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/commits/${sha}/status`,
+  );
+  return response.json();
 }
 
 function repositoryParts(repository) {
@@ -282,33 +318,20 @@ function repositoryParts(repository) {
 function writeHits(kind, hits) {
   const label =
     kind === "gate"
-      ? `protected gate files changed (${GATE_FILES.join(", ")}). owner User label ${GATE_LABEL} required`
+      ? `protected gate files changed (${GATE_FILES.join(", ")}). ${GATE_VERIFIER_LOGIN} label ${GATE_LABEL} after verdict-gate success on head required`
       : "protected agent config changed (.claude/, .codex/, .mcp.json, or a symlink or submodule at them)";
   process.stderr.write(
     `${label}:\n${hits.map((hit) => `  ${hit}`).join("\n")}\n`,
   );
 }
 
-async function ownerApproval(io) {
+async function ownerApproval(io, headSha) {
   const token = io.env.GITHUB_TOKEN;
   const repository = io.env.GITHUB_REPOSITORY;
   const number = io.env.PR_NUMBER;
-  const authorLogin = io.env.PR_AUTHOR_LOGIN;
   const names = repositoryParts(repository);
   if (!token || names == null || !number) {
     return { ok: false, reason: "missing-context" };
-  }
-  const repoUrl = `https://api.github.com/repos/${names.owner}/${names.repo}`;
-  let ownerLogin = names.owner;
-  try {
-    const repoResponse = await githubGet(io, token, repoUrl);
-    const repo = await repoResponse.json();
-    const login = readLogin(repo && repo.owner);
-    if (login) {
-      ownerLogin = login;
-    }
-  } catch {
-    return { ok: false, reason: "unreadable-repo" };
   }
   let events;
   try {
@@ -316,7 +339,13 @@ async function ownerApproval(io) {
   } catch {
     return { ok: false, reason: "unreadable-events" };
   }
-  return gateApprovalFromEvents(events, { ownerLogin, authorLogin });
+  let payload;
+  try {
+    payload = await loadCommitStatus(io, token, names.owner, names.repo, headSha);
+  } catch {
+    return { ok: false, reason: "unreadable-status" };
+  }
+  return gateApprovalFromEvents(events, { verdict: verdictGateStatus(payload) });
 }
 
 function collectHits(base, head) {
@@ -356,8 +385,10 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     return 1;
   }
   let grouped;
+  let headSha;
   try {
     grouped = collectHits(args.base, args.head);
+    headSha = resolveHeadSha(args.head);
   } catch (err) {
     process.stderr.write(`${err.message}\n`);
     return 1;
@@ -371,7 +402,7 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     process.stdout.write("ok\n");
     return 0;
   }
-  const approval = await ownerApproval(io);
+  const approval = await ownerApproval(io, headSha);
   if (approval.ok) {
     process.stdout.write("ok\n");
     return 0;

@@ -36,6 +36,7 @@ test("matches agent config and the gate files", () => {
     "sub/.mcp.json",
     "scripts/check-protected-paths.js",
     "scripts/verdict-gate.js",
+    "scripts/verdict-prose.js",
     ".github/workflows/verdict-gate.yml",
     ".github/workflows/protected-paths.yml",
     ".github/workflows/anti-parallel.yml",
@@ -50,6 +51,7 @@ test("matches agent config and the gate files", () => {
     ".Claude/settings.json",
     "scripts/check-protected-paths.js",
     "scripts/verdict-gate.js",
+    "scripts/verdict-prose.js",
     ".github/workflows/verdict-gate.yml",
     ".github/workflows/protected-paths.yml",
     ".github/workflows/anti-parallel.yml",
@@ -407,7 +409,7 @@ test("a pull that disables its own workflow and checker is still refused by the 
   assert.match(result.stderr, new RegExp(GATE_LABEL));
 });
 
-test("changing a gate file exits 1 without an owner label", () => {
+test("changing a gate file exits 1 without a verifier label", () => {
   for (const file of GATE_FILES) {
     const result = scenario({ [file]: "changed\n" });
     assert.equal(result.status, 1, file);
@@ -426,69 +428,70 @@ test("classifyHits splits agent config from gate files", () => {
   );
 });
 
+const VERIFIER = { login: "app-pilote-verifier[bot]", type: "Bot" };
 const OWNER = { login: "repo-owner", type: "User" };
 const AUTHOR = { login: "pr-author", type: "User" };
-const BOT = { login: "approver[bot]", type: "Bot" };
+const CURSOR_BOT = { login: "cursor[bot]", type: "Bot" };
+const GREEN_AT = "2026-10-31T11:00:00Z";
+const LABEL_AT = "2026-10-31T12:00:00Z";
 
-function labeled(actor) {
-  return { event: "labeled", label: { name: GATE_LABEL }, actor };
+function labeled(actor, createdAt = LABEL_AT) {
+  return { event: "labeled", label: { name: GATE_LABEL }, actor, created_at: createdAt };
 }
 
-test("gate-change-approved counts only when the owner User applied it", () => {
-  assert.deepEqual(
-    gateApprovalFromEvents([labeled(OWNER)], {
-      ownerLogin: "repo-owner",
-      authorLogin: "pr-author",
-    }),
-    { ok: true, login: "repo-owner" },
-  );
+function greenVerdict(updatedAt = GREEN_AT) {
+  return { context: "verdict-gate", state: "success", updated_at: updatedAt };
+}
+
+function withGreen(verdict = greenVerdict()) {
+  return { verdict };
+}
+
+test("gate-change-approved counts when the verifier labeled after verdict-gate success", () => {
+  assert.deepEqual(gateApprovalFromEvents([labeled(VERIFIER)], withGreen()), {
+    ok: true,
+    login: "app-pilote-verifier[bot]",
+  });
 });
 
 test("the label on the pull is ignored; only issue events count", () => {
-  const decision = gateApprovalFromEvents([], {
-    ownerLogin: "repo-owner",
-    authorLogin: "pr-author",
-    labels: [GATE_LABEL],
-  });
+  const decision = gateApprovalFromEvents([], { labels: [GATE_LABEL], ...withGreen() });
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "no-label");
 });
 
-test("a label from the pull author or a bot is refused", () => {
-  assert.equal(
-    gateApprovalFromEvents([labeled(AUTHOR)], {
-      ownerLogin: "repo-owner",
-      authorLogin: "pr-author",
-    }).reason,
-    "author",
-  );
-  assert.equal(
-    gateApprovalFromEvents([labeled(BOT)], {
-      ownerLogin: "repo-owner",
-      authorLogin: "pr-author",
-    }).reason,
-    "bot",
-  );
-  assert.equal(
-    gateApprovalFromEvents([labeled({ login: "other", type: "User" })], {
-      ownerLogin: "repo-owner",
-      authorLogin: "pr-author",
-    }).reason,
-    "not-owner",
-  );
+test("a label from another actor is refused", () => {
+  assert.equal(gateApprovalFromEvents([labeled(OWNER)], withGreen()).reason, "not-verifier");
+  assert.equal(gateApprovalFromEvents([labeled(AUTHOR)], withGreen()).reason, "not-verifier");
+  assert.equal(gateApprovalFromEvents([labeled(CURSOR_BOT)], withGreen()).reason, "not-verifier");
 });
 
-test("unlabeling clears a previous owner approval", () => {
+test("a red or missing verdict-gate on the head is refused", () => {
+  assert.equal(
+    gateApprovalFromEvents([labeled(VERIFIER)], {
+      verdict: { context: "verdict-gate", state: "failure", updated_at: GREEN_AT },
+    }).reason,
+    "no-verdict-gate",
+  );
+  assert.equal(gateApprovalFromEvents([labeled(VERIFIER)], {}).reason, "no-verdict-gate");
+});
+
+test("unlabeling clears a previous verifier approval", () => {
   const decision = gateApprovalFromEvents(
-    [
-      labeled(OWNER),
-      { event: "unlabeled", label: { name: GATE_LABEL }, actor: OWNER },
-    ],
-    { ownerLogin: "repo-owner", authorLogin: "pr-author" },
+    [labeled(VERIFIER), { event: "unlabeled", label: { name: GATE_LABEL }, actor: VERIFIER }],
+    withGreen(),
   );
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "no-label");
 });
+
+test("a label applied before verdict-gate turns green is refused", () => {
+  assert.equal(
+    gateApprovalFromEvents([labeled(VERIFIER, "2026-10-31T10:00:00Z")], withGreen()).reason,
+    "stale-label",
+  );
+});
+
 
 function jsonResponse(body, link) {
   return {
@@ -530,53 +533,153 @@ async function withGateHead(run) {
   }
 }
 
-test("an owner labeled event allows a gate file change", async () => {
+const TIMELINE_URL = "https://api.github.com/repos/acme/app/issues/7/timeline?per_page=100";
+
+function statusUrl(sha) {
+  return `https://api.github.com/repos/acme/app/commits/${sha}/status`;
+}
+
+function gateFetch(events, sha, statuses) {
+  return async (url) => {
+    if (url === TIMELINE_URL) {
+      return jsonResponse(events);
+    }
+    if (url === statusUrl(sha)) {
+      return jsonResponse({ statuses });
+    }
+    throw new Error(`unexpected GET ${url}`);
+  };
+}
+
+const gateEnv = {
+  GITHUB_TOKEN: "test-token",
+  GITHUB_REPOSITORY: "acme/app",
+  PR_NUMBER: "7",
+  PR_AUTHOR_LOGIN: "pr-author",
+};
+
+test("a verifier label after verdict-gate success allows a gate file change", async () => {
   await withGateHead(async (base, head) => {
     const code = await main(["--base", base, "--head", head], {
-      env: {
-        GITHUB_TOKEN: "test-token",
-        GITHUB_REPOSITORY: "acme/app",
-        PR_NUMBER: "7",
-        PR_AUTHOR_LOGIN: "pr-author",
-      },
-      fetch: async (url) => {
-        if (url === "https://api.github.com/repos/acme/app") {
-          return jsonResponse({ owner: OWNER });
-        }
-        if (url === "https://api.github.com/repos/acme/app/issues/7/events?per_page=100") {
-          return jsonResponse([labeled(OWNER)]);
-        }
-        throw new Error(`unexpected GET ${url}`);
-      },
+      env: gateEnv,
+      fetch: gateFetch([labeled(VERIFIER)], head, [greenVerdict()]),
     });
     assert.equal(code, 0);
   });
 });
 
-test("a gate change stays blocked when the author applied the label", async () => {
+test("a gate change stays blocked when another actor applied the label", async () => {
   await withGateHead(async (base, head) => {
     const code = await main(["--base", base, "--head", head], {
-      env: {
-        GITHUB_TOKEN: "test-token",
-        GITHUB_REPOSITORY: "acme/app",
-        PR_NUMBER: "7",
-        PR_AUTHOR_LOGIN: "pr-author",
-      },
-      fetch: async (url) => {
-        if (url === "https://api.github.com/repos/acme/app") {
-          return jsonResponse({ owner: OWNER });
-        }
-        if (url === "https://api.github.com/repos/acme/app/issues/7/events?per_page=100") {
-          return jsonResponse([labeled(AUTHOR)]);
-        }
-        throw new Error(`unexpected GET ${url}`);
-      },
+      env: gateEnv,
+      fetch: gateFetch([labeled(AUTHOR)], head, [greenVerdict()]),
     });
     assert.equal(code, 1);
   });
 });
 
-test("an owner label does not waive an agent-config change", () => {
+test("a commit pushed after the label with an earlier commit date loses the approval", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "check-protected-paths-"));
+  const previous = process.cwd();
+  try {
+    git(dir, "init", "-q", "-b", "main");
+    git(dir, "config", "user.email", "t@example.test");
+    git(dir, "config", "user.name", "t");
+    git(dir, "config", "commit.gpgsign", "false");
+    put(dir, "README.md", "x\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "init");
+    const base = git(dir, "rev-parse", "HEAD");
+    put(dir, "scripts/verdict-gate.js", "changed\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "gate");
+    const shaA = git(dir, "rev-parse", "HEAD");
+    put(dir, "scripts/verdict-gate.js", "again\n");
+    git(dir, "add", "-A");
+    const dated = spawnSync(
+      "git",
+      ["-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "backdated"],
+      {
+        cwd: dir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GIT_AUTHOR_DATE: "2019-01-01T00:00:00Z",
+          GIT_COMMITTER_DATE: "2019-01-01T00:00:00Z",
+        },
+      },
+    );
+    assert.equal(dated.status, 0, dated.stderr);
+    const shaB = git(dir, "rev-parse", "HEAD");
+    assert.notEqual(shaA, shaB);
+    process.chdir(dir);
+    const code = await main(["--base", base, "--head", shaB], {
+      env: gateEnv,
+      fetch: async (url) => {
+        if (url === TIMELINE_URL) {
+          return jsonResponse([labeled(VERIFIER)]);
+        }
+        if (url === statusUrl(shaA)) {
+          return jsonResponse({ statuses: [greenVerdict()] });
+        }
+        if (url === statusUrl(shaB)) {
+          return jsonResponse({ statuses: [] });
+        }
+        throw new Error(`unexpected GET ${url}`);
+      },
+    });
+    assert.equal(code, 1);
+  } finally {
+    process.chdir(previous);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a label for an older head is refused after a new commit", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "check-protected-paths-"));
+  const previous = process.cwd();
+  try {
+    git(dir, "init", "-q", "-b", "main");
+    git(dir, "config", "user.email", "t@example.test");
+    git(dir, "config", "user.name", "t");
+    git(dir, "config", "commit.gpgsign", "false");
+    put(dir, "README.md", "x\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "init");
+    const base = git(dir, "rev-parse", "HEAD");
+    put(dir, "scripts/verdict-gate.js", "changed\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "gate");
+    const shaA = git(dir, "rev-parse", "HEAD");
+    put(dir, "scripts/verdict-gate.js", "again\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "next");
+    const shaB = git(dir, "rev-parse", "HEAD");
+    assert.notEqual(shaA, shaB);
+    process.chdir(dir);
+    const code = await main(["--base", base, "--head", shaB], {
+      env: gateEnv,
+      fetch: async (url) => {
+        if (url === TIMELINE_URL) {
+          return jsonResponse([labeled(VERIFIER)]);
+        }
+        if (url === statusUrl(shaA)) {
+          return jsonResponse({ statuses: [greenVerdict()] });
+        }
+        if (url === statusUrl(shaB)) {
+          return jsonResponse({ statuses: [] });
+        }
+        throw new Error(`unexpected GET ${url}`);
+      },
+    });
+    assert.equal(code, 1);
+  } finally {
+    process.chdir(previous);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a verifier label does not waive an agent-config change", () => {
   const result = scenario({ ".mcp.json": "{}\n" });
   assert.equal(result.status, 1);
   assert.match(result.stderr, /\.mcp\.json/);
