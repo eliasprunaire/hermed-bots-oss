@@ -33,14 +33,28 @@ final class SSHConfigTests: XCTestCase {
         proxycommand none
         """
 
-    private func parse(_ dump: String, alias: String, existing: Set<String> = [], authSock: String? = nil) -> SSHConnectionPreview {
+    private func parse(
+        _ dump: String,
+        alias: String,
+        existing: Set<String> = [],
+        authSock: String? = nil,
+        environment: [String: String] = SSHChildEnvironment.make(),
+        localHost: String = "box.example.invalid"
+    ) -> SSHConnectionPreview {
         SSHConfig.parse(
             dump,
             alias: alias,
             localUser: localUser,
             filesExist: { existing.contains($0) },
-            authSock: authSock
+            authSock: authSock,
+            environment: environment,
+            localHost: localHost
         )
+    }
+
+    /// Sortie de `ssh -G` où les valeurs gardent leurs jetons et leurs `${VAR}` : alias `lab.invalid`, utilisateur distant `deploy`, utilisateur local `operator`
+    private func tokenDump(_ lines: String) -> String {
+        "user deploy\nhostname gateway.invalid\nport 2222\nproxyjump none\n" + lines
     }
 
     func testAnIncludedHostBlockResolvesEveryFieldWithoutSecrets() {
@@ -211,6 +225,115 @@ final class SSHConfigTests: XCTestCase {
             XCTAssertFalse(custom.identityPresent, "\(value) : seule la socket existe, et l'agent est désactivé")
             XCTAssertNoThrow(try SSHConnectionPlanner.config(from: custom, refuseTestHost: true), value)
         }
+    }
+
+    func testIdentityFileTokensAndEnvironmentVariablesAreExpandedLikeOpenSSH() {
+        // ssh -G garde ces formes telles quelles ; ssh les développe au lancement (ssh_config(5), TOKENS)
+        let environment = ["HOME": "/srv/fixture-home", "KEYDIR": "/srv/keys"]
+        let home = NSHomeDirectory()
+        let expectations: [(written: String, extra: String, expected: String)] = [
+            ("%d/.ssh/id_%u", "", home + "/.ssh/id_operator"),
+            ("${HOME}/.ssh/id_ed25519", "", "/srv/fixture-home/.ssh/id_ed25519"),
+            ("${KEYDIR}/%r@%h:%p", "", "/srv/keys/deploy@gateway.invalid:2222"),
+            ("/keys/%n", "", "/keys/lab.invalid"),
+            ("/keys/%k", "", "/keys/lab.invalid"),
+            ("/keys/%k", "hostkeyalias vault\n", "/keys/vault"),
+            ("/keys/%i", "", "/keys/\(getuid())"),
+            ("/keys/%L", "", "/keys/box"),
+            ("/keys/%l", "", "/keys/box.example.invalid"),
+            ("/keys/%j", "", "/keys/"),
+            ("/keys/%C", "", "/keys/6f6e7c15749db066dad594b2b6242c5659d1f1b7"),
+            ("/keys/100%%", "", "/keys/100%"),
+            ("~/.ssh/id_%r", "", home + "/.ssh/id_deploy"),
+            ("/keys/$HOME", "", "/keys/$HOME"),
+        ]
+        for item in expectations {
+            let dump = tokenDump(item.extra + "identityfile \(item.written)\n")
+            let file = parse(dump, alias: "lab.invalid", existing: [item.expected], environment: environment)
+            XCTAssertTrue(file.identityPresent, item.written)
+            XCTAssertTrue(file.anySessionIdentityPresent, item.written)
+            // seule la clé publique existe : même règle que pour un chemin sans jeton
+            let publicOnly = parse(dump, alias: "lab.invalid", existing: [item.expected + ".pub"], environment: environment)
+            XCTAssertTrue(publicOnly.identityPresent, item.written)
+            // le chemin non développé ne compte pas
+            let raw = parse(dump, alias: "lab.invalid", existing: item.written == item.expected ? [] : [item.written], environment: environment)
+            XCTAssertFalse(raw.identityPresent, item.written)
+        }
+        let jump = parse(
+            "user deploy\nhostname gateway.invalid\nport 2222\nproxyjump bastion.invalid\nidentityfile /keys/%C\n",
+            alias: "lab.invalid",
+            existing: ["/keys/eec4be68477c6816847711112911f2676d5b3024"],
+            environment: environment
+        )
+        XCTAssertTrue(jump.identityPresent, "%C et %j suivent la valeur de ProxyJump")
+    }
+
+    func testAnIdentityFileThatSSHCannotExpandIsNotAnIdentity() {
+        // ssh ignore le réglage d'un chemin qu'il ne sait pas développer : variable absente, jeton inconnu, % ou ${ isolés
+        for written in ["${NOPE}/id", "/keys/%f", "/keys/%", "/keys/%q", "${HOME/id", "${1BAD}/id", "${}/id"] {
+            let preview = SSHConfig.parse(
+                tokenDump("identityfile \(written)\n"),
+                alias: "lab.invalid",
+                localUser: localUser,
+                filesExist: { _ in true },
+                environment: ["HOME": "/srv/fixture-home"],
+                localHost: "box.example.invalid"
+            )
+            XCTAssertFalse(preview.identityPresent, written)
+            XCTAssertFalse(preview.anySessionIdentityPresent, written)
+        }
+    }
+
+    func testCertificateFileTokensAreExpandedLikeIdentityFile() {
+        let preview = parse(
+            tokenDump("certificatefile %d/.ssh/cert_%r.pub\nidentityfile /tmp/fake-id.invalid\n"),
+            alias: "lab.invalid",
+            existing: [NSHomeDirectory() + "/.ssh/cert_deploy.pub"]
+        )
+        XCTAssertEqual(preview.identity, .certificate)
+        XCTAssertTrue(preview.identityPresent)
+    }
+
+    func testAnIdentityAgentWrittenWithATokenOrAVariableIsExpandedBeforeTheSocketIsTested() {
+        let environment = ["HOME": "/srv/fixture-home", "AGENT_SOCK": "/run/agent.sock"]
+        let cases: [(written: String, expected: String)] = [
+            ("%d/.run/agent.sock", NSHomeDirectory() + "/.run/agent.sock"),
+            ("${HOME}/.run/agent.sock", "/srv/fixture-home/.run/agent.sock"),
+            ("/run/user/%i/agent.sock", "/run/user/\(getuid())/agent.sock"),
+            ("$AGENT_SOCK", "/run/agent.sock"),
+            ("${AGENT_SOCK}", "/run/agent.sock"),
+        ]
+        for item in cases {
+            let preview = parse(
+                tokenDump("identityagent \(item.written)\n"),
+                alias: "lab.invalid",
+                existing: [item.expected],
+                environment: environment
+            )
+            XCTAssertEqual(preview.identity, .agent, item.written)
+            XCTAssertTrue(preview.identityPresent, item.written)
+        }
+        // une variable absente de l'environnement de ssh n'est pas un chemin nommé comme elle
+        let absent = SSHConfig.parse(
+            tokenDump("identityagent $NOPE\n"),
+            alias: "lab.invalid",
+            localUser: localUser,
+            filesExist: { _ in true },
+            environment: environment,
+            localHost: "box.example.invalid"
+        )
+        XCTAssertFalse(absent.identityPresent)
+    }
+
+    func testAnIdentityAgentVariableIsReadFromTheEnvironmentSSHReceives() {
+        // l'environnement de ssh est celui de SSHChildEnvironment : PATH vaut toujours /usr/bin:/bin, quelle que soit la session de l'app
+        let preview = SSHConfig.parse(
+            tokenDump("identityagent $PATH\n"),
+            alias: "lab.invalid",
+            localUser: localUser,
+            filesExist: { $0 == "/usr/bin:/bin" }
+        )
+        XCTAssertTrue(preview.identityPresent)
     }
 
     func testAnyProxyJumpOrProxyCommandIsRefusedInEveryMode() {
@@ -560,6 +683,34 @@ final class SSHConnectorTests: XCTestCase {
             )
             XCTAssertEqual(result.refused, [], value)
             XCTAssertEqual(result.opened, ["lab.invalid"], value)
+        }
+    }
+
+    func testAnIdentityFileWrittenWithATokenCountsWhenTheFileExists() async throws {
+        // ssh -G garde `IdentityFile %d/.ssh/id_%u` tel quel : ssh développe les jetons, la garde doit faire de même
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hb-id-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        for name in ["id_operator", "cert_operator"] {
+            try Data().write(to: directory.appendingPathComponent(name))
+        }
+        // %u = utilisateur local (operator), %r = utilisateur distant (operator dans ce dump), %n = alias
+        for written in ["id_%u", "id_%r"] {
+            let result = await outcome(of: dump(identityFile: directory.path + "/" + written, extra: "identityagent none\n"), authMode: .sessionAgent)
+            XCTAssertEqual(result.refused, [], written)
+            XCTAssertEqual(result.opened, ["lab.invalid"], written)
+        }
+        let certificate = await outcome(
+            of: dump(identityFile: missingIdentityFile, extra: "identityagent none\ncertificatefile \(directory.path)/cert_%u\n"),
+            authMode: .sessionAgent
+        )
+        XCTAssertEqual(certificate.refused, [])
+        XCTAssertEqual(certificate.opened, ["lab.invalid"])
+        // un jeton inconnu ou un fichier développé qui manque : refus
+        for written in ["id_%f", "id_%n", "${HB_NO_SUCH_VARIABLE}/id_operator"] {
+            let result = await outcome(of: dump(identityFile: directory.path + "/" + written, extra: "identityagent none\n"), authMode: .sessionAgent)
+            XCTAssertEqual(result.refused, [.noIdentity], written)
+            XCTAssertEqual(result.opened, [], written)
         }
     }
 
