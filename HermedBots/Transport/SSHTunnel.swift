@@ -9,7 +9,7 @@ import os
 
 /// Pourquoi le tunnel ne s'ouvre pas ou s'est fermé
 /// Seul `unreachable` donne lieu à une réouverture : une clé refusée ou un hôte changé ne se règle pas en réessayant
-/// Les cas à détail de texte gardent les dernières lignes de la sortie d'erreur de ssh, que `message` affiche
+/// Une cause connue garde un texte fixe, sans la sortie brute de ssh ; seul `unreachable` (cause inconnue) montre les dernières lignes de sa sortie d'erreur
 enum SSHFailure: Error, Equatable, Sendable {
     case forbiddenHost
     case relayRefused
@@ -37,16 +37,15 @@ enum SSHFailure: Error, Equatable, Sendable {
     }
 
     static func classify(stderr: String, status: Int32 = 255) -> SSHFailure {
-        let detail = Self.detail(of: stderr)
         switch SSHExitClassification.kind(stderr: stderr, status: status) {
         case .agentUnavailable: return .missingAgent
         case .missingKey: return .missingKey
-        case .agentEmpty: return .agentLockedOrEmpty(detail)
-        case .certificateExpired: return .certificateExpired(detail)
-        case .authRefused: return .wrongKey(detail)
-        case .hostKeyChanged: return .hostKeyChanged(detail)
+        case .agentEmpty: return .agentLockedOrEmpty("")
+        case .certificateExpired: return .certificateExpired("")
+        case .authRefused: return .wrongKey("")
+        case .hostKeyChanged: return .hostKeyChanged("")
         case .tunnelClosed: return .tunnelClosed
-        case .hostUnreachable: return .unreachable(detail)
+        case .hostUnreachable: return .unreachable(Self.detail(of: stderr))
         case .wrapperFailure:
             let found = SSHExitClassification.wrapperFailure(stderr: stderr)
             return .wrapperFailure(name: found?.name ?? "", code: found?.code ?? "")
@@ -67,17 +66,10 @@ enum SSHFailure: Error, Equatable, Sendable {
 }
 
 extension SSHFailure {
-    /// Le texte de la cause, puis le détail de ssh quand il existe
+    /// Le texte de la cause, puis, pour une cause inconnue, le détail repris de ssh
     var message: String {
-        guard let detail, !detail.isEmpty else { return summary }
+        guard case .unreachable(let detail) = self, !detail.isEmpty else { return summary }
         return summary + "\n" + detail
-    }
-
-    private var detail: String? {
-        switch self {
-        case .agentLockedOrEmpty(let text), .certificateExpired(let text), .wrongKey(let text), .hostKeyChanged(let text), .unreachable(let text): text
-        default: nil
-        }
     }
 
     private var summary: String {

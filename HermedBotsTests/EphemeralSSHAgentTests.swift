@@ -92,7 +92,7 @@ final class EphemeralSSHAgentTests: XCTestCase {
 
     func testAMissingAgentIsNamedInsteadOfPublickey() {
         XCTAssertEqual(SSHFailure.classify(stderr: "Error connecting to agent: No such file or directory", status: 255), .missingAgent)
-        XCTAssertEqual(SSHFailure.classify(stderr: "user@example.invalid: Permission denied (publickey).", status: 255), .wrongKey("user@example.invalid: Permission denied (publickey)."))
+        XCTAssertEqual(SSHFailure.classify(stderr: "user@example.invalid: Permission denied (publickey).", status: 255), .wrongKey(""))
         XCTAssertEqual(SSHFailure.missingAgent.message, "L'agent SSH est absent. Démarre l'agent, puis réessaie.")
     }
 
@@ -232,7 +232,7 @@ final class EphemeralSSHAgentTests: XCTestCase {
         XCTAssertTrue(failed, "\(tunnel.state)")
         guard case .failed(let failure) = tunnel.state else { return }
         XCTAssertFalse(failure.retries)
-        XCTAssertEqual(failure, .wrongKey("user@example.invalid: Permission denied (publickey)."))
+        XCTAssertEqual(failure, .wrongKey(""))
         let agentGone = await Self.gone(pid!)
         XCTAssertTrue(agentGone)
         let after = try await Spawn.run(
