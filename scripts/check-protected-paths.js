@@ -157,20 +157,35 @@ function labelName(raw) {
   return raw.name;
 }
 
+function nestedDate(person) {
+  if (person == null || typeof person !== "object") {
+    return null;
+  }
+  if (typeof person.date !== "string" || person.date === "") {
+    return null;
+  }
+  return person.date;
+}
+
 function eventTimeMs(event) {
   if (event == null || typeof event !== "object") {
     return null;
   }
-  if (typeof event.created_at !== "string" || event.created_at === "") {
+  const raw =
+    (typeof event.created_at === "string" && event.created_at !== "" && event.created_at) ||
+    nestedDate(event.committer) ||
+    nestedDate(event.author);
+  if (raw == null) {
     return null;
   }
-  const ms = Date.parse(event.created_at);
+  const ms = Date.parse(raw);
   return Number.isFinite(ms) ? ms : null;
 }
 
 // latest labeled/unlabeled event for GATE_LABEL wins; presence of the label on the
 // pull payload is ignored. stale-label: labeled.created_at must be strictly after
-// the latest committed or head_ref_force_pushed created_at in the issue timeline.
+// the latest head_ref_force_pushed.created_at or committed.committer.date (timeline
+// committed events have no created_at).
 function gateApprovalFromEvents(events) {
   if (!Array.isArray(events)) {
     return { ok: false, reason: "unreadable-events" };

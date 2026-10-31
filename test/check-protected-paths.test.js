@@ -430,7 +430,7 @@ const HEAD_AT = "2026-10-31T11:00:00Z";
 const LABEL_AT = "2026-10-31T12:00:00Z";
 
 function committed(createdAt) {
-  return { event: "committed", created_at: createdAt };
+  return { event: "committed", committer: { date: createdAt } };
 }
 
 function labeled(actor, createdAt = LABEL_AT) {
