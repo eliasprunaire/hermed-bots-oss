@@ -271,7 +271,6 @@ enum SSHConfig {
         }
     }
 
-    /// `ssh -G` peut laisser `IdentityAgent` sous `$SSH_AUTH_SOCK` ou `${VAR}` : ssh lit la variable, pas un chemin.
     private static func resolvedIdentityAgentPath(_ value: String, authSock: String?) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if let name = identityAgentEnvironmentName(trimmed) {
