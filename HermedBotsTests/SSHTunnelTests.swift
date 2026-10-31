@@ -349,13 +349,23 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertFalse(result.stdout.contains("SECRETMATERIAL"))
     }
 
-    func testStdoutIsCapturedInFullWhileStderrKeepsOnlyItsStart() async throws {
+    func testStdoutIsCapturedInFullWhileStderrKeepsOnlyItsEnd() async throws {
         // 16 Kio sur chaque sortie : la table de `hermes profile list` de 40 profils fait plus de 14 Kio et ne doit jamais être coupée
-        let script = "dd if=/dev/zero bs=1024 count=16 2>/dev/null | tr '\\0' x; dd if=/dev/zero bs=1024 count=16 2>/dev/null | tr '\\0' e >&2"
+        let script = "dd if=/dev/zero bs=1024 count=16 2>/dev/null | tr '\\0' x; dd if=/dev/zero bs=1024 count=16 2>/dev/null | tr '\\0' e >&2; echo fin >&2"
         let result = try await Spawn.run("/bin/sh", ["-c", script], environment: ["PATH": "/usr/bin:/bin"], timeout: .seconds(10))
         XCTAssertEqual(result.status, 0)
         XCTAssertEqual(result.stdout.utf8.count, 16 * 1024)
         XCTAssertEqual(result.stderr.utf8.count, 8192)
+        XCTAssertTrue(result.stderr.hasSuffix("efin\n"), "la fin de la sortie d'erreur est gardée, pas son début")
+    }
+
+    func testTheLastStderrLinesSurviveMoreThanTheBufferOfNoise() async throws {
+        // 9 000 octets de bruit avant la ligne utile : le tampon (8 192 octets) ne garde que la fin
+        let noise = "dd if=/dev/zero bs=1000 count=9 2>/dev/null | tr '\\0' x >&2; echo >&2"
+        let wrapper = try await Spawn.run("/bin/sh", ["-c", noise + "; echo gate-wrapper_failure=17 >&2"], environment: ["PATH": "/usr/bin:/bin"], timeout: .seconds(10))
+        XCTAssertEqual(SSHFailure.classify(stderr: wrapper.stderr, status: 255), .wrapperFailure(name: "gate-wrapper", code: "17"))
+        let refused = try await Spawn.run("/bin/sh", ["-c", noise + "; echo 'ssh: connect to host gateway.invalid port 22: Connection refused' >&2"], environment: ["PATH": "/usr/bin:/bin"], timeout: .seconds(10))
+        XCTAssertTrue(SSHFailure.classify(stderr: refused.stderr, status: 255).message.hasSuffix("port 22: Connection refused"))
     }
 }
 

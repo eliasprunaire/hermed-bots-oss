@@ -238,7 +238,7 @@ enum SSHChildEnvironment {
 
 // MARK: - Processus enfants
 
-/// Un processus lancé par `posix_spawn`, avec la sortie d'erreur gardée en mémoire (8 Kio au plus) et la sortie standard gardée en entier
+/// Un processus lancé par `posix_spawn`, avec la fin de la sortie d'erreur gardée en mémoire (8 Kio au plus) et la sortie standard gardée en entier
 final class Child: Sendable {
     let pid: pid_t
     /// le groupe de processus auquel il appartient ; un signal envoyé au groupe atteint toute sa descendance
@@ -424,9 +424,10 @@ enum Spawn {
         }
     }
 
-    /// Lit `fd` jusqu'à sa fermeture et garde les `limit` premiers octets
+    /// Lit `fd` jusqu'à sa fermeture et garde les `limit` derniers octets
     /// La sortie standard n'a pas de plafond : un plafond couperait en silence une table de profils et inventerait un profil
     /// Elle est bornée par le délai de `run` ; la sortie d'erreur ne sert qu'à un message, donc 8 Kio suffisent
+    /// La cause d'un échec (`<nom>_failure=<code>`, dernières lignes de ssh) est à la fin de la sortie d'erreur, pas au début
     fileprivate static func drain(_ fd: Int32, into buffer: OSAllocatedUnfairLock<Data>, limit: Int) {
         defer { close(fd) }
         var chunk = [UInt8](repeating: 0, count: 2048)
@@ -434,9 +435,12 @@ enum Spawn {
             let count = read(fd, &chunk, chunk.count)
             if count < 0, errno == EINTR { continue }
             if count <= 0 { return }
-            // la fin de la sortie est lue jusqu'au bout pour ne pas bloquer le processus, mais seul le début est gardé
+            // le début de la sortie est lu jusqu'au bout pour ne pas bloquer le processus, mais seule la fin est gardée
             let received = Array(chunk[0..<count])
-            buffer.withLock { if $0.count < limit { $0.append(contentsOf: received.prefix(limit - $0.count)) } }
+            buffer.withLock {
+                $0.append(contentsOf: received)
+                if $0.count > limit { $0.removeFirst($0.count - limit) }
+            }
         }
     }
 }
