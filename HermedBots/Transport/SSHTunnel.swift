@@ -9,6 +9,7 @@ import os
 
 /// Pourquoi le tunnel ne s'ouvre pas ou s'est fermé
 /// Seul `unreachable` donne lieu à une réouverture : une clé refusée ou un hôte changé ne se règle pas en réessayant
+/// Une cause connue garde un texte fixe, sans la sortie brute de ssh ; seul `unreachable` (cause inconnue) montre les dernières lignes de sa sortie d'erreur
 enum SSHFailure: Error, Equatable, Sendable {
     case forbiddenHost
     case relayRefused
@@ -20,6 +21,10 @@ enum SSHFailure: Error, Equatable, Sendable {
     case missingAgent
     case missingKey
     case missingWrapper
+    /// Aucune identité à présenter : refusé avant tout lancement de ssh, sauf en mode Exécutable
+    case noIdentity
+    /// L'exécutable SSH a écrit `<nom>_failure=<code>` : son échec est nommé et ne se réessaie pas
+    case wrapperFailure(name: String, code: String)
     case agentLockedOrEmpty(String)
     case certificateExpired(String)
     case wrongKey(String)
@@ -40,13 +45,34 @@ enum SSHFailure: Error, Equatable, Sendable {
         case .authRefused: return .wrongKey("")
         case .hostKeyChanged: return .hostKeyChanged("")
         case .tunnelClosed: return .tunnelClosed
-        case .hostUnreachable: return .unreachable("")
+        case .hostUnreachable: return .unreachable(Self.detail(of: stderr))
+        case .wrapperFailure:
+            let found = SSHExitClassification.wrapperFailure(stderr: stderr)
+            return .wrapperFailure(name: found?.name ?? "", code: found?.code ?? "")
         }
+    }
+
+    static let detailLines = 3
+    static let detailLimit = 400
+
+    /// Les dernières lignes de la sortie d'erreur, sans caractère de contrôle et bornées : c'est ce que l'utilisateur voit de la cause
+    static func detail(of stderr: String) -> String {
+        let lines = stderr.split(whereSeparator: \.isNewline)
+            .map { String($0.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }).trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let text = lines.suffix(detailLines).joined(separator: "\n")
+        return text.count > detailLimit ? "…" + text.suffix(detailLimit - 1) : text
     }
 }
 
 extension SSHFailure {
+    /// Le texte de la cause, puis, pour une cause inconnue, le détail repris de ssh
     var message: String {
+        guard case .unreachable(let detail) = self, !detail.isEmpty else { return summary }
+        return summary + "\n" + detail
+    }
+
+    private var summary: String {
         switch self {
         case .forbiddenHost: String(localized: "Cet hôte est refusé en mode test.")
         case .relayRefused: String(localized: "Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte.")
@@ -58,6 +84,8 @@ extension SSHFailure {
         case .missingAgent: String(localized: "L'agent SSH est absent. Démarre l'agent, puis réessaie.")
         case .missingKey: String(localized: "La clé SSH n'est pas chargée dans l'agent. Charge une identité dans l'agent, puis réessaie.")
         case .missingWrapper: String(localized: "L'exécutable SSH configuré est introuvable. Vérifie le chemin dans Réglages.")
+        case .noIdentity: String(localized: "Aucune identité SSH n'est disponible. Charge une clé dans l'agent ou indique une commande de clé dans Réglages, puis réessaie.")
+        case .wrapperFailure(let name, let code): String(localized: "L'exécutable SSH a échoué : \(name) (code \(code)). Le tunnel reste fermé.")
         case .agentLockedOrEmpty: String(localized: "L'agent SSH est verrouillé ou vide. Déverrouille-le ou charge une identité, puis réessaie.")
         case .certificateExpired: String(localized: "Le certificat SSH a expiré. Renouvelle-le, puis réessaie.")
         case .wrongKey: String(localized: "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.")
@@ -210,7 +238,7 @@ enum SSHChildEnvironment {
 
 // MARK: - Processus enfants
 
-/// Un processus lancé par `posix_spawn`, avec la sortie d'erreur gardée en mémoire (8 Kio au plus) et la sortie standard gardée en entier
+/// Un processus lancé par `posix_spawn`, avec la fin de la sortie d'erreur gardée en mémoire (8 Kio au plus) et la sortie standard gardée en entier
 final class Child: Sendable {
     let pid: pid_t
     /// le groupe de processus auquel il appartient ; un signal envoyé au groupe atteint toute sa descendance
@@ -396,9 +424,10 @@ enum Spawn {
         }
     }
 
-    /// Lit `fd` jusqu'à sa fermeture et garde les `limit` premiers octets
+    /// Lit `fd` jusqu'à sa fermeture et garde les `limit` derniers octets
     /// La sortie standard n'a pas de plafond : un plafond couperait en silence une table de profils et inventerait un profil
     /// Elle est bornée par le délai de `run` ; la sortie d'erreur ne sert qu'à un message, donc 8 Kio suffisent
+    /// La cause d'un échec (`<nom>_failure=<code>`, dernières lignes de ssh) est à la fin de la sortie d'erreur, pas au début
     fileprivate static func drain(_ fd: Int32, into buffer: OSAllocatedUnfairLock<Data>, limit: Int) {
         defer { close(fd) }
         var chunk = [UInt8](repeating: 0, count: 2048)
@@ -406,9 +435,12 @@ enum Spawn {
             let count = read(fd, &chunk, chunk.count)
             if count < 0, errno == EINTR { continue }
             if count <= 0 { return }
-            // la fin de la sortie est lue jusqu'au bout pour ne pas bloquer le processus, mais seul le début est gardé
+            // le début de la sortie est lu jusqu'au bout pour ne pas bloquer le processus, mais seule la fin est gardée
             let received = Array(chunk[0..<count])
-            buffer.withLock { if $0.count < limit { $0.append(contentsOf: received.prefix(limit - $0.count)) } }
+            buffer.withLock {
+                $0.append(contentsOf: received)
+                if $0.count > limit { $0.removeFirst($0.count - limit) }
+            }
         }
     }
 }
@@ -570,6 +602,10 @@ final class SSHTunnel {
         case failed(SSHFailure)
     }
 
+    /// Échecs consécutifs, depuis la dernière ouverture réussie, après lesquels le superviseur s'arrête sur la dernière erreur
+    /// La chute d'un tunnel ouvert compte pour le premier : après elle, cinq réouvertures ratées arrêtent la boucle
+    static let maxConsecutiveFailures = 6
+
     private(set) var state = State.idle
     private let delays: [Duration]
     private var generation = 0
@@ -629,13 +665,13 @@ final class SSHTunnel {
                 guard generation == id else { return }
                 failure = error as? SSHFailure ?? .unreachable("")
             }
-            guard failure.retries else {
+            failures += 1
+            guard failure.retries, failures < Self.maxConsecutiveFailures else {
                 state = .failed(failure)
                 await backend.close()
                 return
             }
-            let delay = delays[min(failures, delays.count - 1)]
-            failures += 1
+            let delay = delays[min(failures - 1, delays.count - 1)]
             attempt += 1
             try? await Task.sleep(for: delay)
         }
@@ -876,7 +912,7 @@ actor SystemSSHBackend: SSHBackend {
         let dump = try await resolver.dump(alias: alias, invocation: .tunnel)
         let preview = SSHConfig.parse(dump, alias: alias, localUser: localUser)
         guard let agent = preview.identityAgentValue, SSHLaunchIdentity.identityAgentIsExternal(agent) else {
-            throw SSHFailure.missingKey
+            throw SSHFailure.noIdentity
         }
         let path = resolvedIdentityAgentPath(agent)
         guard FileManager.default.fileExists(atPath: path) else { throw SSHFailure.missingAgent }

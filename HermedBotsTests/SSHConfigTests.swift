@@ -33,14 +33,28 @@ final class SSHConfigTests: XCTestCase {
         proxycommand none
         """
 
-    private func parse(_ dump: String, alias: String, existing: Set<String> = [], authSock: String? = nil) -> SSHConnectionPreview {
+    private func parse(
+        _ dump: String,
+        alias: String,
+        existing: Set<String> = [],
+        authSock: String? = nil,
+        environment: [String: String] = SSHChildEnvironment.make(),
+        localHost: String = "box.example.invalid"
+    ) -> SSHConnectionPreview {
         SSHConfig.parse(
             dump,
             alias: alias,
             localUser: localUser,
             filesExist: { existing.contains($0) },
-            authSock: authSock
+            authSock: authSock,
+            environment: environment,
+            localHost: localHost
         )
+    }
+
+    /// Sortie de `ssh -G` où les valeurs gardent leurs jetons et leurs `${VAR}` : alias `lab.invalid`, utilisateur distant `deploy`, utilisateur local `operator`
+    private func tokenDump(_ lines: String) -> String {
+        "user deploy\nhostname gateway.invalid\nport 2222\nproxyjump none\n" + lines
     }
 
     func testAnIncludedHostBlockResolvesEveryFieldWithoutSecrets() {
@@ -213,6 +227,151 @@ final class SSHConfigTests: XCTestCase {
         }
     }
 
+    func testIdentityFileTokensAndEnvironmentVariablesAreExpandedLikeOpenSSH() {
+        // ssh -G garde ces formes telles quelles ; ssh les développe au lancement (ssh_config(5), TOKENS)
+        let environment = ["HOME": "/srv/fixture-home", "KEYDIR": "/srv/keys"]
+        let home = NSHomeDirectory()
+        let expectations: [(written: String, extra: String, expected: String)] = [
+            ("%d/.ssh/id_%u", "", home + "/.ssh/id_operator"),
+            ("${HOME}/.ssh/id_ed25519", "", "/srv/fixture-home/.ssh/id_ed25519"),
+            ("${KEYDIR}/%r@%h:%p", "", "/srv/keys/deploy@gateway.invalid:2222"),
+            ("/keys/%n", "", "/keys/lab.invalid"),
+            ("/keys/%k", "", "/keys/lab.invalid"),
+            ("/keys/%k", "hostkeyalias vault\n", "/keys/vault"),
+            ("/keys/%i", "", "/keys/\(getuid())"),
+            ("/keys/%L", "", "/keys/box"),
+            ("/keys/%l", "", "/keys/box.example.invalid"),
+            ("/keys/%j", "", "/keys/"),
+            ("/keys/%C", "", "/keys/6f6e7c15749db066dad594b2b6242c5659d1f1b7"),
+            ("/keys/100%%", "", "/keys/100%"),
+            ("~/.ssh/id_%r", "", home + "/.ssh/id_deploy"),
+            ("/keys/$HOME", "", "/keys/$HOME"),
+        ]
+        for item in expectations {
+            let dump = tokenDump(item.extra + "identityfile \(item.written)\n")
+            let file = parse(dump, alias: "lab.invalid", existing: [item.expected], environment: environment)
+            XCTAssertTrue(file.identityPresent, item.written)
+            XCTAssertTrue(file.anySessionIdentityPresent, item.written)
+            // seule la clé publique existe : même règle que pour un chemin sans jeton
+            let publicOnly = parse(dump, alias: "lab.invalid", existing: [item.expected + ".pub"], environment: environment)
+            XCTAssertTrue(publicOnly.identityPresent, item.written)
+            // le chemin non développé ne compte pas
+            let raw = parse(dump, alias: "lab.invalid", existing: item.written == item.expected ? [] : [item.written], environment: environment)
+            XCTAssertFalse(raw.identityPresent, item.written)
+        }
+        let jump = parse(
+            "user deploy\nhostname gateway.invalid\nport 2222\nproxyjump bastion.invalid\nidentityfile /keys/%C\n",
+            alias: "lab.invalid",
+            existing: ["/keys/eec4be68477c6816847711112911f2676d5b3024"],
+            environment: environment
+        )
+        XCTAssertTrue(jump.identityPresent, "%C et %j suivent la valeur de ProxyJump")
+    }
+
+    func testAnIdentityFileThatSSHCannotExpandIsNotAnIdentity() {
+        // ssh ignore le réglage d'un chemin qu'il ne sait pas développer : variable absente, jeton inconnu, % ou ${ isolés
+        for written in ["${NOPE}/id", "/keys/%f", "/keys/%", "/keys/%q", "${HOME/id", "${1BAD}/id", "${}/id"] {
+            let preview = SSHConfig.parse(
+                tokenDump("identityfile \(written)\n"),
+                alias: "lab.invalid",
+                localUser: localUser,
+                filesExist: { _ in true },
+                environment: ["HOME": "/srv/fixture-home"],
+                localHost: "box.example.invalid"
+            )
+            XCTAssertFalse(preview.identityPresent, written)
+            XCTAssertFalse(preview.anySessionIdentityPresent, written)
+        }
+    }
+
+    func testCertificateFileTokensAreExpandedLikeIdentityFile() {
+        let preview = parse(
+            tokenDump("certificatefile %d/.ssh/cert_%r.pub\nidentityfile /tmp/fake-id.invalid\n"),
+            alias: "lab.invalid",
+            existing: [NSHomeDirectory() + "/.ssh/cert_deploy.pub"]
+        )
+        XCTAssertEqual(preview.identity, .certificate)
+        XCTAssertTrue(preview.identityPresent)
+    }
+
+    func testAnIdentityAgentOfTheDumpIsTheFinalPathAndIsNotExpandedAgain() {
+        // ssh -G a déjà développé `~`, les jetons, `%%` et `${VAR}` de IdentityAgent : la valeur du dump est le chemin que ssh ouvre
+        let environment = ["HOME": "/srv/fixture-home"]
+        let paths = [
+            "/run/agent.sock",
+            "/run/a%b/agent.sock",
+            "/run/100%/agent.sock",
+            "/run/a%u/agent.sock",
+            "/run/a%%/agent.sock",
+            "${HOME}/agent.sock",
+            "/run/$HOME/agent.sock",
+        ]
+        for path in paths {
+            let preview = parse(tokenDump("identityagent \(path)\n"), alias: "lab.invalid", existing: [path], environment: environment)
+            XCTAssertEqual(preview.identity, .agent, path)
+            XCTAssertTrue(preview.identityPresent, path)
+            XCTAssertTrue(preview.anySessionIdentityPresent, path)
+        }
+        // le chemin d'une seconde expansion (`%u` devient l'utilisateur local, `${HOME}` la variable) n'est pas celui que ssh ouvre
+        for path in ["/run/a%u/agent.sock", "${HOME}/agent.sock"] {
+            let expandedTwice = parse(
+                tokenDump("identityagent \(path)\n"),
+                alias: "lab.invalid",
+                existing: ["/run/aoperator/agent.sock", "/srv/fixture-home/agent.sock"],
+                environment: environment
+            )
+            XCTAssertFalse(expandedTwice.identityPresent, path)
+            XCTAssertFalse(expandedTwice.anySessionIdentityPresent, path)
+        }
+    }
+
+    func testAnIdentityAgentWrittenAsAVariableIsReadFromTheEnvironmentOfSSH() {
+        // ssh -G laisse `SSH_AUTH_SOCK` et `$VAR` tels quels ; ssh pose ensuite la valeur de la variable, sans la développer, comme socket de l'agent
+        let environment = ["AGENT_SOCK": "/run/agent-%u.sock", "HOME_SOCK": "~/session.sock"]
+        let cases: [(written: String, authSock: String?, socket: String)] = [
+            ("$AGENT_SOCK", nil, "/run/agent-%u.sock"),
+            ("$HOME_SOCK", nil, "~/session.sock"),
+            ("$SSH_AUTH_SOCK", "/run/session.sock", "/run/session.sock"),
+            ("SSH_AUTH_SOCK", "/run/session.sock", "/run/session.sock"),
+            ("$SSH_AUTH_SOCK", "~/session.sock", "~/session.sock"),
+        ]
+        for item in cases {
+            let preview = parse(
+                tokenDump("identityagent \(item.written)\nidentityfile /tmp/fake-id.invalid\n"),
+                alias: "lab.invalid",
+                existing: [item.socket],
+                authSock: item.authSock,
+                environment: environment
+            )
+            XCTAssertTrue(preview.anySessionIdentityPresent, item.written)
+            if item.written != "SSH_AUTH_SOCK" { XCTAssertTrue(preview.identityPresent, item.written) }
+        }
+        // une variable absente ou un SSH_AUTH_SOCK absent : ssh n'a aucun socket à essayer, même si tout chemin existait
+        for (written, authSock) in [("$NOPE", "/run/session.sock"), ("$AGENT_SOCK", nil), ("$SSH_AUTH_SOCK", nil), ("SSH_AUTH_SOCK", nil)] as [(String, String?)] {
+            let absent = SSHConfig.parse(
+                tokenDump("identityagent \(written)\nidentityfile /tmp/fake-id.invalid\n"),
+                alias: "lab.invalid",
+                localUser: localUser,
+                filesExist: { !$0.hasPrefix("/tmp/fake-id.invalid") },
+                authSock: authSock,
+                environment: [:],
+                localHost: "box.example.invalid"
+            )
+            XCTAssertFalse(absent.anySessionIdentityPresent, "\(written) sans variable")
+        }
+    }
+
+    func testAnIdentityAgentVariableIsReadFromTheEnvironmentSSHReceives() {
+        // l'environnement de ssh est celui de SSHChildEnvironment : PATH vaut toujours /usr/bin:/bin, quelle que soit la session de l'app
+        let preview = SSHConfig.parse(
+            tokenDump("identityagent $PATH\n"),
+            alias: "lab.invalid",
+            localUser: localUser,
+            filesExist: { $0 == "/usr/bin:/bin" }
+        )
+        XCTAssertTrue(preview.identityPresent)
+    }
+
     func testAnyProxyJumpOrProxyCommandIsRefusedInEveryMode() {
         let relays = [
             "proxyjump bastion.invalid",
@@ -349,6 +508,12 @@ final class SSHConfigTests: XCTestCase {
     }
 }
 
+/// Un fichier qui existe sur tout hôte : l'aperçu ne teste que sa présence, ssh ne le lit pas dans ces tests
+private let existingIdentityFile = "/dev/null"
+
+/// Un fichier d'identité qui n'existe pas : l'aperçu le donne pour absent
+private let missingIdentityFile = "/tmp/fake-id.invalid"
+
 @MainActor
 final class SSHConnectorTests: XCTestCase {
     private func knownDump(hostname: String) -> SSHConfigDump {
@@ -357,7 +522,7 @@ final class SSHConnectorTests: XCTestCase {
             user operator
             hostname \(hostname)
             port 22
-            identityfile /tmp/fake-id.invalid
+            identityfile \(existingIdentityFile)
             proxyjump none
             """
         )
@@ -473,6 +638,155 @@ final class SSHConnectorTests: XCTestCase {
                 XCTAssertEqual(opened, [], "\(invocation) refuse=\(refuse)")
             }
         }
+    }
+
+    private struct Outcome {
+        var opened: [String] = []
+        var refused: [SSHFailure] = []
+        var preview: SSHConnectionPreview?
+    }
+
+    private func outcome(of dump: SSHConfigDump, authMode: SSHAuthMode, keyCommandSet: Bool = false, authSock: String? = nil) async -> Outcome {
+        let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump, .profileList: dump, .profileLocks: dump])
+        let connector = SSHConnector(resolver: resolver, localUser: "operator", authSock: authSock)
+        var result = Outcome()
+        connector.begin(
+            alias: "lab.invalid",
+            refuseTestHost: true,
+            authMode: authMode,
+            keyCommandSet: keyCommandSet,
+            opened: { config, preview in
+                result.opened.append(config.alias)
+                result.preview = preview
+            },
+            refused: { failure, preview in
+                result.refused.append(failure)
+                result.preview = preview
+            }
+        )
+        await eventually { !result.opened.isEmpty || !result.refused.isEmpty }
+        return result
+    }
+
+    private func dump(identityFile: String, extra: String = "") -> SSHConfigDump {
+        SSHConfigDump(stdout: "user operator\nhostname gateway.invalid\nport 22\n\(extra)identityfile \(identityFile)\nproxyjump none\n")
+    }
+
+    func testNoIdentityIsRefusedBeforeLaunchInSessionMode() async {
+        let missing = await outcome(of: dump(identityFile: missingIdentityFile), authMode: .sessionAgent)
+        XCTAssertEqual(missing.refused, [.noIdentity])
+        XCTAssertEqual(missing.opened, [])
+        XCTAssertEqual(missing.preview?.identityPresent, false, "l'aperçu reste affiché avec l'identité absente")
+        // une identité présente laisse ouvrir
+        let present = await outcome(of: dump(identityFile: existingIdentityFile), authMode: .sessionAgent)
+        XCTAssertEqual(present.refused, [])
+        XCTAssertEqual(present.opened, ["lab.invalid"])
+        // le mode Exécutable porte sa propre identité : aucune garde
+        let wrapper = await outcome(of: dump(identityFile: missingIdentityFile), authMode: .wrapper)
+        XCTAssertEqual(wrapper.refused, [])
+        XCTAssertEqual(wrapper.opened, ["lab.invalid"])
+    }
+
+    func testAKeyFileIsEnoughWhenTheConfiguredAgentSocketIsMissing() async {
+        // ssh se rabat sur le fichier quand l'IdentityAgent ne répond pas : l'aperçu « agent absent » ne suffit pas à refuser
+        let result = await outcome(of: dump(identityFile: existingIdentityFile, extra: "identityagent /tmp/fake-agent.invalid\n"), authMode: .sessionAgent)
+        XCTAssertEqual(result.refused, [])
+        XCTAssertEqual(result.opened, ["lab.invalid"])
+        XCTAssertEqual(result.preview?.identityPresent, false, "l'aperçu garde son état : l'agent annoncé est absent")
+    }
+
+    func testTheSessionAgentIsEnoughWhenTheCustomIdentityFileIsMissing() async {
+        // ssh présente aussi les clés de l'agent de session quand l'IdentityFile personnalisé manque
+        let result = await outcome(of: dump(identityFile: missingIdentityFile), authMode: .sessionAgent, authSock: existingIdentityFile)
+        XCTAssertEqual(result.refused, [])
+        XCTAssertEqual(result.opened, ["lab.invalid"])
+        XCTAssertEqual(result.preview?.identityPresent, false, "l'aperçu garde son état : la clé annoncée est absente")
+        // IdentityAgent none désactive l'agent : il ne reste aucune source
+        let disabled = await outcome(of: dump(identityFile: missingIdentityFile, extra: "identityagent none\n"), authMode: .sessionAgent, authSock: existingIdentityFile)
+        XCTAssertEqual(disabled.refused, [.noIdentity])
+        XCTAssertEqual(disabled.opened, [])
+        // ni fichier ni socket : refus
+        let nothing = await outcome(of: dump(identityFile: missingIdentityFile), authMode: .sessionAgent, authSock: "/tmp/fake-agent.invalid")
+        XCTAssertEqual(nothing.refused, [.noIdentity])
+    }
+
+    func testAnIdentityAgentEnvironmentReferenceCountsWhenTheSocketExists() async {
+        // ssh -G imprime ces deux formes telles quelles ; `IdentityAgent ${SSH_AUTH_SOCK}` arrive déjà développé en chemin
+        for value in ["$SSH_AUTH_SOCK", "SSH_AUTH_SOCK"] {
+            let result = await outcome(
+                of: dump(identityFile: missingIdentityFile, extra: "identityagent \(value)\n"),
+                authMode: .sessionAgent,
+                authSock: existingIdentityFile
+            )
+            XCTAssertEqual(result.refused, [], value)
+            XCTAssertEqual(result.opened, ["lab.invalid"], value)
+        }
+        // la variable absente ne laisse aucune source : refus
+        let absent = await outcome(of: dump(identityFile: missingIdentityFile, extra: "identityagent $SSH_AUTH_SOCK\n"), authMode: .sessionAgent)
+        XCTAssertEqual(absent.refused, [.noIdentity])
+    }
+
+    func testAnIdentityAgentSocketWithALiteralPercentCountsWhenItExists() async throws {
+        // `IdentityAgent <dossier>/agent-%%u.sock` : ssh -G imprime `agent-%u.sock` et ssh ouvre ce nom tel quel
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hb-id-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        XCTAssertTrue(FileManager.default.createFile(atPath: directory.path + "/agent-%u.sock", contents: Data()))
+        let present = await outcome(of: dump(identityFile: missingIdentityFile, extra: "identityagent \(directory.path)/agent-%u.sock\n"), authMode: .sessionAgent)
+        XCTAssertEqual(present.refused, [])
+        XCTAssertEqual(present.opened, ["lab.invalid"])
+        XCTAssertEqual(present.preview?.identityPresent, true)
+        // un socket du même dossier qui n'existe pas reste refusé
+        let other = await outcome(of: dump(identityFile: missingIdentityFile, extra: "identityagent \(directory.path)/agent-%q.sock\n"), authMode: .sessionAgent)
+        XCTAssertEqual(other.refused, [.noIdentity])
+    }
+
+    func testAnIdentityFileWrittenWithATokenCountsWhenTheFileExists() async throws {
+        // ssh -G garde `IdentityFile %d/.ssh/id_%u` tel quel : ssh développe les jetons, la garde doit faire de même
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hb-id-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        for name in ["id_operator", "cert_operator"] {
+            try Data().write(to: directory.appendingPathComponent(name))
+        }
+        // %u = utilisateur local (operator), %r = utilisateur distant (operator dans ce dump), %n = alias
+        for written in ["id_%u", "id_%r"] {
+            let result = await outcome(of: dump(identityFile: directory.path + "/" + written, extra: "identityagent none\n"), authMode: .sessionAgent)
+            XCTAssertEqual(result.refused, [], written)
+            XCTAssertEqual(result.opened, ["lab.invalid"], written)
+        }
+        let certificate = await outcome(
+            of: dump(identityFile: missingIdentityFile, extra: "identityagent none\ncertificatefile \(directory.path)/cert_%u\n"),
+            authMode: .sessionAgent
+        )
+        XCTAssertEqual(certificate.refused, [])
+        XCTAssertEqual(certificate.opened, ["lab.invalid"])
+        // un jeton inconnu ou un fichier développé qui manque : refus
+        for written in ["id_%f", "id_%n", "${HB_NO_SUCH_VARIABLE}/id_operator"] {
+            let result = await outcome(of: dump(identityFile: directory.path + "/" + written, extra: "identityagent none\n"), authMode: .sessionAgent)
+            XCTAssertEqual(result.refused, [.noIdentity], written)
+            XCTAssertEqual(result.opened, [], written)
+        }
+    }
+
+    func testEphemeralWithoutKeyCommandOrAgentIsRefusedBeforeLaunch() async {
+        // le fichier d'identité du dump ne compte pas : l'agent temporaire n'en lit aucun
+        let files = dump(identityFile: existingIdentityFile)
+        let none = await outcome(of: files, authMode: .ephemeralAgent, keyCommandSet: false)
+        XCTAssertEqual(none.refused, [.noIdentity])
+        XCTAssertEqual(none.opened, [])
+        let command = await outcome(of: files, authMode: .ephemeralAgent, keyCommandSet: true)
+        XCTAssertEqual(command.refused, [])
+        XCTAssertEqual(command.opened, ["lab.invalid"])
+        let agent = await outcome(of: dump(identityFile: existingIdentityFile, extra: "identityagent /tmp/fake-agent.invalid\n"), authMode: .ephemeralAgent, keyCommandSet: false)
+        XCTAssertEqual(agent.refused, [])
+        XCTAssertEqual(agent.opened, ["lab.invalid"])
+    }
+
+    func testARelayIsRefusedBeforeTheIdentityIsChecked() async {
+        let relayWithoutIdentity = SSHConfigDump(stdout: "user operator\nhostname gateway.invalid\nport 22\nidentityfile \(missingIdentityFile)\nproxyjump bastion.invalid\n")
+        let result = await outcome(of: relayWithoutIdentity, authMode: .sessionAgent)
+        XCTAssertEqual(result.refused, [.relayRefused])
     }
 
     func testExampleHostIsRefusedWithoutDumpingTheConfig() async {
@@ -598,6 +912,67 @@ final class RealSshConfigTests: XCTestCase {
             return nil
         } catch let failure as SSHFailure {
             return failure
+        }
+    }
+
+    /// Dossier jetable avec des fichiers vides ; les noms peuvent contenir `%`, d'où les chemins en texte
+    private func makeDirectory(files: [String] = []) throws -> URL {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("hb-test-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        for name in files {
+            XCTAssertTrue(FileManager.default.createFile(atPath: directory.path + "/" + name, contents: Data()), name)
+        }
+        return directory
+    }
+
+    /// La sortie de `/usr/bin/ssh -G -F` pour l'hôte `lab.invalid` ; `$DIR` désigne le dossier jetable, dans la config et dans l'environnement de ssh
+    private func realDump(_ config: String, in directory: URL, environment: [String: String] = [:]) async throws -> SSHConfigDump {
+        let path = directory.path + "/config"
+        try config.replacingOccurrences(of: "$DIR", with: directory.path).write(toFile: path, atomically: true, encoding: .utf8)
+        let sshEnvironment = environment.mapValues { $0.replacingOccurrences(of: "$DIR", with: directory.path) }
+        return try await SystemSSHConfigResolver(environment: sshEnvironment, configFile: path).dump(alias: "lab.invalid", invocation: .tunnel)
+    }
+
+    func testAnIdentityAgentWithADoublePercentIsTestedAsSshPrintsIt() async throws {
+        // `%%` devient `%` dans le dump : la garde teste ce nom, elle ne le développe pas une seconde fois
+        let directory = try makeDirectory(files: ["agent-%u.sock"])
+        let dump = try await realDump("Host lab.invalid\n  IdentityAgent $DIR/agent-%%u.sock\n", in: directory)
+        XCTAssertTrue(dump.stdout.contains("\nidentityagent \(directory.path)/agent-%u.sock\n"), "ssh -G développe %% en %")
+        let preview = SSHConfig.parse(dump, alias: "lab.invalid", localUser: "operator")
+        XCTAssertEqual(preview.identity, .agent)
+        XCTAssertTrue(preview.identityPresent)
+        XCTAssertTrue(preview.anySessionIdentityPresent)
+    }
+
+    func testSshExpandsTheIdentityAgentItselfButLeavesTheIdentityFileToTheGuard() async throws {
+        let directory = try makeDirectory(files: ["agent-gateway.example.invalid.sock", "key-gateway.example.invalid", "k%x"])
+        let environment = ["HOME": "$DIR"]
+        let sshEnvironment = SSHChildEnvironment.make(["HOME": directory.path])
+        // IdentityAgent : `${HOME}` et `%h` sont développés par ssh -G
+        let agent = try await realDump("Host lab.invalid\n  Hostname gateway.example.invalid\n  IdentityAgent ${HOME}/agent-%h.sock\n", in: directory, environment: environment)
+        XCTAssertTrue(agent.stdout.contains("\nidentityagent \(directory.path)/agent-gateway.example.invalid.sock\n"))
+        XCTAssertTrue(SSHConfig.parse(agent, alias: "lab.invalid", localUser: "operator", environment: sshEnvironment).identityPresent)
+        // IdentityFile : ssh -G garde `${HOME}`, `%h` et `%%` tels quels, la garde les développe comme ssh au lancement
+        for (written, kept) in [("${HOME}/key-%h", "${HOME}/key-%h"), ("$DIR/k%%x", directory.path + "/k%%x")] {
+            let config = "Host lab.invalid\n  Hostname gateway.example.invalid\n  IdentityAgent none\n  IdentityFile \(written)\n"
+            let file = try await realDump(config, in: directory, environment: environment)
+            XCTAssertTrue(file.stdout.contains("\nidentityfile \(kept)\n"), written)
+            let preview = SSHConfig.parse(file, alias: "lab.invalid", localUser: "operator", environment: sshEnvironment)
+            XCTAssertEqual(preview.identity, .file, written)
+            XCTAssertTrue(preview.identityPresent, written)
+        }
+    }
+
+    func testSshLeavesAnIdentityAgentVariableAndNoneAsWritten() async throws {
+        let directory = try makeDirectory()
+        let sshEnvironment = SSHChildEnvironment.make(["SSH_AUTH_SOCK": "/dev/null"])
+        for (written, expected) in [("$SSH_AUTH_SOCK", true), ("SSH_AUTH_SOCK", true), ("none", false)] {
+            let config = "Host lab.invalid\n  IdentityAgent \(written)\n  IdentityFile $DIR/missing\n"
+            let dump = try await realDump(config, in: directory, environment: ["SSH_AUTH_SOCK": "/dev/null"])
+            XCTAssertTrue(dump.stdout.contains("\nidentityagent \(written)\n"), written)
+            let preview = SSHConfig.parse(dump, alias: "lab.invalid", localUser: "operator", authSock: "/dev/null", environment: sshEnvironment)
+            XCTAssertEqual(preview.anySessionIdentityPresent, expected, written)
         }
     }
 
@@ -808,7 +1183,7 @@ final class AppModelConnectTests: XCTestCase {
             user operator
             hostname \(hostname)
             port 22
-            identityfile /tmp/fake-id.invalid
+            identityfile \(existingIdentityFile)
             proxyjump none
             """
         )
@@ -875,7 +1250,8 @@ final class AppModelConnectTests: XCTestCase {
             user operator
             hostname 127.0.0.1
             port 1
-            identityfile /tmp/fake-id.invalid
+            identityagent none
+            identityfile \(missingIdentityFile)
             proxyjump none
             """
         )
@@ -894,10 +1270,11 @@ final class AppModelConnectTests: XCTestCase {
         await eventually {
             if case .failed = model.tunnel.state { true } else { false }
         }
+        // le mode capturé est la session : sans identité (IdentityAgent none, donc le SSH_AUTH_SOCK de l'hôte ne compte pas), le connecteur refuse avant tout lancement ; le mode Exécutable (sans garde) donnerait missingWrapper
         if case .failed(let failure) = model.tunnel.state {
-            XCTAssertNotEqual(failure, .missingWrapper)
+            XCTAssertEqual(failure, .noIdentity)
         } else {
-            XCTFail("attendu un échec de lancement, obtenu \(model.tunnel.state)")
+            XCTFail("attendu un refus noIdentity, obtenu \(model.tunnel.state)")
         }
     }
 

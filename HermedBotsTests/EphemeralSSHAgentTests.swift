@@ -386,6 +386,25 @@ final class EphemeralSSHAgentTests: XCTestCase {
         await backend.close()
     }
 
+    func testAnEphemeralLaunchWithoutKeyCommandOrAgentIsNamedBeforeAnySpawn() async throws {
+        // ni source de clé, ni commande de clé, ni IdentityAgent dans le dump : ssh ne doit pas partir, sinon il prendrait l'agent de la session
+        let backend = SystemSSHBackend(
+            environment: ["PATH": "/usr/bin:/bin"],
+            resolver: AgreeingSSHResolver(),
+            client: SSHClientSettings(authMode: .ephemeralAgent, sshBinary: "/tmp/example-ssh-never-spawned.invalid"),
+            keySource: nil
+        )
+        let config = try SSHTunnelConfig(alias: "lab.invalid", hostname: "example.invalid", user: "user", sshPort: 2200, refuseTestHost: true)
+        do {
+            _ = try await backend.open(config)
+            XCTFail("open() a réussi sans identité")
+        } catch let failure as SSHFailure {
+            XCTAssertEqual(failure, .noIdentity)
+            XCTAssertFalse(failure.retries)
+        }
+        await backend.close()
+    }
+
     func testAnEmptyKeySourceIsNamedInsteadOfPublickey() async throws {
         let backend = SystemSSHBackend(
             environment: ["PATH": "/usr/bin:/bin"],

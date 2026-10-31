@@ -240,6 +240,46 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(SSHExitClassification.kind(stderr: "", status: 255), .hostUnreachable)
     }
 
+    func testAWrapperFailureLineIsNamedWhateverThePrecedingStderrSays() {
+        let line = "gate-wrapper_failure=17"
+        XCTAssertEqual(
+            SSHExitClassification.wrapperFailure(stderr: line + "\n"),
+            SSHWrapperFailure(name: "gate-wrapper", code: "17")
+        )
+        XCTAssertEqual(
+            SSHExitClassification.wrapperFailure(stderr: "debug: starting\n\(line) (see log)\nPermission denied (publickey).\n"),
+            SSHWrapperFailure(name: "gate-wrapper", code: "17")
+        )
+        XCTAssertEqual(
+            SSHExitClassification.wrapperFailure(stderr: "relay.v2_failure=host_down:3\n"),
+            SSHWrapperFailure(name: "relay.v2", code: "host_down:3")
+        )
+        // la ligne du wrapper l'emporte sur les phrases d'OpenSSH et sur le repli « injoignable »
+        for status: Int32 in [1, 255] {
+            XCTAssertEqual(SSHExitClassification.kind(stderr: "Permission denied (publickey).\n\(line)\n", status: status), .wrapperFailure)
+            XCTAssertEqual(SSHExitClassification.kind(stderr: line, status: status), .wrapperFailure)
+        }
+    }
+
+    func testOnlyAWellFormedKeyValueLineIsAWrapperFailure() {
+        for stderr in [
+            "",
+            "Permission denied (publickey).",
+            "_failure=3",
+            "gate_failure=",
+            "gate_failure",
+            "gate failure=3",
+            "gate_failure=a=b",
+            "-gate_failure=3",
+            "gate/x_failure=3",
+            "gate_failure=\(String(repeating: "9", count: 33))",
+            "\(String(repeating: "a", count: 65))_failure=3",
+        ] {
+            XCTAssertNil(SSHExitClassification.wrapperFailure(stderr: stderr), stderr)
+            XCTAssertNotEqual(SSHExitClassification.kind(stderr: stderr, status: 255), .wrapperFailure, stderr)
+        }
+    }
+
     func testTenThousandClassificationsStayCheap() {
         for _ in 0..<10_000 {
             XCTAssertEqual(
