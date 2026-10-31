@@ -296,6 +296,9 @@ enum SSHConfig {
             }
             if let authSock, !authSock.isEmpty { return filesExist(authSock) }
             return false
+        case .executable:
+            // le dump n'en produit jamais : seul le mode Exécutable le pose, et l'exécutable choisit l'identité
+            return true
         }
     }
 
