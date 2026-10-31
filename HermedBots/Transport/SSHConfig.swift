@@ -288,35 +288,28 @@ enum SSHConfig {
         case .agent:
             if let agent, isNone(agent) { return false }
             if let agent {
-                return resolvedIdentityAgentPath(agent, expansion: expansion).map(filesExist) ?? false
+                return identityAgentPath(agent, environment: expansion.environment).map(filesExist) ?? false
             }
             if let authSock, !authSock.isEmpty { return filesExist(authSock) }
             return false
         }
     }
 
-    /// `nil` quand ssh n'a aucun chemin à essayer : variable absente ou forme qu'il ne sait pas développer
-    private static func resolvedIdentityAgentPath(_ value: String, expansion: PathExpansion) -> String? {
+    /// Le socket que ssh ouvre pour la valeur `IdentityAgent` du dump ; `nil` quand la variable lue est absente
+    /// `ssh -G` a déjà développé `~`, les jetons, `%%` et `${VAR}` (ssh.c, avant l'impression du dump) : la valeur est le chemin, sans seconde expansion
+    /// Restent `SSH_AUTH_SOCK` et `$VAR`, que ssh lit après le dump dans son environnement et prend tels quels, sans les développer
+    private static func identityAgentPath(_ value: String, environment: [String: String]) -> String? {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        // `SSH_AUTH_SOCK` et `$VAR` : ssh lit la variable dans son environnement, il ne teste pas un chemin de ce nom
-        if let name = identityAgentEnvironmentName(trimmed) {
-            return expansion.environment[name].map(expand)
-        }
-        return expansion(trimmed)
+        guard let name = identityAgentEnvironmentName(trimmed) else { return trimmed }
+        return environment[name]
     }
 
+    /// `${VAR}` n'en est pas une : ssh -G l'a développé, et ce qui reste est un chemin (ssh teste `$` puis un caractère autre que `{`)
     private static func identityAgentEnvironmentName(_ value: String) -> String? {
-        if value == "SSH_AUTH_SOCK" { return "SSH_AUTH_SOCK" }
-        guard value.first == "$" else { return nil }
-        let body = String(value.dropFirst())
-        let name: String
-        if body.count >= 2, body.first == "{", body.last == "}" {
-            name = String(body.dropFirst().dropLast())
-        } else {
-            name = body
-        }
-        guard name.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil else { return nil }
-        return name
+        if value == "SSH_AUTH_SOCK" { return value }
+        guard value.hasPrefix("$"), !value.hasPrefix("${") else { return nil }
+        let name = String(value.dropFirst())
+        return name.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) == nil ? nil : name
     }
 
     /// Nom d'hôte local tel que ssh le lit pour les jetons `%l` et `%L`
@@ -326,8 +319,9 @@ enum SSHConfig {
         return String(decoding: buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
     }
 
-    /// Ce que ssh fait d'un chemin de la config avant de l'ouvrir : `~`, jetons `%x` (ssh_config(5), TOKENS), puis `${VAR}` de son environnement
-    /// `ssh -G` laisse ces formes telles quelles ; le résultat est `nil` quand ssh ignore le réglage (jeton inconnu, `%` ou `${` isolés, variable absente)
+    /// Ce que ssh fait d'un chemin `IdentityFile` ou `CertificateFile` avant de l'ouvrir : `~`, jetons `%x` (ssh_config(5), TOKENS), puis `${VAR}` de son environnement
+    /// `ssh -G` laisse ces deux champs tels quels ; il développe lui-même `IdentityAgent`, dont la valeur du dump ne passe jamais ici
+    /// Le résultat est `nil` quand ssh ignore le réglage (jeton inconnu, `%` ou `${` isolés, variable absente)
     private struct PathExpansion {
         let alias: String
         let hostname: String
