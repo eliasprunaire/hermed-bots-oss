@@ -2,7 +2,6 @@
 
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");
-const { verdictLines, plainMarker } = require("./verdict-prose.js");
 
 const PROTECTED_DIRS = [".claude/", ".codex/"];
 const PROTECTED_FILES = [".mcp.json"];
@@ -17,6 +16,7 @@ const GATE_FILES = [
 ];
 const GATE_LABEL = "gate-change-approved";
 const GATE_VERIFIER_LOGIN = "app-pilote-verifier[bot]";
+const VERDICT_CONTEXT = "verdict-gate";
 const HEX_SHA = /^[0-9a-fA-F]{40}$/;
 
 function posix(file) {
@@ -169,66 +169,36 @@ function resolveHeadSha(head) {
   return sha.toLowerCase();
 }
 
-function commentUser(comment) {
-  if (comment == null || typeof comment !== "object") {
-    return null;
-  }
-  return comment.user;
-}
-
-function commentBody(comment) {
-  if (comment == null || typeof comment !== "object") {
-    return null;
-  }
-  if (typeof comment.body !== "string") {
-    return null;
-  }
-  return comment.body;
-}
-
-function createdAtMs(raw) {
+function isoTimeMs(raw, key) {
   if (raw == null || typeof raw !== "object") {
     return null;
   }
-  if (typeof raw.created_at !== "string" || raw.created_at === "") {
+  if (typeof raw[key] !== "string" || raw[key] === "") {
     return null;
   }
-  const ms = Date.parse(raw.created_at);
+  const ms = Date.parse(raw[key]);
   return Number.isFinite(ms) ? ms : null;
 }
 
-// last marked VERDICT from the verifier that cites headSha wins; FAIL cancels a prior PASS.
-// prose() from verdict-prose.js drops fenced blocks and blockquotes.
-function verifierPassForHead(comments, headSha) {
-  if (!Array.isArray(comments) || typeof headSha !== "string" || !HEX_SHA.test(headSha)) {
-    return { pass: false, at: null };
+function verdictGateStatus(payload) {
+  if (payload == null || typeof payload !== "object" || !Array.isArray(payload.statuses)) {
+    return null;
   }
-  const want = headSha.toLowerCase();
-  let pass = false;
-  let at = null;
-  for (const comment of comments) {
-    if (foldLogin(readLogin(commentUser(comment))) !== GATE_VERIFIER_LOGIN) {
+  for (const status of payload.statuses) {
+    if (status == null || typeof status !== "object") {
       continue;
     }
-    const body = commentBody(comment);
-    if (body == null || !plainMarker(body)) {
-      continue;
-    }
-    for (const line of verdictLines(body)) {
-      if (line.sha !== want) {
-        continue;
-      }
-      pass = line.verdict === "PASS" || line.verdict === "PASS+NOTES";
-      at = createdAtMs(comment);
+    if (status.context === VERDICT_CONTEXT) {
+      return status;
     }
   }
-  return { pass, at };
+  return null;
 }
 
 // latest labeled/unlabeled event for GATE_LABEL wins; presence of the label on the
-// pull payload is ignored. the label is bound to the head SHA via a marked PASS or
-// PASS+NOTES from the same verifier, and must be after that verdict.
-function gateApprovalFromEvents(events, { headSha, comments } = {}) {
+// pull payload is ignored. verdict-gate must be success on this head; the label
+// created_at must be strictly after that status updated_at (never a commit date).
+function gateApprovalFromEvents(events, { verdict } = {}) {
   if (!Array.isArray(events)) {
     return { ok: false, reason: "unreadable-events" };
   }
@@ -243,7 +213,7 @@ function gateApprovalFromEvents(events, { headSha, comments } = {}) {
     }
     if (event.event === "labeled") {
       actor = event.actor;
-      labeledAt = createdAtMs(event);
+      labeledAt = isoTimeMs(event, "created_at");
     } else if (event.event === "unlabeled") {
       actor = null;
       labeledAt = null;
@@ -256,11 +226,11 @@ function gateApprovalFromEvents(events, { headSha, comments } = {}) {
   if (actorLogin !== GATE_VERIFIER_LOGIN) {
     return { ok: false, reason: "not-verifier" };
   }
-  const found = verifierPassForHead(comments, headSha);
-  if (!found.pass) {
-    return { ok: false, reason: "no-pass-for-head" };
+  if (verdict == null || verdict.state !== "success") {
+    return { ok: false, reason: "no-verdict-gate" };
   }
-  if (labeledAt == null || found.at == null || labeledAt <= found.at) {
+  const greenAt = isoTimeMs(verdict, "updated_at") ?? isoTimeMs(verdict, "created_at");
+  if (labeledAt == null || greenAt == null || labeledAt <= greenAt) {
     return { ok: false, reason: "stale-label" };
   }
   return { ok: true, login: actorLogin };
@@ -325,12 +295,13 @@ async function loadEvents(io, token, owner, repo, number) {
   );
 }
 
-async function loadComments(io, token, owner, repo, number) {
-  return loadPages(
+async function loadCommitStatus(io, token, owner, repo, sha) {
+  const response = await githubGet(
     io,
     token,
-    `https://api.github.com/repos/${owner}/${repo}/issues/${number}/comments?per_page=100`,
+    `https://api.github.com/repos/${owner}/${repo}/commits/${sha}/status`,
   );
+  return response.json();
 }
 
 function repositoryParts(repository) {
@@ -347,7 +318,7 @@ function repositoryParts(repository) {
 function writeHits(kind, hits) {
   const label =
     kind === "gate"
-      ? `protected gate files changed (${GATE_FILES.join(", ")}). ${GATE_VERIFIER_LOGIN} label ${GATE_LABEL} and PASS @ head required`
+      ? `protected gate files changed (${GATE_FILES.join(", ")}). ${GATE_VERIFIER_LOGIN} label ${GATE_LABEL} after verdict-gate success on head required`
       : "protected agent config changed (.claude/, .codex/, .mcp.json, or a symlink or submodule at them)";
   process.stderr.write(
     `${label}:\n${hits.map((hit) => `  ${hit}`).join("\n")}\n`,
@@ -368,13 +339,13 @@ async function ownerApproval(io, headSha) {
   } catch {
     return { ok: false, reason: "unreadable-events" };
   }
-  let comments;
+  let payload;
   try {
-    comments = await loadComments(io, token, names.owner, names.repo, number);
+    payload = await loadCommitStatus(io, token, names.owner, names.repo, headSha);
   } catch {
-    return { ok: false, reason: "unreadable-comments" };
+    return { ok: false, reason: "unreadable-status" };
   }
-  return gateApprovalFromEvents(events, { headSha, comments });
+  return gateApprovalFromEvents(events, { verdict: verdictGateStatus(payload) });
 }
 
 function collectHits(base, head) {

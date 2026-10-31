@@ -32,7 +32,7 @@ module.exports = Object.freeze([
     job: "check-plans",
   }),
   Object.freeze({
-    rule: "No change to .claude/, .codex/ or .mcp.json in a PR, and no change to gate files without an app-pilote-verifier[bot] gate-change-approved label and PASS on the current head SHA",
+    rule: "No change to .claude/, .codex/ or .mcp.json in a PR, and no change to gate files without verdict-gate success on the head and an app-pilote-verifier[bot] gate-change-approved label after that status",
     script: "scripts/check-protected-paths.js",
     test: "test/check-protected-paths.test.js",
     job: "protected-agent-config",

@@ -352,11 +352,6 @@ function runWorkflowStep(headFiles) {
     git(origin, "config", "uploadpack.allowAnySHA1InWant", "true");
     put(origin, "README.md", "x\n");
     put(origin, "scripts/check-protected-paths.js", readFileSync(script, "utf8"));
-    put(
-      origin,
-      "scripts/verdict-prose.js",
-      readFileSync(join(root, "scripts/verdict-prose.js"), "utf8"),
-    );
     git(origin, "add", "-A");
     git(origin, "commit", "-q", "-m", "init");
     const base = git(origin, "rev-parse", "HEAD");
@@ -437,125 +432,62 @@ const VERIFIER = { login: "app-pilote-verifier[bot]", type: "Bot" };
 const OWNER = { login: "repo-owner", type: "User" };
 const AUTHOR = { login: "pr-author", type: "User" };
 const CURSOR_BOT = { login: "cursor[bot]", type: "Bot" };
-const HEAD_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const OTHER_SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-const MARKER = "<!-- dev-lead-verifier -->";
-const PASS_AT = "2026-10-31T11:00:00Z";
+const GREEN_AT = "2026-10-31T11:00:00Z";
 const LABEL_AT = "2026-10-31T12:00:00Z";
 
 function labeled(actor, createdAt = LABEL_AT) {
   return { event: "labeled", label: { name: GATE_LABEL }, actor, created_at: createdAt };
 }
 
-function verdictComment(user, verdict, sha, createdAt = PASS_AT) {
-  return { user, body: `VERDICT: ${verdict} @ ${sha}\n${MARKER}`, created_at: createdAt };
+function greenVerdict(updatedAt = GREEN_AT) {
+  return { context: "verdict-gate", state: "success", updated_at: updatedAt };
 }
 
-function passOn(sha, user = VERIFIER) {
-  return { headSha: sha, comments: [verdictComment(user, "PASS", sha)] };
+function withGreen(verdict = greenVerdict()) {
+  return { verdict };
 }
 
-test("gate-change-approved counts only when app-pilote-verifier[bot] labeled and PASSed the head", () => {
-  assert.deepEqual(gateApprovalFromEvents([labeled(VERIFIER)], passOn(HEAD_SHA)), {
+test("gate-change-approved counts when the verifier labeled after verdict-gate success", () => {
+  assert.deepEqual(gateApprovalFromEvents([labeled(VERIFIER)], withGreen()), {
     ok: true,
     login: "app-pilote-verifier[bot]",
   });
-  assert.equal(
-    gateApprovalFromEvents([labeled(VERIFIER)], {
-      headSha: HEAD_SHA,
-      comments: [verdictComment(VERIFIER, "PASS+NOTES", HEAD_SHA)],
-    }).ok,
-    true,
-  );
 });
 
 test("the label on the pull is ignored; only issue events count", () => {
-  const decision = gateApprovalFromEvents([], { labels: [GATE_LABEL], ...passOn(HEAD_SHA) });
+  const decision = gateApprovalFromEvents([], { labels: [GATE_LABEL], ...withGreen() });
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "no-label");
 });
 
-test("a label from a human is refused", () => {
-  assert.equal(gateApprovalFromEvents([labeled(OWNER)], passOn(HEAD_SHA)).reason, "not-verifier");
+test("a label from another actor is refused", () => {
+  assert.equal(gateApprovalFromEvents([labeled(OWNER)], withGreen()).reason, "not-verifier");
+  assert.equal(gateApprovalFromEvents([labeled(AUTHOR)], withGreen()).reason, "not-verifier");
+  assert.equal(gateApprovalFromEvents([labeled(CURSOR_BOT)], withGreen()).reason, "not-verifier");
 });
 
-test("a label from the pull author is refused", () => {
-  assert.equal(gateApprovalFromEvents([labeled(AUTHOR)], passOn(HEAD_SHA)).reason, "not-verifier");
-});
-
-test("a label from cursor[bot] is refused", () => {
-  assert.equal(gateApprovalFromEvents([labeled(CURSOR_BOT)], passOn(HEAD_SHA)).reason, "not-verifier");
-});
-
-test("a verifier PASS on another SHA does not approve the head", () => {
+test("a red or missing verdict-gate on the head is refused", () => {
   assert.equal(
     gateApprovalFromEvents([labeled(VERIFIER)], {
-      headSha: HEAD_SHA,
-      comments: [verdictComment(VERIFIER, "PASS", OTHER_SHA)],
+      verdict: { context: "verdict-gate", state: "failure", updated_at: GREEN_AT },
     }).reason,
-    "no-pass-for-head",
+    "no-verdict-gate",
   );
+  assert.equal(gateApprovalFromEvents([labeled(VERIFIER)], {}).reason, "no-verdict-gate");
 });
 
 test("unlabeling clears a previous verifier approval", () => {
   const decision = gateApprovalFromEvents(
     [labeled(VERIFIER), { event: "unlabeled", label: { name: GATE_LABEL }, actor: VERIFIER }],
-    passOn(HEAD_SHA),
+    withGreen(),
   );
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "no-label");
 });
 
-test("a PASS inside a closed code fence does not cancel a FAIL", () => {
-  for (const fence of ["```", "~~~"]) {
-    const decision = gateApprovalFromEvents([labeled(VERIFIER)], {
-      headSha: HEAD_SHA,
-      comments: [
-        verdictComment(VERIFIER, "FAIL", HEAD_SHA, PASS_AT),
-        {
-          user: VERIFIER,
-          created_at: "2026-10-31T11:30:00Z",
-          body: [fence, `VERDICT: PASS @ ${HEAD_SHA}`, fence, MARKER].join("\n"),
-        },
-      ],
-    });
-    assert.equal(decision.ok, false, fence);
-    assert.equal(decision.reason, "no-pass-for-head", fence);
-  }
-});
-
-test("a PASS inside a blockquote does not count", () => {
-  const decision = gateApprovalFromEvents([labeled(VERIFIER)], {
-    headSha: HEAD_SHA,
-    comments: [
-      {
-        user: VERIFIER,
-        created_at: PASS_AT,
-        body: [`> VERDICT: PASS @ ${HEAD_SHA}`, MARKER].join("\n"),
-      },
-    ],
-  });
-  assert.equal(decision.ok, false);
-  assert.equal(decision.reason, "no-pass-for-head");
-});
-
-test("a PASS outside a fence still counts", () => {
-  const decision = gateApprovalFromEvents([labeled(VERIFIER)], {
-    headSha: HEAD_SHA,
-    comments: [
-      {
-        user: VERIFIER,
-        created_at: PASS_AT,
-        body: ["```", "sample", "```", `VERDICT: PASS @ ${HEAD_SHA}`, MARKER].join("\n"),
-      },
-    ],
-  });
-  assert.equal(decision.ok, true);
-});
-
-test("a label applied before the PASS on the head is refused", () => {
+test("a label applied before verdict-gate turns green is refused", () => {
   assert.equal(
-    gateApprovalFromEvents([labeled(VERIFIER, "2026-10-31T10:00:00Z")], passOn(HEAD_SHA)).reason,
+    gateApprovalFromEvents([labeled(VERIFIER, "2026-10-31T10:00:00Z")], withGreen()).reason,
     "stale-label",
   );
 });
@@ -602,45 +534,45 @@ async function withGateHead(run) {
 }
 
 const TIMELINE_URL = "https://api.github.com/repos/acme/app/issues/7/timeline?per_page=100";
-const COMMENTS_URL = "https://api.github.com/repos/acme/app/issues/7/comments?per_page=100";
 
-function gateFetch(events, comments) {
+function statusUrl(sha) {
+  return `https://api.github.com/repos/acme/app/commits/${sha}/status`;
+}
+
+function gateFetch(events, sha, statuses) {
   return async (url) => {
     if (url === TIMELINE_URL) {
       return jsonResponse(events);
     }
-    if (url === COMMENTS_URL) {
-      return jsonResponse(comments);
+    if (url === statusUrl(sha)) {
+      return jsonResponse({ statuses });
     }
     throw new Error(`unexpected GET ${url}`);
   };
 }
 
-test("a verifier label and PASS on the head allows a gate file change", async () => {
+const gateEnv = {
+  GITHUB_TOKEN: "test-token",
+  GITHUB_REPOSITORY: "acme/app",
+  PR_NUMBER: "7",
+  PR_AUTHOR_LOGIN: "pr-author",
+};
+
+test("a verifier label after verdict-gate success allows a gate file change", async () => {
   await withGateHead(async (base, head) => {
     const code = await main(["--base", base, "--head", head], {
-      env: {
-        GITHUB_TOKEN: "test-token",
-        GITHUB_REPOSITORY: "acme/app",
-        PR_NUMBER: "7",
-        PR_AUTHOR_LOGIN: "pr-author",
-      },
-      fetch: gateFetch([labeled(VERIFIER)], [verdictComment(VERIFIER, "PASS", head)]),
+      env: gateEnv,
+      fetch: gateFetch([labeled(VERIFIER)], head, [greenVerdict()]),
     });
     assert.equal(code, 0);
   });
 });
 
-test("a gate change stays blocked when the author applied the label", async () => {
+test("a gate change stays blocked when another actor applied the label", async () => {
   await withGateHead(async (base, head) => {
     const code = await main(["--base", base, "--head", head], {
-      env: {
-        GITHUB_TOKEN: "test-token",
-        GITHUB_REPOSITORY: "acme/app",
-        PR_NUMBER: "7",
-        PR_AUTHOR_LOGIN: "pr-author",
-      },
-      fetch: gateFetch([labeled(AUTHOR)], [verdictComment(VERIFIER, "PASS", head)]),
+      env: gateEnv,
+      fetch: gateFetch([labeled(AUTHOR)], head, [greenVerdict()]),
     });
     assert.equal(code, 1);
   });
@@ -682,13 +614,19 @@ test("a commit pushed after the label with an earlier commit date loses the appr
     assert.notEqual(shaA, shaB);
     process.chdir(dir);
     const code = await main(["--base", base, "--head", shaB], {
-      env: {
-        GITHUB_TOKEN: "test-token",
-        GITHUB_REPOSITORY: "acme/app",
-        PR_NUMBER: "7",
-        PR_AUTHOR_LOGIN: "pr-author",
+      env: gateEnv,
+      fetch: async (url) => {
+        if (url === TIMELINE_URL) {
+          return jsonResponse([labeled(VERIFIER)]);
+        }
+        if (url === statusUrl(shaA)) {
+          return jsonResponse({ statuses: [greenVerdict()] });
+        }
+        if (url === statusUrl(shaB)) {
+          return jsonResponse({ statuses: [] });
+        }
+        throw new Error(`unexpected GET ${url}`);
       },
-      fetch: gateFetch([labeled(VERIFIER)], [verdictComment(VERIFIER, "PASS", shaA)]),
     });
     assert.equal(code, 1);
   } finally {
@@ -720,13 +658,19 @@ test("a label for an older head is refused after a new commit", async () => {
     assert.notEqual(shaA, shaB);
     process.chdir(dir);
     const code = await main(["--base", base, "--head", shaB], {
-      env: {
-        GITHUB_TOKEN: "test-token",
-        GITHUB_REPOSITORY: "acme/app",
-        PR_NUMBER: "7",
-        PR_AUTHOR_LOGIN: "pr-author",
+      env: gateEnv,
+      fetch: async (url) => {
+        if (url === TIMELINE_URL) {
+          return jsonResponse([labeled(VERIFIER)]);
+        }
+        if (url === statusUrl(shaA)) {
+          return jsonResponse({ statuses: [greenVerdict()] });
+        }
+        if (url === statusUrl(shaB)) {
+          return jsonResponse({ statuses: [] });
+        }
+        throw new Error(`unexpected GET ${url}`);
       },
-      fetch: gateFetch([labeled(VERIFIER)], [verdictComment(VERIFIER, "PASS", shaA)]),
     });
     assert.equal(code, 1);
   } finally {
