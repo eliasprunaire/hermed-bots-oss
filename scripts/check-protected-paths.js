@@ -15,7 +15,9 @@ const GATE_FILES = [
 ];
 const GATE_LABEL = "gate-change-approved";
 const GATE_VERIFIER_LOGIN = "app-pilote-verifier[bot]";
-const HEAD_PUSH_EVENTS = new Set(["committed", "head_ref_force_pushed"]);
+const VERDICT_MARKER = "<!-- dev-lead-verifier -->";
+const VERDICT_LINE = /^VERDICT: (PASS\+NOTES|PASS|FAIL) @ ([0-9a-fA-F]{40})$/;
+const HEX_SHA = /^[0-9a-fA-F]{40}$/;
 
 function posix(file) {
   return String(file).replace(/\\/g, "/").toLowerCase();
@@ -159,59 +161,76 @@ function labelName(raw) {
   return raw.name;
 }
 
-function nestedDate(person) {
-  if (person == null || typeof person !== "object") {
-    return null;
+function resolveHeadSha(head) {
+  const sha = git(["rev-parse", "--verify", `${head}^{commit}`]).toString("utf8").trim();
+  if (!HEX_SHA.test(sha)) {
+    throw new Error("head is not a commit");
   }
-  if (typeof person.date !== "string" || person.date === "") {
-    return null;
-  }
-  return person.date;
+  return sha.toLowerCase();
 }
 
-function eventTimeMs(event) {
-  if (event == null || typeof event !== "object") {
+function commentUser(comment) {
+  if (comment == null || typeof comment !== "object") {
     return null;
   }
-  const raw =
-    (typeof event.created_at === "string" && event.created_at !== "" && event.created_at) ||
-    nestedDate(event.committer) ||
-    nestedDate(event.author);
-  if (raw == null) {
+  return comment.user;
+}
+
+function commentBody(comment) {
+  if (comment == null || typeof comment !== "object") {
     return null;
   }
-  const ms = Date.parse(raw);
-  return Number.isFinite(ms) ? ms : null;
+  if (typeof comment.body !== "string") {
+    return null;
+  }
+  return comment.body;
+}
+
+// last marked VERDICT from the verifier that cites headSha wins; FAIL cancels a prior PASS
+function hasVerifierPassForHead(comments, headSha) {
+  if (!Array.isArray(comments) || typeof headSha !== "string" || !HEX_SHA.test(headSha)) {
+    return false;
+  }
+  const want = headSha.toLowerCase();
+  let pass = false;
+  for (const comment of comments) {
+    if (foldLogin(readLogin(commentUser(comment))) !== GATE_VERIFIER_LOGIN) {
+      continue;
+    }
+    const body = commentBody(comment);
+    if (body == null || !body.includes(VERDICT_MARKER)) {
+      continue;
+    }
+    for (const line of body.split(/\r?\n/)) {
+      const match = VERDICT_LINE.exec(line);
+      if (!match || match[2].toLowerCase() !== want) {
+        continue;
+      }
+      pass = match[1] === "PASS" || match[1] === "PASS+NOTES";
+    }
+  }
+  return pass;
 }
 
 // latest labeled/unlabeled event for GATE_LABEL wins; presence of the label on the
-// pull payload is ignored. stale-label: labeled.created_at must be strictly after
-// the latest head_ref_force_pushed.created_at or committed.committer.date (timeline
-// committed events have no created_at).
-function gateApprovalFromEvents(events) {
+// pull payload is ignored. the label is bound to the head SHA via a marked PASS or
+// PASS+NOTES from the same verifier; commit dates are not used.
+function gateApprovalFromEvents(events, { headSha, comments } = {}) {
   if (!Array.isArray(events)) {
     return { ok: false, reason: "unreadable-events" };
   }
   let actor = null;
-  let labeledAt = null;
-  let headAt = null;
   for (const event of events) {
     if (event == null || typeof event !== "object") {
       continue;
-    }
-    const at = eventTimeMs(event);
-    if (HEAD_PUSH_EVENTS.has(event.event) && at != null && (headAt == null || at > headAt)) {
-      headAt = at;
     }
     if (labelName(event.label) !== GATE_LABEL) {
       continue;
     }
     if (event.event === "labeled") {
       actor = event.actor;
-      labeledAt = at;
     } else if (event.event === "unlabeled") {
       actor = null;
-      labeledAt = null;
     }
   }
   if (actor == null) {
@@ -221,8 +240,8 @@ function gateApprovalFromEvents(events) {
   if (actorLogin !== GATE_VERIFIER_LOGIN) {
     return { ok: false, reason: "not-verifier" };
   }
-  if (labeledAt == null || headAt == null || labeledAt <= headAt) {
-    return { ok: false, reason: "stale-label" };
+  if (!hasVerifierPassForHead(comments, headSha)) {
+    return { ok: false, reason: "no-pass-for-head" };
   }
   return { ok: true, login: actorLogin };
 }
@@ -263,19 +282,35 @@ async function githubGet(io, token, url) {
   throw new Error("GET failed");
 }
 
-async function loadEvents(io, token, owner, repo, number) {
-  const events = [];
-  let url = `https://api.github.com/repos/${owner}/${repo}/issues/${number}/timeline?per_page=100`;
+async function loadPages(io, token, startUrl) {
+  const items = [];
+  let url = startUrl;
   while (url) {
     const response = await githubGet(io, token, url);
     const page = await response.json();
     if (!Array.isArray(page)) {
-      throw new Error("event page is unreadable");
+      throw new Error("page is unreadable");
     }
-    events.push(...page);
+    items.push(...page);
     url = nextUrl(response.headers.get("link"));
   }
-  return events;
+  return items;
+}
+
+async function loadEvents(io, token, owner, repo, number) {
+  return loadPages(
+    io,
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/issues/${number}/timeline?per_page=100`,
+  );
+}
+
+async function loadComments(io, token, owner, repo, number) {
+  return loadPages(
+    io,
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/issues/${number}/comments?per_page=100`,
+  );
 }
 
 function repositoryParts(repository) {
@@ -292,14 +327,14 @@ function repositoryParts(repository) {
 function writeHits(kind, hits) {
   const label =
     kind === "gate"
-      ? `protected gate files changed (${GATE_FILES.join(", ")}). ${GATE_VERIFIER_LOGIN} label ${GATE_LABEL} required`
+      ? `protected gate files changed (${GATE_FILES.join(", ")}). ${GATE_VERIFIER_LOGIN} label ${GATE_LABEL} and PASS @ head required`
       : "protected agent config changed (.claude/, .codex/, .mcp.json, or a symlink or submodule at them)";
   process.stderr.write(
     `${label}:\n${hits.map((hit) => `  ${hit}`).join("\n")}\n`,
   );
 }
 
-async function ownerApproval(io) {
+async function ownerApproval(io, headSha) {
   const token = io.env.GITHUB_TOKEN;
   const repository = io.env.GITHUB_REPOSITORY;
   const number = io.env.PR_NUMBER;
@@ -313,7 +348,13 @@ async function ownerApproval(io) {
   } catch {
     return { ok: false, reason: "unreadable-events" };
   }
-  return gateApprovalFromEvents(events);
+  let comments;
+  try {
+    comments = await loadComments(io, token, names.owner, names.repo, number);
+  } catch {
+    return { ok: false, reason: "unreadable-comments" };
+  }
+  return gateApprovalFromEvents(events, { headSha, comments });
 }
 
 function collectHits(base, head) {
@@ -353,8 +394,10 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     return 1;
   }
   let grouped;
+  let headSha;
   try {
     grouped = collectHits(args.base, args.head);
+    headSha = resolveHeadSha(args.head);
   } catch (err) {
     process.stderr.write(`${err.message}\n`);
     return 1;
@@ -368,7 +411,7 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     process.stdout.write("ok\n");
     return 0;
   }
-  const approval = await ownerApproval(io);
+  const approval = await ownerApproval(io, headSha);
   if (approval.ok) {
     process.stdout.write("ok\n");
     return 0;

@@ -430,61 +430,69 @@ const VERIFIER = { login: "app-pilote-verifier[bot]", type: "Bot" };
 const OWNER = { login: "repo-owner", type: "User" };
 const AUTHOR = { login: "pr-author", type: "User" };
 const CURSOR_BOT = { login: "cursor[bot]", type: "Bot" };
-const HEAD_AT = "2026-10-31T11:00:00Z";
-const LABEL_AT = "2026-10-31T12:00:00Z";
+const HEAD_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const OTHER_SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const MARKER = "<!-- dev-lead-verifier -->";
 
-function committed(createdAt) {
-  return { event: "committed", committer: { date: createdAt } };
+function labeled(actor) {
+  return { event: "labeled", label: { name: GATE_LABEL }, actor };
 }
 
-function labeled(actor, createdAt = LABEL_AT) {
-  return { event: "labeled", label: { name: GATE_LABEL }, actor, created_at: createdAt };
+function verdictComment(user, verdict, sha) {
+  return { user, body: `VERDICT: ${verdict} @ ${sha}\n${MARKER}` };
 }
 
-function afterHead(actor = VERIFIER) {
-  return [committed(HEAD_AT), labeled(actor, LABEL_AT)];
+function passOn(sha, user = VERIFIER) {
+  return { headSha: sha, comments: [verdictComment(user, "PASS", sha)] };
 }
 
-test("gate-change-approved counts only when app-pilote-verifier[bot] applied it after the head", () => {
-  assert.deepEqual(gateApprovalFromEvents(afterHead()), {
+test("gate-change-approved counts only when app-pilote-verifier[bot] labeled and PASSed the head", () => {
+  assert.deepEqual(gateApprovalFromEvents([labeled(VERIFIER)], passOn(HEAD_SHA)), {
     ok: true,
     login: "app-pilote-verifier[bot]",
   });
+  assert.equal(
+    gateApprovalFromEvents([labeled(VERIFIER)], {
+      headSha: HEAD_SHA,
+      comments: [verdictComment(VERIFIER, "PASS+NOTES", HEAD_SHA)],
+    }).ok,
+    true,
+  );
 });
 
 test("the label on the pull is ignored; only issue events count", () => {
-  const decision = gateApprovalFromEvents([], { labels: [GATE_LABEL] });
+  const decision = gateApprovalFromEvents([], { labels: [GATE_LABEL], ...passOn(HEAD_SHA) });
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "no-label");
 });
 
 test("a label from a human is refused", () => {
-  assert.equal(gateApprovalFromEvents(afterHead(OWNER)).reason, "not-verifier");
+  assert.equal(gateApprovalFromEvents([labeled(OWNER)], passOn(HEAD_SHA)).reason, "not-verifier");
 });
 
 test("a label from the pull author is refused", () => {
-  assert.equal(gateApprovalFromEvents(afterHead(AUTHOR)).reason, "not-verifier");
+  assert.equal(gateApprovalFromEvents([labeled(AUTHOR)], passOn(HEAD_SHA)).reason, "not-verifier");
 });
 
 test("a label from cursor[bot] is refused", () => {
-  assert.equal(gateApprovalFromEvents(afterHead(CURSOR_BOT)).reason, "not-verifier");
+  assert.equal(gateApprovalFromEvents([labeled(CURSOR_BOT)], passOn(HEAD_SHA)).reason, "not-verifier");
 });
 
-test("a verifier label older than the head is refused", () => {
-  for (const later of [committed(LABEL_AT), { event: "head_ref_force_pushed", created_at: LABEL_AT }]) {
-    assert.equal(
-      gateApprovalFromEvents([labeled(VERIFIER, HEAD_AT), later]).reason,
-      "stale-label",
-      later.event,
-    );
-  }
+test("a verifier PASS on another SHA does not approve the head", () => {
+  assert.equal(
+    gateApprovalFromEvents([labeled(VERIFIER)], {
+      headSha: HEAD_SHA,
+      comments: [verdictComment(VERIFIER, "PASS", OTHER_SHA)],
+    }).reason,
+    "no-pass-for-head",
+  );
 });
 
 test("unlabeling clears a previous verifier approval", () => {
-  const decision = gateApprovalFromEvents([
-    ...afterHead(),
-    { event: "unlabeled", label: { name: GATE_LABEL }, actor: VERIFIER, created_at: "2026-10-31T13:00:00Z" },
-  ]);
+  const decision = gateApprovalFromEvents(
+    [labeled(VERIFIER), { event: "unlabeled", label: { name: GATE_LABEL }, actor: VERIFIER }],
+    passOn(HEAD_SHA),
+  );
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "no-label");
 });
@@ -530,8 +538,21 @@ async function withGateHead(run) {
 }
 
 const TIMELINE_URL = "https://api.github.com/repos/acme/app/issues/7/timeline?per_page=100";
+const COMMENTS_URL = "https://api.github.com/repos/acme/app/issues/7/comments?per_page=100";
 
-test("a verifier labeled event after the head allows a gate file change", async () => {
+function gateFetch(events, comments) {
+  return async (url) => {
+    if (url === TIMELINE_URL) {
+      return jsonResponse(events);
+    }
+    if (url === COMMENTS_URL) {
+      return jsonResponse(comments);
+    }
+    throw new Error(`unexpected GET ${url}`);
+  };
+}
+
+test("a verifier label and PASS on the head allows a gate file change", async () => {
   await withGateHead(async (base, head) => {
     const code = await main(["--base", base, "--head", head], {
       env: {
@@ -540,12 +561,7 @@ test("a verifier labeled event after the head allows a gate file change", async 
         PR_NUMBER: "7",
         PR_AUTHOR_LOGIN: "pr-author",
       },
-      fetch: async (url) => {
-        if (url === TIMELINE_URL) {
-          return jsonResponse(afterHead());
-        }
-        throw new Error(`unexpected GET ${url}`);
-      },
+      fetch: gateFetch([labeled(VERIFIER)], [verdictComment(VERIFIER, "PASS", head)]),
     });
     assert.equal(code, 0);
   });
@@ -560,15 +576,61 @@ test("a gate change stays blocked when the author applied the label", async () =
         PR_NUMBER: "7",
         PR_AUTHOR_LOGIN: "pr-author",
       },
-      fetch: async (url) => {
-        if (url === TIMELINE_URL) {
-          return jsonResponse(afterHead(AUTHOR));
-        }
-        throw new Error(`unexpected GET ${url}`);
-      },
+      fetch: gateFetch([labeled(AUTHOR)], [verdictComment(VERIFIER, "PASS", head)]),
     });
     assert.equal(code, 1);
   });
+});
+
+test("a commit pushed after the label with an earlier commit date loses the approval", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "check-protected-paths-"));
+  const previous = process.cwd();
+  try {
+    git(dir, "init", "-q", "-b", "main");
+    git(dir, "config", "user.email", "t@example.test");
+    git(dir, "config", "user.name", "t");
+    git(dir, "config", "commit.gpgsign", "false");
+    put(dir, "README.md", "x\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "init");
+    const base = git(dir, "rev-parse", "HEAD");
+    put(dir, "scripts/verdict-gate.js", "changed\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "gate");
+    const shaA = git(dir, "rev-parse", "HEAD");
+    put(dir, "scripts/verdict-gate.js", "again\n");
+    git(dir, "add", "-A");
+    const dated = spawnSync(
+      "git",
+      ["-c", "core.hooksPath=/dev/null", "commit", "-q", "-m", "backdated"],
+      {
+        cwd: dir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          GIT_AUTHOR_DATE: "2019-01-01T00:00:00Z",
+          GIT_COMMITTER_DATE: "2019-01-01T00:00:00Z",
+        },
+      },
+    );
+    assert.equal(dated.status, 0, dated.stderr);
+    const shaB = git(dir, "rev-parse", "HEAD");
+    assert.notEqual(shaA, shaB);
+    process.chdir(dir);
+    const code = await main(["--base", base, "--head", shaB], {
+      env: {
+        GITHUB_TOKEN: "test-token",
+        GITHUB_REPOSITORY: "acme/app",
+        PR_NUMBER: "7",
+        PR_AUTHOR_LOGIN: "pr-author",
+      },
+      fetch: gateFetch([labeled(VERIFIER)], [verdictComment(VERIFIER, "PASS", shaA)]),
+    });
+    assert.equal(code, 1);
+  } finally {
+    process.chdir(previous);
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("a verifier label does not waive an agent-config change", () => {
