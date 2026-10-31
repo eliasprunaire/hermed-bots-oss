@@ -131,6 +131,23 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(launch.present)
     }
 
+    func testWrapperModeLeavesTheIdentityToTheExecutable() {
+        for sessionKind in [SSHLaunchIdentityKind.file, .certificate, .agent] {
+            let launch = SSHLaunchIdentity.overlay(
+                mode: .wrapper,
+                sessionKind: sessionKind,
+                sessionPresent: false,
+                keyCommandSet: false,
+                hasExternalIdentityAgent: false
+            )
+            XCTAssertEqual(launch.kind, .executable, "\(sessionKind)")
+            XCTAssertTrue(launch.present, "\(sessionKind)")
+        }
+        XCTAssertEqual(SSHLaunchIdentityKind.executable.rawValue, "executable")
+        XCTAssertTrue(SSHLaunchIdentity.allows(.executable, launch: .wrapper))
+        XCTAssertFalse(SSHLaunchIdentity.allows(.executable, launch: .ephemeralAgent))
+    }
+
     func testEphemeralPresenceFollowsKeyCommandOrExternalAgent() {
         let missing = SSHLaunchIdentity.overlay(
             mode: .ephemeralAgent,

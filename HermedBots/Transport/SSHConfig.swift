@@ -7,12 +7,14 @@ enum SSHIdentityKind: Equatable, Sendable {
     case agent
     case certificate
     case file
+    case executable
 
     var label: String {
         switch self {
         case .agent: String(localized: "agent SSH")
         case .certificate: String(localized: "certificat")
         case .file: String(localized: "fichier")
+        case .executable: String(localized: "gérée par l'exécutable")
         }
     }
 
@@ -21,6 +23,7 @@ enum SSHIdentityKind: Equatable, Sendable {
         case .agent: .agent
         case .certificate: .certificate
         case .file: .file
+        case .executable: .executable
         }
     }
 
@@ -29,6 +32,7 @@ enum SSHIdentityKind: Equatable, Sendable {
         case .agent: self = .agent
         case .certificate: self = .certificate
         case .file: self = .file
+        case .executable: self = .executable
         }
     }
 }

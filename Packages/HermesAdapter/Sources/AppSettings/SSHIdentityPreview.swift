@@ -4,6 +4,8 @@ public enum SSHLaunchIdentityKind: String, Sendable, Equatable {
     case agent
     case certificate
     case file
+    /// Mode Exécutable : l'exécutable choisit l'identité, l'app n'en lit aucune
+    case executable
 }
 
 public struct SSHLaunchIdentity: Equatable, Sendable {
@@ -32,8 +34,10 @@ public struct SSHLaunchIdentity: Equatable, Sendable {
         hasExternalIdentityAgent: Bool
     ) -> SSHLaunchIdentity {
         switch mode {
-        case .sessionAgent, .wrapper:
+        case .sessionAgent:
             return SSHLaunchIdentity(kind: sessionKind, present: sessionPresent)
+        case .wrapper:
+            return SSHLaunchIdentity(kind: .executable, present: true)
         case .ephemeralAgent:
             return SSHLaunchIdentity(kind: .agent, present: keyCommandSet || hasExternalIdentityAgent)
         }

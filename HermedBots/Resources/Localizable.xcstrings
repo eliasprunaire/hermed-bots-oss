@@ -152,6 +152,11 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "file" } }
       }
     },
+    "gérée par l'exécutable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "managed by the executable" } }
+      }
+    },
     "Hermes a refusé la réponse : %@" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Hermes refused the answer: %@" } }

@@ -141,6 +141,21 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertEqual(session.matchingLaunch(mode: .sessionAgent, keyCommandSet: false).identity, .file)
     }
 
+    func testIdentityLineInWrapperModeSaysManagedByExecutable() {
+        // le dump nomme un fichier de clé absent : sans le correctif, la ligne disait « fichier » et « absente »
+        let session = parse(defaultDump, alias: "unknown-alias.invalid")
+        XCTAssertEqual(session.identity, .file)
+        XCTAssertFalse(session.identityPresent)
+        let launch = session.matchingLaunch(mode: .wrapper, keyCommandSet: false)
+        XCTAssertEqual(launch.identity, .executable)
+        XCTAssertEqual(launch.identity.label, "gérée par l'exécutable")
+        XCTAssertTrue(launch.identityPresent)
+        XCTAssertFalse(launch.identity.label.contains("fichier"))
+        XCTAssertEqual(launch.identity.launchKind, .executable)
+        // le mode session garde sa ligne
+        XCTAssertEqual(session.matchingLaunch(mode: .sessionAgent, keyCommandSet: false).identity, .file)
+    }
+
     func testAPresentPublicKeyIsOnlyALabel() {
         let dump = """
             user hermes
