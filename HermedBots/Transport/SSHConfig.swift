@@ -263,10 +263,38 @@ enum SSHConfig {
             }
         case .agent:
             if let agent, isNone(agent) { return false }
-            if let agent, agent != "SSH_AUTH_SOCK" { return filesExist(expand(agent)) }
+            if let agent {
+                return filesExist(resolvedIdentityAgentPath(agent, authSock: authSock))
+            }
             if let authSock, !authSock.isEmpty { return filesExist(authSock) }
             return false
         }
+    }
+
+    /// `ssh -G` peut laisser `IdentityAgent` sous `$SSH_AUTH_SOCK` ou `${VAR}` : ssh lit la variable, pas un chemin.
+    private static func resolvedIdentityAgentPath(_ value: String, authSock: String?) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let name = identityAgentEnvironmentName(trimmed) {
+            let socket = name == "SSH_AUTH_SOCK" ? authSock : ProcessInfo.processInfo.environment[name]
+            if let socket, !socket.isEmpty {
+                return expand(socket)
+            }
+        }
+        return expand(trimmed)
+    }
+
+    private static func identityAgentEnvironmentName(_ value: String) -> String? {
+        if value == "SSH_AUTH_SOCK" { return "SSH_AUTH_SOCK" }
+        guard value.first == "$" else { return nil }
+        let body = String(value.dropFirst())
+        let name: String
+        if body.count >= 2, body.first == "{", body.last == "}" {
+            name = String(body.dropFirst().dropLast())
+        } else {
+            name = body
+        }
+        guard name.range(of: #"^[A-Za-z_][A-Za-z0-9_]*$"#, options: .regularExpression) != nil else { return nil }
+        return name
     }
 
     private static func dictionary(from dump: String) -> [String: [String]] {

@@ -551,6 +551,18 @@ final class SSHConnectorTests: XCTestCase {
         XCTAssertEqual(nothing.refused, [.noIdentity])
     }
 
+    func testAnIdentityAgentEnvironmentReferenceCountsWhenTheSocketExists() async {
+        for value in ["$SSH_AUTH_SOCK", "${SSH_AUTH_SOCK}"] {
+            let result = await outcome(
+                of: dump(identityFile: missingIdentityFile, extra: "identityagent \(value)\n"),
+                authMode: .sessionAgent,
+                authSock: existingIdentityFile
+            )
+            XCTAssertEqual(result.refused, [], value)
+            XCTAssertEqual(result.opened, ["lab.invalid"], value)
+        }
+    }
+
     func testEphemeralWithoutKeyCommandOrAgentIsRefusedBeforeLaunch() async {
         // le fichier d'identité du dump ne compte pas : l'agent temporaire n'en lit aucun
         let files = dump(identityFile: existingIdentityFile)
