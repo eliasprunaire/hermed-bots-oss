@@ -487,9 +487,9 @@ final class SSHConnectorTests: XCTestCase {
         var preview: SSHConnectionPreview?
     }
 
-    private func outcome(of dump: SSHConfigDump, authMode: SSHAuthMode, keyCommandSet: Bool = false) async -> Outcome {
+    private func outcome(of dump: SSHConfigDump, authMode: SSHAuthMode, keyCommandSet: Bool = false, authSock: String? = nil) async -> Outcome {
         let resolver = ScriptedSSHResolver(dumps: [.tunnel: dump, .profileList: dump, .profileLocks: dump])
-        let connector = SSHConnector(resolver: resolver, localUser: "operator", authSock: nil)
+        let connector = SSHConnector(resolver: resolver, localUser: "operator", authSock: authSock)
         var result = Outcome()
         connector.begin(
             alias: "lab.invalid",
@@ -526,6 +526,29 @@ final class SSHConnectorTests: XCTestCase {
         let wrapper = await outcome(of: dump(identityFile: missingIdentityFile), authMode: .wrapper)
         XCTAssertEqual(wrapper.refused, [])
         XCTAssertEqual(wrapper.opened, ["lab.invalid"])
+    }
+
+    func testAKeyFileIsEnoughWhenTheConfiguredAgentSocketIsMissing() async {
+        // ssh se rabat sur le fichier quand l'IdentityAgent ne répond pas : l'aperçu « agent absent » ne suffit pas à refuser
+        let result = await outcome(of: dump(identityFile: existingIdentityFile, extra: "identityagent /tmp/fake-agent.invalid\n"), authMode: .sessionAgent)
+        XCTAssertEqual(result.refused, [])
+        XCTAssertEqual(result.opened, ["lab.invalid"])
+        XCTAssertEqual(result.preview?.identityPresent, false, "l'aperçu garde son état : l'agent annoncé est absent")
+    }
+
+    func testTheSessionAgentIsEnoughWhenTheCustomIdentityFileIsMissing() async {
+        // ssh présente aussi les clés de l'agent de session quand l'IdentityFile personnalisé manque
+        let result = await outcome(of: dump(identityFile: missingIdentityFile), authMode: .sessionAgent, authSock: existingIdentityFile)
+        XCTAssertEqual(result.refused, [])
+        XCTAssertEqual(result.opened, ["lab.invalid"])
+        XCTAssertEqual(result.preview?.identityPresent, false, "l'aperçu garde son état : la clé annoncée est absente")
+        // IdentityAgent none désactive l'agent : il ne reste aucune source
+        let disabled = await outcome(of: dump(identityFile: missingIdentityFile, extra: "identityagent none\n"), authMode: .sessionAgent, authSock: existingIdentityFile)
+        XCTAssertEqual(disabled.refused, [.noIdentity])
+        XCTAssertEqual(disabled.opened, [])
+        // ni fichier ni socket : refus
+        let nothing = await outcome(of: dump(identityFile: missingIdentityFile), authMode: .sessionAgent, authSock: "/tmp/fake-agent.invalid")
+        XCTAssertEqual(nothing.refused, [.noIdentity])
     }
 
     func testEphemeralWithoutKeyCommandOrAgentIsRefusedBeforeLaunch() async {
@@ -948,6 +971,7 @@ final class AppModelConnectTests: XCTestCase {
             user operator
             hostname 127.0.0.1
             port 1
+            identityagent none
             identityfile \(missingIdentityFile)
             proxyjump none
             """
@@ -967,7 +991,7 @@ final class AppModelConnectTests: XCTestCase {
         await eventually {
             if case .failed = model.tunnel.state { true } else { false }
         }
-        // le mode capturé est la session : sans identité, le connecteur refuse avant tout lancement ; le mode Exécutable (sans garde) donnerait missingWrapper
+        // le mode capturé est la session : sans identité (IdentityAgent none, donc le SSH_AUTH_SOCK de l'hôte ne compte pas), le connecteur refuse avant tout lancement ; le mode Exécutable (sans garde) donnerait missingWrapper
         if case .failed(let failure) = model.tunnel.state {
             XCTAssertEqual(failure, .noIdentity)
         } else {

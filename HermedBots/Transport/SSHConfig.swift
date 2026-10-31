@@ -44,6 +44,8 @@ struct SSHConnectionPreview: Equatable, Sendable {
     let identityAgentValue: String?
     let sessionKind: SSHLaunchIdentityKind
     let sessionPresent: Bool
+    /// Au moins une source d'identité existe (certificat, fichier de clé, IdentityAgent ou agent de session) : ssh les essaie toutes, `identityPresent` n'en juge qu'une
+    let anySessionIdentityPresent: Bool
 
     var identityPresentLabel: String {
         if identity == .certificate {
@@ -75,8 +77,14 @@ struct SSHConnectionPreview: Equatable, Sendable {
             usesExternalIdentityAgent: usesExternalIdentityAgent,
             identityAgentValue: identityAgentValue,
             sessionKind: sessionKind,
-            sessionPresent: sessionPresent
+            sessionPresent: sessionPresent,
+            anySessionIdentityPresent: anySessionIdentityPresent
         )
+    }
+
+    /// Le mode agent temporaire n'utilise que sa commande de clé ou l'IdentityAgent externe ; les autres modes laissent ssh essayer toute source
+    func canAuthenticate(mode: SSHAuthMode) -> Bool {
+        mode == .ephemeralAgent ? identityPresent : anySessionIdentityPresent
     }
 }
 
@@ -219,7 +227,10 @@ enum SSHConfig {
             usesExternalIdentityAgent: SSHLaunchIdentity.identityAgentIsExternal(agent),
             identityAgentValue: agent,
             sessionKind: identity.launchKind,
-            sessionPresent: present
+            sessionPresent: present,
+            anySessionIdentityPresent: [SSHIdentityKind.certificate, .file, .agent].contains {
+                identityPresent(kind: $0, certificates: certificates, identityFiles: identityFiles, agent: agent, authSock: authSock, filesExist: filesExist)
+            }
         )
     }
 
@@ -251,6 +262,7 @@ enum SSHConfig {
                 return filesExist(expanded) || filesExist(expanded + ".pub")
             }
         case .agent:
+            if let agent, isNone(agent) { return false }
             if let agent, agent != "SSH_AUTH_SOCK" { return filesExist(expand(agent)) }
             if let authSock, !authSock.isEmpty { return filesExist(authSock) }
             return false
@@ -380,8 +392,8 @@ final class SSHConnector {
                     .matchingLaunch(mode: authMode, keyCommandSet: keyCommandSet)
                 preview = preview ?? next
                 let config = try SSHConnectionPlanner.config(from: next, refuseTestHost: refuseTestHost)
-                // `next` porte l'identité du mode de lancement ; le mode Exécutable apporte la sienne
-                if authMode != .wrapper, !next.identityPresent { throw SSHFailure.noIdentity }
+                // le mode Exécutable apporte sa propre identité ; sinon une seule source existante suffit
+                if authMode != .wrapper, !next.canAuthenticate(mode: authMode) { throw SSHFailure.noIdentity }
                 tunnel = tunnel ?? (config, next)
             }
             guard id == generation, !Task.isCancelled, let tunnel else { return }
