@@ -36,6 +36,7 @@ test("matches agent config and the gate files", () => {
     "sub/.mcp.json",
     "scripts/check-protected-paths.js",
     "scripts/verdict-gate.js",
+    "scripts/verdict-prose.js",
     ".github/workflows/verdict-gate.yml",
     ".github/workflows/protected-paths.yml",
     ".github/workflows/anti-parallel.yml",
@@ -50,6 +51,7 @@ test("matches agent config and the gate files", () => {
     ".Claude/settings.json",
     "scripts/check-protected-paths.js",
     "scripts/verdict-gate.js",
+    "scripts/verdict-prose.js",
     ".github/workflows/verdict-gate.yml",
     ".github/workflows/protected-paths.yml",
     ".github/workflows/anti-parallel.yml",
@@ -350,6 +352,11 @@ function runWorkflowStep(headFiles) {
     git(origin, "config", "uploadpack.allowAnySHA1InWant", "true");
     put(origin, "README.md", "x\n");
     put(origin, "scripts/check-protected-paths.js", readFileSync(script, "utf8"));
+    put(
+      origin,
+      "scripts/verdict-prose.js",
+      readFileSync(join(root, "scripts/verdict-prose.js"), "utf8"),
+    );
     git(origin, "add", "-A");
     git(origin, "commit", "-q", "-m", "init");
     const base = git(origin, "rev-parse", "HEAD");
@@ -433,13 +440,15 @@ const CURSOR_BOT = { login: "cursor[bot]", type: "Bot" };
 const HEAD_SHA = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 const OTHER_SHA = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const MARKER = "<!-- dev-lead-verifier -->";
+const PASS_AT = "2026-10-31T11:00:00Z";
+const LABEL_AT = "2026-10-31T12:00:00Z";
 
-function labeled(actor) {
-  return { event: "labeled", label: { name: GATE_LABEL }, actor };
+function labeled(actor, createdAt = LABEL_AT) {
+  return { event: "labeled", label: { name: GATE_LABEL }, actor, created_at: createdAt };
 }
 
-function verdictComment(user, verdict, sha) {
-  return { user, body: `VERDICT: ${verdict} @ ${sha}\n${MARKER}` };
+function verdictComment(user, verdict, sha, createdAt = PASS_AT) {
+  return { user, body: `VERDICT: ${verdict} @ ${sha}\n${MARKER}`, created_at: createdAt };
 }
 
 function passOn(sha, user = VERIFIER) {
@@ -496,6 +505,61 @@ test("unlabeling clears a previous verifier approval", () => {
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "no-label");
 });
+
+test("a PASS inside a closed code fence does not cancel a FAIL", () => {
+  for (const fence of ["```", "~~~"]) {
+    const decision = gateApprovalFromEvents([labeled(VERIFIER)], {
+      headSha: HEAD_SHA,
+      comments: [
+        verdictComment(VERIFIER, "FAIL", HEAD_SHA, PASS_AT),
+        {
+          user: VERIFIER,
+          created_at: "2026-10-31T11:30:00Z",
+          body: [fence, `VERDICT: PASS @ ${HEAD_SHA}`, fence, MARKER].join("\n"),
+        },
+      ],
+    });
+    assert.equal(decision.ok, false, fence);
+    assert.equal(decision.reason, "no-pass-for-head", fence);
+  }
+});
+
+test("a PASS inside a blockquote does not count", () => {
+  const decision = gateApprovalFromEvents([labeled(VERIFIER)], {
+    headSha: HEAD_SHA,
+    comments: [
+      {
+        user: VERIFIER,
+        created_at: PASS_AT,
+        body: [`> VERDICT: PASS @ ${HEAD_SHA}`, MARKER].join("\n"),
+      },
+    ],
+  });
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "no-pass-for-head");
+});
+
+test("a PASS outside a fence still counts", () => {
+  const decision = gateApprovalFromEvents([labeled(VERIFIER)], {
+    headSha: HEAD_SHA,
+    comments: [
+      {
+        user: VERIFIER,
+        created_at: PASS_AT,
+        body: ["```", "sample", "```", `VERDICT: PASS @ ${HEAD_SHA}`, MARKER].join("\n"),
+      },
+    ],
+  });
+  assert.equal(decision.ok, true);
+});
+
+test("a label applied before the PASS on the head is refused", () => {
+  assert.equal(
+    gateApprovalFromEvents([labeled(VERIFIER, "2026-10-31T10:00:00Z")], passOn(HEAD_SHA)).reason,
+    "stale-label",
+  );
+});
+
 
 function jsonResponse(body, link) {
   return {
@@ -614,6 +678,44 @@ test("a commit pushed after the label with an earlier commit date loses the appr
       },
     );
     assert.equal(dated.status, 0, dated.stderr);
+    const shaB = git(dir, "rev-parse", "HEAD");
+    assert.notEqual(shaA, shaB);
+    process.chdir(dir);
+    const code = await main(["--base", base, "--head", shaB], {
+      env: {
+        GITHUB_TOKEN: "test-token",
+        GITHUB_REPOSITORY: "acme/app",
+        PR_NUMBER: "7",
+        PR_AUTHOR_LOGIN: "pr-author",
+      },
+      fetch: gateFetch([labeled(VERIFIER)], [verdictComment(VERIFIER, "PASS", shaA)]),
+    });
+    assert.equal(code, 1);
+  } finally {
+    process.chdir(previous);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a label for an older head is refused after a new commit", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "check-protected-paths-"));
+  const previous = process.cwd();
+  try {
+    git(dir, "init", "-q", "-b", "main");
+    git(dir, "config", "user.email", "t@example.test");
+    git(dir, "config", "user.name", "t");
+    git(dir, "config", "commit.gpgsign", "false");
+    put(dir, "README.md", "x\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "init");
+    const base = git(dir, "rev-parse", "HEAD");
+    put(dir, "scripts/verdict-gate.js", "changed\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "gate");
+    const shaA = git(dir, "rev-parse", "HEAD");
+    put(dir, "scripts/verdict-gate.js", "again\n");
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "next");
     const shaB = git(dir, "rev-parse", "HEAD");
     assert.notEqual(shaA, shaB);
     process.chdir(dir);

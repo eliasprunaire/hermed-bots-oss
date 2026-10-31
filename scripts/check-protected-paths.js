@@ -2,6 +2,7 @@
 
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");
+const { verdictLines, plainMarker } = require("./verdict-prose.js");
 
 const PROTECTED_DIRS = [".claude/", ".codex/"];
 const PROTECTED_FILES = [".mcp.json"];
@@ -12,11 +13,10 @@ const GATE_FILES = [
   "scripts/verdict-gate.js",
   "scripts/check-protected-paths.js",
   "scripts/check-anti-parallel.js",
+  "scripts/verdict-prose.js",
 ];
 const GATE_LABEL = "gate-change-approved";
 const GATE_VERIFIER_LOGIN = "app-pilote-verifier[bot]";
-const VERDICT_MARKER = "<!-- dev-lead-verifier -->";
-const VERDICT_LINE = /^VERDICT: (PASS\+NOTES|PASS|FAIL) @ ([0-9a-fA-F]{40})$/;
 const HEX_SHA = /^[0-9a-fA-F]{40}$/;
 
 function posix(file) {
@@ -186,40 +186,54 @@ function commentBody(comment) {
   return comment.body;
 }
 
-// last marked VERDICT from the verifier that cites headSha wins; FAIL cancels a prior PASS
-function hasVerifierPassForHead(comments, headSha) {
+function createdAtMs(raw) {
+  if (raw == null || typeof raw !== "object") {
+    return null;
+  }
+  if (typeof raw.created_at !== "string" || raw.created_at === "") {
+    return null;
+  }
+  const ms = Date.parse(raw.created_at);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+// last marked VERDICT from the verifier that cites headSha wins; FAIL cancels a prior PASS.
+// prose() from verdict-prose.js drops fenced blocks and blockquotes.
+function verifierPassForHead(comments, headSha) {
   if (!Array.isArray(comments) || typeof headSha !== "string" || !HEX_SHA.test(headSha)) {
-    return false;
+    return { pass: false, at: null };
   }
   const want = headSha.toLowerCase();
   let pass = false;
+  let at = null;
   for (const comment of comments) {
     if (foldLogin(readLogin(commentUser(comment))) !== GATE_VERIFIER_LOGIN) {
       continue;
     }
     const body = commentBody(comment);
-    if (body == null || !body.includes(VERDICT_MARKER)) {
+    if (body == null || !plainMarker(body)) {
       continue;
     }
-    for (const line of body.split(/\r?\n/)) {
-      const match = VERDICT_LINE.exec(line);
-      if (!match || match[2].toLowerCase() !== want) {
+    for (const line of verdictLines(body)) {
+      if (line.sha !== want) {
         continue;
       }
-      pass = match[1] === "PASS" || match[1] === "PASS+NOTES";
+      pass = line.verdict === "PASS" || line.verdict === "PASS+NOTES";
+      at = createdAtMs(comment);
     }
   }
-  return pass;
+  return { pass, at };
 }
 
 // latest labeled/unlabeled event for GATE_LABEL wins; presence of the label on the
 // pull payload is ignored. the label is bound to the head SHA via a marked PASS or
-// PASS+NOTES from the same verifier; commit dates are not used.
+// PASS+NOTES from the same verifier, and must be after that verdict.
 function gateApprovalFromEvents(events, { headSha, comments } = {}) {
   if (!Array.isArray(events)) {
     return { ok: false, reason: "unreadable-events" };
   }
   let actor = null;
+  let labeledAt = null;
   for (const event of events) {
     if (event == null || typeof event !== "object") {
       continue;
@@ -229,8 +243,10 @@ function gateApprovalFromEvents(events, { headSha, comments } = {}) {
     }
     if (event.event === "labeled") {
       actor = event.actor;
+      labeledAt = createdAtMs(event);
     } else if (event.event === "unlabeled") {
       actor = null;
+      labeledAt = null;
     }
   }
   if (actor == null) {
@@ -240,8 +256,12 @@ function gateApprovalFromEvents(events, { headSha, comments } = {}) {
   if (actorLogin !== GATE_VERIFIER_LOGIN) {
     return { ok: false, reason: "not-verifier" };
   }
-  if (!hasVerifierPassForHead(comments, headSha)) {
+  const found = verifierPassForHead(comments, headSha);
+  if (!found.pass) {
     return { ok: false, reason: "no-pass-for-head" };
+  }
+  if (labeledAt == null || found.at == null || labeledAt <= found.at) {
+    return { ok: false, reason: "stale-label" };
   }
   return { ok: true, login: actorLogin };
 }
