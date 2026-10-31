@@ -7,6 +7,7 @@ const { join } = require("node:path");
 const {
   checkSources,
   explicitSquashBody,
+  stripCoAuthoredBy,
 } = require("./check-pr-attribution.js");
 
 const TRUSTED_HELPERS = [
@@ -91,7 +92,7 @@ function main(argv = process.argv.slice(2), deps = {}) {
     return 1;
   }
   const pr = parsed.pr;
-  const squashBody = (deps.squashBody || explicitSquashBody)();
+  const squashBody = stripCoAuthoredBy((deps.squashBody || explicitSquashBody)());
   const failures = checkSources([{ label: "squash body", text: squashBody }]);
   if (failures.length > 0) {
     for (const line of failures) {

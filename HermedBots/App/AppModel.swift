@@ -89,6 +89,7 @@ final class AppModel {
     private var sshResolver: any SSHConfigResolving
     private let connector: SSHConnector
     private var previewGeneration = 0
+    private var pendingLaunch: SSHClientSettings?
     let updates: UpdateCheck
     private(set) var updateRender = 0
     #if DEBUG
@@ -99,7 +100,7 @@ final class AppModel {
     // de quoi lire la liste des profils par un second ssh : le même alias que le tunnel
     private var sshBackend: SystemSSHBackend?
     private var sshConfig: SSHTunnelConfig?
-    private var launchClient: SSHClientSettings?
+    private(set) var launchClient: SSHClientSettings?
     /// Une relecture SSH par profil et par 401/403, puis le message d'échec ; « Réessayer » la rouvre
     private let apiKeyFetches = APIKeyFetches()
     /// Le profil dont le refus affiche `apiError` : « Réessayer » relit sa clé, pas celle du profil à l'écran
@@ -273,7 +274,9 @@ final class AppModel {
     func connect() {
         apiKeyFetches.reset()
         persistEndpoint()
+        previewGeneration += 1
         let client = capturedClientSettings()
+        pendingLaunch = client
         connector.begin(
             alias: host,
             refuseTestHost: environment.refuseTestHost,
@@ -292,11 +295,15 @@ final class AppModel {
                 self.authMode = launch.authMode
             }
             let shown = preview.matchingLaunch(mode: launch.authMode, keyCommandSet: !launch.keyCommandPath.isEmpty)
+            self.previewGeneration += 1
             self.preview = shown
             self.displayedPort = .readOnly(resolvedPort: shown.port)
             self.openTunnel(config, client: launch)
+            self.pendingLaunch = nil
         }, refused: { [weak self] failure, preview in
             guard let self else { return }
+            self.pendingLaunch = nil
+            self.previewGeneration += 1
             if let preview {
                 self.preview = preview
                 self.displayedPort = .readOnly(resolvedPort: preview.port)
@@ -326,7 +333,9 @@ final class AppModel {
                 authSock: ProcessInfo.processInfo.environment["SSH_AUTH_SOCK"]
             )
             guard id == previewGeneration else { return }
-            if !authModeChosen {
+            if pendingLaunch != nil { return }
+            let locked = launchClient
+            if locked == nil, !authModeChosen {
                 authMode = SSHAuthModeChoice.selected(
                     userChose: false,
                     stored: mode,
@@ -334,10 +343,15 @@ final class AppModel {
                     hasExternalIdentityAgent: session.usesExternalIdentityAgent
                 )
             }
-            preview = session.matchingLaunch(mode: authMode, keyCommandSet: keyCommandSet)
+            let overlayMode = SSHLaunchIdentity.overlayMode(picker: authMode, launch: locked?.authMode)
+            let overlayKey = locked.map { !$0.keyCommandPath.isEmpty } ?? keyCommandSet
+            let shown = session.matchingLaunch(mode: overlayMode, keyCommandSet: overlayKey)
+            guard SSHLaunchIdentity.allows(shown.identity.launchKind, launch: locked?.authMode) else { return }
+            preview = shown
             displayedPort = .readOnly(resolvedPort: session.port)
         } catch {
             guard id == previewGeneration else { return }
+            if pendingLaunch != nil { return }
             preview = nil
             displayedPort = .readOnly(resolvedPort: nil)
         }

@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const { test } = require("node:test");
-const { main } = require("../scripts/check-main-push.js");
+const { main, UNKNOWN, NONCOMPLIANT } = require("../scripts/check-main-push.js");
 
 const SHA = "a".repeat(40);
 const BEFORE = "c".repeat(40);
@@ -147,11 +147,13 @@ test("a merged pull with a different merge commit exits 1", async () => {
         merged_at: "2026-10-17T00:00:00Z",
         state: "closed",
         merge_commit_sha: "b".repeat(40),
+        base: { ref: "main" },
       },
     ]);
   });
   assert.equal(await main(io), 1);
   assert.match(stderr.join("\n"), new RegExp(`no merged pull request for ${SHA}`));
+  assert.match(stderr.join("\n"), new RegExp(NONCOMPLIANT));
 });
 
 test("an empty pull list exits 1", async () => {
@@ -338,4 +340,227 @@ test("a zero before sha exits 1", async () => {
   io.env.GITHUB_BEFORE = "0".repeat(40);
   assert.equal(await main(io), 1);
   assert.match(stderr.join("\n"), /GITHUB_BEFORE must be a non-zero sha/);
+});
+
+test("API unreadability is UNKNOWN and a missing merge is NONCOMPLIANT", async () => {
+  const unread = harness(async () => response(503, { message: "unavailable" }));
+  assert.equal(await main(unread.io), 1);
+  assert.equal(unread.stderr.join("\n"), `${UNKNOWN}: could not read pull requests for the commit`);
+
+  const unmatched = harness(async () => response(200, []));
+  assert.equal(await main(unmatched.io), 1);
+  assert.equal(
+    unmatched.stderr.join("\n"),
+    `${NONCOMPLIANT}: no merged pull request for ${SHA}`,
+  );
+});
+
+test("a 200 pull detail without base is UNKNOWN", async () => {
+  const listed = liveAssociatedPull();
+  const { io, stderr } = harness(
+    routeFetch({
+      pulls: async () => response(200, [listed]),
+      pull: async () =>
+        response(200, {
+          number: 9,
+          merged_at: "2026-10-17T13:54:01Z",
+          merge_commit_sha: SHA,
+        }),
+      commit: async () => {
+        throw new Error("commit should not be read");
+      },
+    }),
+  );
+  assert.equal(await main(io), 1);
+  assert.equal(stderr.join("\n"), `${UNKNOWN}: malformed pull request`);
+});
+
+test("a 200 pull detail without merge_commit_sha is UNKNOWN", async () => {
+  const listed = liveAssociatedPull();
+  const { io, stderr } = harness(
+    routeFetch({
+      pulls: async () => response(200, [listed]),
+      pull: async () =>
+        response(200, {
+          number: 9,
+          merged_at: "2026-10-17T13:54:01Z",
+          base: { ref: "main" },
+        }),
+      commit: async () => {
+        throw new Error("commit should not be read");
+      },
+    }),
+  );
+  assert.equal(await main(io), 1);
+  assert.equal(stderr.join("\n"), `${UNKNOWN}: malformed pull request`);
+});
+
+test("an unreadable list merge_commit_sha or merged_at is UNKNOWN", async () => {
+  const badSha = harness(async () => {
+    return response(200, [
+      {
+        number: 9,
+        merged_at: "2026-10-17T00:00:00Z",
+        merge_commit_sha: "not-a-sha",
+        base: { ref: "main" },
+      },
+    ]);
+  });
+  assert.equal(await main(badSha.io), 1);
+  assert.equal(badSha.stderr.join("\n"), `${UNKNOWN}: malformed pull request list`);
+
+  const badMergedAt = harness(async () => {
+    return response(200, [
+      {
+        number: 9,
+        merged_at: 1,
+        merge_commit_sha: SHA,
+        base: { ref: "main" },
+      },
+    ]);
+  });
+  assert.equal(await main(badMergedAt.io), 1);
+  assert.equal(badMergedAt.stderr.join("\n"), `${UNKNOWN}: malformed pull request list`);
+});
+
+test("a merged list item without base is UNKNOWN", async () => {
+  const { io, stderr } = harness(async () => {
+    return response(200, [
+      {
+        number: 9,
+        merged_at: "2026-10-17T00:00:00Z",
+        state: "closed",
+        merge_commit_sha: SHA,
+      },
+    ]);
+  });
+  assert.equal(await main(io), 1);
+  assert.equal(stderr.join("\n"), `${UNKNOWN}: malformed pull request list`);
+});
+
+test("a list item with an empty base object is UNKNOWN", async () => {
+  const { io, stderr } = harness(async () => {
+    return response(200, [
+      {
+        number: 9,
+        merged_at: "2026-10-17T00:00:00Z",
+        state: "closed",
+        merge_commit_sha: SHA,
+        base: {},
+      },
+    ]);
+  });
+  assert.equal(await main(io), 1);
+  assert.equal(stderr.join("\n"), `${UNKNOWN}: malformed pull request list`);
+});
+
+test("a 200 pull detail with an empty base object is UNKNOWN", async () => {
+  const listed = liveAssociatedPull();
+  const { io, stderr } = harness(
+    routeFetch({
+      pulls: async () => response(200, [listed]),
+      pull: async () =>
+        response(200, {
+          number: 9,
+          merged_at: "2026-10-17T13:54:01Z",
+          merge_commit_sha: SHA,
+          base: {},
+        }),
+      commit: async () => {
+        throw new Error("commit should not be read");
+      },
+    }),
+  );
+  assert.equal(await main(io), 1);
+  assert.equal(stderr.join("\n"), `${UNKNOWN}: malformed pull request`);
+});
+
+test("a list item missing merged_at is UNKNOWN", async () => {
+  const { io, stderr } = harness(async () => {
+    return response(200, [
+      {
+        number: 9,
+        state: "closed",
+        merge_commit_sha: SHA,
+        base: { ref: "main" },
+      },
+    ]);
+  });
+  assert.equal(await main(io), 1);
+  assert.equal(stderr.join("\n"), `${UNKNOWN}: malformed pull request list`);
+});
+
+test("a 200 pull detail missing merged_at is UNKNOWN", async () => {
+  const listed = liveAssociatedPull();
+  const { io, stderr } = harness(
+    routeFetch({
+      pulls: async () => response(200, [listed]),
+      pull: async () =>
+        response(200, {
+          number: 9,
+          merge_commit_sha: SHA,
+          base: { ref: "main" },
+        }),
+      commit: async () => {
+        throw new Error("commit should not be read");
+      },
+    }),
+  );
+  assert.equal(await main(io), 1);
+  assert.equal(stderr.join("\n"), `${UNKNOWN}: malformed pull request`);
+});
+
+test("a list item with a null merged_at is NONCOMPLIANT", async () => {
+  const { io, stderr } = harness(async () => {
+    return response(200, [
+      {
+        number: 9,
+        merged_at: null,
+        state: "open",
+        merge_commit_sha: SHA,
+        base: { ref: "main" },
+      },
+    ]);
+  });
+  assert.equal(await main(io), 1);
+  assert.equal(stderr.join("\n"), `${NONCOMPLIANT}: no merged pull request for ${SHA}`);
+});
+
+test("a 200 pull detail with a null base is UNKNOWN", async () => {
+  const listed = liveAssociatedPull();
+  const { io, stderr } = harness(
+    routeFetch({
+      pulls: async () => response(200, [listed]),
+      pull: async () =>
+        response(200, {
+          number: 9,
+          merged_at: "2026-10-17T13:54:01Z",
+          merge_commit_sha: SHA,
+          base: null,
+        }),
+      commit: async () => {
+        throw new Error("commit should not be read");
+      },
+    }),
+  );
+  assert.equal(await main(io), 1);
+  assert.equal(stderr.join("\n"), `${UNKNOWN}: malformed pull request`);
+});
+
+test("missing context is UNKNOWN and a non-parent before sha is NONCOMPLIANT", async () => {
+  const missing = harness(async () => {
+    throw new Error("fetch");
+  });
+  missing.io.env.GITHUB_TOKEN = "";
+  assert.equal(await main(missing.io), 1);
+  assert.equal(missing.stderr.join("\n"), `${UNKNOWN}: GITHUB_TOKEN is required`);
+
+  const parent = harness(
+    routeFetch({
+      pulls: async () => response(200, [mergedPull()]),
+      commit: async () => response(200, { parents: [{ sha: "d".repeat(40) }] }),
+    }),
+  );
+  assert.equal(await main(parent.io), 1);
+  assert.equal(parent.stderr.join("\n"), `${NONCOMPLIANT}: before sha is not the first parent`);
 });

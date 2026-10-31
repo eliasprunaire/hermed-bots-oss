@@ -38,4 +38,18 @@ public struct SSHLaunchIdentity: Equatable, Sendable {
             return SSHLaunchIdentity(kind: .agent, present: keyCommandSet || hasExternalIdentityAgent)
         }
     }
+
+    public static func overlayMode(picker: SSHAuthMode, launch: SSHAuthMode?) -> SSHAuthMode {
+        launch ?? picker
+    }
+
+    public static func allows(_ kind: SSHLaunchIdentityKind, launch: SSHAuthMode?) -> Bool {
+        guard let launch else { return true }
+        switch launch {
+        case .ephemeralAgent:
+            return kind == .agent
+        case .sessionAgent, .wrapper:
+            return true
+        }
+    }
 }
