@@ -46,10 +46,17 @@ jobs:
         run: |
           # run the gate as it exists on the base branch, so a PR cannot weaken its own gate
           checker="$RUNNER_TEMP/verdict-gate.js"
+          prose="$RUNNER_TEMP/verdict-prose.js"
           if git cat-file -e "$BASE_SHA:scripts/verdict-gate.js" 2>/dev/null; then
             git show "$BASE_SHA:scripts/verdict-gate.js" > "$checker"
           else
             echo "::notice::scripts/verdict-gate.js is absent on the base: using the PR copy"
             cp scripts/verdict-gate.js "$checker"
+          fi
+          if git cat-file -e "$BASE_SHA:scripts/verdict-prose.js" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/verdict-prose.js" > "$prose"
+          else
+            echo "::notice::scripts/verdict-prose.js is absent on the base: using the PR copy"
+            cp scripts/verdict-prose.js "$prose"
           fi
           node "$checker"

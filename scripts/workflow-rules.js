@@ -20,6 +20,12 @@ module.exports = Object.freeze([
     job: "record-verdict",
   }),
   Object.freeze({
+    rule: "record-verdict exports verdict-prose.js from the base alongside verdict-gate.js",
+    script: "scripts/verdict-prose.js",
+    test: "test/verdict-gate.test.js",
+    job: "record-verdict",
+  }),
+  Object.freeze({
     rule: "Direct push to main",
     script: "scripts/check-main-push.js",
     test: "test/check-main-push.test.js",

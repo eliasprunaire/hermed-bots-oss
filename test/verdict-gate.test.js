@@ -982,6 +982,7 @@ test("the workflow records a status from record-verdict", () => {
   assert.match(job, /node "\$checker"/);
   assert.equal(job.includes("node scripts/verdict-gate.js"), false);
   assert.match(job, /git show "\$BASE_SHA:scripts\/verdict-gate\.js"/);
+  assert.match(job, /git show "\$BASE_SHA:scripts\/verdict-prose\.js"/);
   assert.match(job, /fetch-depth:\s*0/);
   assert.match(job, /persist-credentials:\s*false/);
   assert.equal(yaml.includes("pull_request_target"), false);
@@ -991,6 +992,37 @@ test("the workflow records a status from record-verdict", () => {
   );
   assert.equal(job.includes("*[bot]"), false);
   assert.equal(job.includes("'[bot]'"), false);
+});
+
+test("record-verdict can run from only the files it exports out of BASE_SHA", () => {
+  const yaml = readFileSync(
+    join(__dirname, "..", ".github/workflows/verdict-gate.yml"),
+    "utf8",
+  );
+  const exported = [
+    ...yaml.matchAll(/git show "\$BASE_SHA:scripts\/([^"]+\.js)"/g),
+  ].map((match) => match[1]);
+  assert.ok(exported.includes("verdict-gate.js"));
+  const dir = mkdtempSync(join(tmpdir(), "verdict-gate-export-"));
+  try {
+    for (const name of exported) {
+      writeFileSync(
+        join(dir, name),
+        readFileSync(join(__dirname, "..", "scripts", name)),
+      );
+    }
+    const result = spawnSync(process.execPath, [join(dir, "verdict-gate.js")], {
+      cwd: dir,
+      encoding: "utf8",
+      env: { PATH: process.env.PATH },
+    });
+    assert.doesNotMatch(
+      `${result.stderr}\n${result.stdout}`,
+      /Cannot find module '\.\/verdict-prose\.js'/,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 function initGitDir() {
