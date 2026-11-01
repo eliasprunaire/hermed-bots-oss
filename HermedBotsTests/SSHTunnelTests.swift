@@ -52,7 +52,7 @@ final class SSHTunnelConfigTests: XCTestCase {
 
     func testTheProfileListReadRunsOnlyHermesProfileListWithNoForward() throws {
         let args = try config().profileListArguments()
-        XCTAssertEqual(Array(args.suffix(4)), ["lab.invalid", "hermes", "profile", "list"])
+        XCTAssertEqual(Array(args.suffix(2)), ["lab.invalid", "sh -lc 'echo; echo HERMED_BOTS_REPLY; hermes profile list'"])
         for absent in ["-N", "-L", "-R", "-D", "-F", "-i", "-l", "-p"] { XCTAssertFalse(args.contains(absent), absent) }
         for required in ["-T", "BatchMode=yes", "ForwardAgent=no", "ControlMaster=no", "ControlPath=none", "ConnectTimeout=5"] {
             XCTAssertTrue(args.contains(required), required)
@@ -63,15 +63,16 @@ final class SSHTunnelConfigTests: XCTestCase {
         let args = try config().profileLocksArguments()
         XCTAssertEqual(Array(args.suffix(2)), ["lab.invalid", ProfileLock.command])
         for absent in ["-N", "-L", "-R", "-D", "-F", "-i", "-l", "-p"] { XCTAssertFalse(args.contains(absent), absent) }
-        XCTAssertEqual(Array(args.dropLast(2)), Array(try config().profileListArguments().dropLast(4)))
+        XCTAssertEqual(Array(args.dropLast(2)), Array(try config().profileListArguments().dropLast(2)))
     }
 
     func testTheAPIKeyReadRunsOnlyTheFrozenHermesConfigGetWithTheSameAlias() throws {
         let args = try config().apiKeyArguments(profile: "cyber")
-        XCTAssertEqual(Array(args.suffix(8)), ["lab.invalid", "hermes", "-p", "cyber", "config", "get", "API_SERVER_KEY", "--raw"])
+        XCTAssertEqual(Array(args.suffix(2)), ["lab.invalid", "sh -lc 'echo; echo HERMED_BOTS_REPLY; hermes -p cyber config get API_SERVER_KEY --raw'"])
         XCTAssertEqual(HermesAPIKey.remoteCommand(profile: "cyber"), ["hermes", "-p", "cyber", "config", "get", "API_SERVER_KEY", "--raw"])
         for absent in ["-N", "-L", "-R", "-D", "-F", "-i", "-l"] { XCTAssertFalse(args.contains(absent), absent) }
-        XCTAssertEqual(args.indices.filter { args[$0] == "-p" }.map { args[$0 + 1] }, ["cyber"])
+        // le `-p` de hermes est dans la chaîne distante : ssh lui-même n'en reçoit aucun
+        XCTAssertFalse(args.contains("-p"))
         for required in ["-T", "BatchMode=yes", "ForwardAgent=no", "ControlMaster=no", "ControlPath=none", "ConnectTimeout=5"] {
             XCTAssertTrue(args.contains(required), required)
         }
@@ -122,24 +123,24 @@ final class SSHTunnelConfigTests: XCTestCase {
             return secret
         }
 
-        let failed = await fetches.fetch(profile: "cyber", into: &store, read: read)
+        let failed = try await fetches.fetch(profile: "cyber", into: &store, read: read)
         XCTAssertNil(failed)
         // le même refus ne relit pas
-        let sameRefusal = await fetches.fetch(profile: "cyber", into: &store, read: read)
+        let sameRefusal = try await fetches.fetch(profile: "cyber", into: &store, read: read)
         XCTAssertNil(sameRefusal)
         XCTAssertEqual(reads, ["cyber"])
 
         fetches.reset()
-        let retried = await fetches.fetch(profile: "cyber", into: &store, read: read)
+        let retried = try await fetches.fetch(profile: "cyber", into: &store, read: read)
         XCTAssertEqual(retried, secret)
         XCTAssertEqual(reads, ["cyber", "cyber"])
         XCTAssertEqual(try store.apiKey(profile: "cyber"), secret)
 
         // un profil qui a répondu rouvre sa lecture sans toucher aux autres
-        _ = await fetches.fetch(profile: "sport", into: &store, read: read)
+        _ = try await fetches.fetch(profile: "sport", into: &store, read: read)
         fetches.settle("cyber")
-        _ = await fetches.fetch(profile: "cyber", into: &store, read: read)
-        _ = await fetches.fetch(profile: "sport", into: &store, read: read)
+        _ = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        _ = try await fetches.fetch(profile: "sport", into: &store, read: read)
         XCTAssertEqual(reads, ["cyber", "cyber", "sport", "cyber"])
     }
 
@@ -783,6 +784,400 @@ final class SystemSSHBackendTests: XCTestCase {
         }
         await backend.close()
     }
+}
+
+/// Le mode Exécutable lance l'exécutable avec le PATH du shell de connexion de l'utilisateur : une app ouverte depuis le Finder ne reçoit que le PATH minimal de launchd
+final class WrapperLoginPathTests: XCTestCase {
+    private let config = try! SSHTunnelConfig(alias: "lab.invalid", hostname: "example.invalid", user: "operator", sshPort: 2200, refuseTestHost: true)
+    private let home = "/tmp/example-home"
+    private let launchdPath = "/usr/bin:/bin:/usr/sbin:/sbin"
+
+    private func script(_ body: String, name: String = "tool") throws -> String {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hb-login-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let path = dir.appendingPathComponent(name).path
+        try "#!/bin/sh\n\(body)\n".write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+        return path
+    }
+
+    /// Un exécutable qui écrit son PATH sur la sortie d'erreur puis échoue : `open()` rend ce PATH dans le détail de `unreachable`
+    private func pathSeenByWrapper(_ backend: SystemSSHBackend) async throws -> String {
+        defer { addTeardownBlock { await backend.close() } }
+        do {
+            _ = try await backend.open(config)
+            XCTFail("open() a réussi avec un exécutable qui échoue")
+        } catch let failure as SSHFailure {
+            guard case .unreachable(let detail) = failure else { XCTFail("\(failure)"); return "" }
+            return detail
+        }
+        return ""
+    }
+
+    private func backend(wrapper: String, loginShell: String?, timeout: Duration = .seconds(5)) -> SystemSSHBackend {
+        SystemSSHBackend(
+            environment: ["PATH": launchdPath, "HOME": home, "USER": "operator", "LOGNAME": "operator"],
+            client: SSHClientSettings(authMode: .wrapper, wrapperPath: wrapper),
+            loginPath: LoginPath(shell: loginShell, timeout: timeout)
+        )
+    }
+
+    func testWrapperGetsALoginPath() async throws {
+        let wrapper = try script(#"printf '%s\n' "$PATH" >&2; exit 255"#)
+        // le shell écrit du bruit avant le PATH (un rc qui affiche) et refuse d'être lancé sans `-l`
+        let shell = try script(#"[ "$1" = "-l" ] || exit 9; echo 'message du rc'; printf '%s\n' '/opt/example-login/bin:/usr/bin:/bin'"#, name: "login-shell")
+        let seen = try await pathSeenByWrapper(backend(wrapper: wrapper, loginShell: shell))
+        XCTAssertEqual(seen, "/opt/example-login/bin:/usr/bin:/bin")
+    }
+
+    func testWrapperPathFallsBackWhenLoginShellFails() async throws {
+        let wrapper = try script(#"printf '%s\n' "$PATH" >&2; exit 255"#)
+        let expected = launchdPath + ":/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:\(home)/.local/bin:\(home)/bin"
+        let failing = try script("exit 1", name: "failing-shell")
+        let silent = try script("printf ''", name: "silent-shell")
+        let hanging = try script("sleep 30", name: "hanging-shell")
+        for (name, shell) in [("échec", failing), ("sortie vide", silent), ("absent", "/tmp/example-shell.invalid")] {
+            let seen = try await pathSeenByWrapper(backend(wrapper: wrapper, loginShell: shell))
+            XCTAssertEqual(seen, expected, name)
+        }
+        // un shell qui ne rend pas la main est tué au délai
+        let started = ContinuousClock.now
+        let seen = try await pathSeenByWrapper(backend(wrapper: wrapper, loginShell: hanging, timeout: .milliseconds(300)))
+        XCTAssertEqual(seen, expected, "délai")
+        XCTAssertLessThan(ContinuousClock.now - started, .seconds(10))
+    }
+
+    func testTheLoginPathIsReadOncePerBackend() async throws {
+        let counter = FileManager.default.temporaryDirectory.appendingPathComponent("hb-login-count-\(UUID().uuidString.prefix(8))")
+        addTeardownBlock { try? FileManager.default.removeItem(at: counter) }
+        let shell = try script("echo run >> '\(counter.path)'; printf '%s\\n' '/opt/example-login/bin'", name: "counting-shell")
+        let wrapper = try script(#"printf '%s\n' "$PATH" >&2; exit 255"#)
+        let backend = backend(wrapper: wrapper, loginShell: shell)
+        _ = try await pathSeenByWrapper(backend)
+        let second = try await pathSeenByWrapper(backend)
+        XCTAssertEqual(second, "/opt/example-login/bin")
+        let runs = try String(contentsOf: counter, encoding: .utf8).split(separator: "\n")
+        XCTAssertEqual(runs.count, 1)
+    }
+
+    func testTheSessionModeKeepsItsFixedPath() {
+        let environment = SSHChildEnvironment.make(["PATH": "/opt/example-login/bin", "HOME": home])
+        XCTAssertEqual(environment["PATH"], "/usr/bin:/bin")
+    }
+}
+
+/// ssh envoie la commande distante au shell du compte de l'hôte, qui n'est ni interactif ni de connexion : le PATH que le profil de connexion ajoute n'y est pas
+final class RemoteLoginShellTests: XCTestCase {
+    private let outerShells = ["/bin/sh", "/bin/bash", "/bin/zsh"]
+
+    private func config() throws -> SSHTunnelConfig {
+        try SSHTunnelConfig(alias: "lab.invalid", hostname: "gateway.invalid", user: "operator", refuseTestHost: true)
+    }
+
+    /// Un HOME dont `.profile` ajoute `.local/bin` au PATH, où `tool` est un script : l'installation d'un outil dans un dossier bin personnel
+    private func homeWithTool(_ tool: String, body: String, banner: String? = nil, terminated: Bool = true) throws -> String {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("hb-remote-\(UUID().uuidString.prefix(8))")
+        let bin = home.appendingPathComponent(".local/bin")
+        try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: home) }
+        // un profil bavard écrit sur stdout avant la commande : motd, conseil du jour, diagnostic
+        // `terminated: false` : la dernière ligne de la bannière n'a pas de saut de ligne (printf sans \n)
+        let chatter = banner.map { terminated ? "echo '\($0)'\n" : "printf '%s' '\($0)'\n" } ?? ""
+        try "\(chatter)PATH=\"\(bin.path):$PATH\"\nexport PATH\n".write(to: home.appendingPathComponent(".profile"), atomically: true, encoding: .utf8)
+        let path = bin.appendingPathComponent(tool).path
+        try "#!/bin/sh\n\(body)\n".write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+        return home.path
+    }
+
+    /// Ce que fait sshd : le shell du compte lance la chaîne reçue avec `-c`, sans PATH de connexion
+    private func replay(_ remote: String, outer: String, home: String) async throws -> Spawn.Output {
+        try await Spawn.run(outer, ["-c", remote], environment: ["PATH": "/usr/bin:/bin", "HOME": home, "LC_ALL": "C"], timeout: .seconds(10))
+    }
+
+    func testRemoteCommandRunsInALoginShell() async throws {
+        let home = try homeWithTool("hermes", body: #"printf 'hermes %s\n' "$*""#)
+        let list = try config().profileListArguments().last!
+        let key = try config().apiKeyArguments(profile: "cyber").last!
+        for outer in outerShells {
+            let listed = try await replay(list, outer: outer, home: home)
+            XCTAssertEqual(listed.status, 0, outer)
+            XCTAssertEqual(RemoteShell.reply(listed.stdout), "hermes profile list\n", outer)
+            let read = try await replay(key, outer: outer, home: home)
+            XCTAssertEqual(RemoteShell.reply(read.stdout), "hermes -p cyber config get API_SERVER_KEY --raw\n", outer)
+        }
+        // la commande nue, telle que l'app l'envoyait, ne trouve pas l'outil : 127
+        let bare = try await replay("hermes profile list", outer: "/bin/sh", home: home)
+        XCTAssertEqual(bare.status, 127)
+    }
+
+    func testRemoteArgumentsAreQuotedInTheLoginShell() async throws {
+        let canary = FileManager.default.temporaryDirectory.appendingPathComponent("hb-canary-\(UUID().uuidString.prefix(8))")
+        addTeardownBlock { try? FileManager.default.removeItem(at: canary) }
+        let home = try homeWithTool("tool", body: #"for a in "$@"; do printf '[%s]\n' "$a"; done"#)
+        let hostile = ["a b", "it's", "$HOME", "x; touch \(canary.path)", "`touch \(canary.path)`", "", "ligne 1\nligne 2", "a\\b", "\"q\"", "*", "-p", "é"]
+        let remote = RemoteShell.loginCommand(["tool"] + hostile)
+        for outer in outerShells {
+            let output = try await replay(remote, outer: outer, home: home)
+            XCTAssertEqual(RemoteShell.reply(output.stdout), hostile.map { "[\($0)]\n" }.joined(), outer)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: canary.path), "un argument a été exécuté par le shell distant")
+    }
+
+    func testRemoteShellQuotingKeepsReadableWordsAndEscapesTheRest() {
+        for plain in ["hermes", "-p", "--raw", "API_SERVER_KEY", "cyber.v2", "/usr/bin/x"] {
+            XCTAssertEqual(RemoteShell.quote(plain), plain)
+        }
+        XCTAssertEqual(RemoteShell.quote(""), "''")
+        XCTAssertEqual(RemoteShell.quote("it's"), #"'it'\''s'"#)
+        XCTAssertEqual(RemoteShell.quote("a b"), "'a b'")
+        XCTAssertEqual(RemoteShell.loginCommand(["hermes", "a b"]), #"sh -lc 'echo; echo HERMED_BOTS_REPLY; hermes '\''a b'\'''"#)
+    }
+
+    func testAChattyLoginProfileDoesNotReplaceTheAPIKey() async throws {
+        let secret = "profile-key-VALUE"
+        let home = try homeWithTool("hermes", body: "printf '%s\\n' '\(secret)'", banner: "Welcome to the host")
+        let key = try config().apiKeyArguments(profile: "cyber").last!
+        for outer in outerShells {
+            let read = try await replay(key, outer: outer, home: home)
+            XCTAssertEqual(read.status, 0, outer)
+            // sans l'isolation, la bannière est la première ligne : elle serait gardée comme clé
+            XCTAssertEqual(HermesAPIKey.parse(read.stdout), "Welcome to the host", outer)
+            XCTAssertEqual(HermesAPIKey.parse(RemoteShell.reply(read.stdout)), secret, outer)
+        }
+    }
+
+    func testAnUnterminatedLoginBannerDoesNotReplaceTheAPIKey() async throws {
+        let secret = "profile-key-VALUE"
+        let home = try homeWithTool("hermes", body: "printf '%s\\n' '\(secret)'", banner: "Welcome to the host", terminated: false)
+        let key = try config().apiKeyArguments(profile: "cyber").last!
+        let list = try config().profileListArguments().last!
+        for outer in outerShells {
+            let read = try await replay(key, outer: outer, home: home)
+            XCTAssertEqual(read.status, 0, outer)
+            // sans le saut de ligne avant le marqueur, la bannière et le marqueur forment une seule ligne que `reply` ne reconnaît pas
+            XCTAssertEqual(HermesAPIKey.parse(RemoteShell.reply(read.stdout)), secret, outer)
+            let listed = try await replay(list, outer: outer, home: home)
+            XCTAssertEqual(RemoteShell.reply(listed.stdout), "\(secret)\n", outer)
+        }
+    }
+
+    func testTheReplyIsWhatFollowsTheLastMarkerLine() {
+        let marker = "HERMED_BOTS_REPLY"
+        XCTAssertEqual(RemoteShell.reply("bannière\n\(marker)\nclé\nreste\n"), "clé\nreste\n")
+        XCTAssertEqual(RemoteShell.reply("\(marker)\n"), "")
+        XCTAssertEqual(RemoteShell.reply("a\n\(marker)\nb\n\(marker)\nc\n"), "c\n")
+        // une ligne qui contient le marqueur sans l'être n'isole rien ; sans marqueur, la sortie reste entière
+        XCTAssertEqual(RemoteShell.reply("préfixe \(marker)\nclé\n"), "préfixe \(marker)\nclé\n")
+        XCTAssertEqual(RemoteShell.reply("clé\n"), "clé\n")
+        XCTAssertEqual(RemoteShell.reply(""), "")
+    }
+
+    /// Un exécutable qui tient le port du tunnel ouvert, puis répond aux lectures auxiliaires avec le code et la sortie d'erreur de `status`
+    private func answeringWrapper(status: String, stdout: String = "") throws -> String {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hb-answer-\(UUID().uuidString.prefix(8))")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        let wrapper = dir.appendingPathComponent("wrapper").path
+        try """
+        #!/bin/sh
+        forward=""
+        for arg in "$@"; do
+          case "$arg" in 127.0.0.1:*:127.0.0.1:*) forward="$arg" ;; esac
+        done
+        if [ -n "$forward" ]; then
+          port=$(printf '%s' "$forward" | awk -F: '{print $2}')
+          exec /usr/bin/python3 -c 'import socket,sys,time; p=int(sys.argv[1]); s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("127.0.0.1",p)); s.listen(1); s.settimeout(30); c,_=s.accept(); time.sleep(8)' "$port"
+        fi
+        cat "\(dir.path)/stdout"
+        code=$(cut -d' ' -f1 "\(dir.path)/answer")
+        cut -d' ' -f2- "\(dir.path)/answer" >&2
+        exit "$code"
+        """.write(toFile: wrapper, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper)
+        try status.write(toFile: dir.appendingPathComponent("answer").path, atomically: true, encoding: .utf8)
+        try stdout.write(toFile: dir.appendingPathComponent("stdout").path, atomically: true, encoding: .utf8)
+        return wrapper
+    }
+
+    private func openedBackend(answering status: String, stdout: String = "") async throws -> SystemSSHBackend {
+        let backend = SystemSSHBackend(
+            environment: ["PATH": "/usr/bin:/bin", "HOME": "/tmp/example-home", "USER": "user", "LOGNAME": "user"],
+            resolver: HostAgreeingResolver(),
+            client: SSHClientSettings(authMode: .wrapper, wrapperPath: try answeringWrapper(status: status, stdout: stdout)),
+            loginPath: LoginPath(shell: "/bin/sh", timeout: .seconds(5))
+        )
+        addTeardownBlock { await backend.close() }
+        _ = try await backend.open(try SSHTunnelConfig(alias: "lab.invalid", hostname: "example.invalid", user: "user", sshPort: 2200, refuseTestHost: true))
+        return backend
+    }
+
+    private let tunnel = try! SSHTunnelConfig(alias: "lab.invalid", hostname: "example.invalid", user: "user", sshPort: 2200, refuseTestHost: true)
+
+    func testExit127IsNamedToolNotFound() async throws {
+        let backend = try await openedBackend(answering: "127 sh: 1: hermes: not found\n")
+        do {
+            _ = try await backend.readProfileList(tunnel)
+            XCTFail("readProfileList a réussi avec le code 127")
+        } catch let failure as SSHFailure {
+            XCTAssertEqual(failure, .remoteToolNotFound)
+            XCTAssertFalse(failure.retries)
+            XCTAssertTrue(failure.message.contains("introuvable sur l'hôte"), failure.message)
+            XCTAssertFalse(failure.message.contains("ne répond pas"), failure.message)
+        }
+        do {
+            _ = try await backend.readAPIKey(tunnel, profile: "cyber")
+            XCTFail("readAPIKey a réussi avec le code 127")
+        } catch let failure as SSHFailure {
+            XCTAssertEqual(failure, .remoteToolNotFound)
+        }
+        XCTAssertEqual(SSHFailure.remoteToolNotFound.message, "Outil introuvable sur l'hôte : la commande hermes n'est pas dans le PATH du shell de connexion. Ajoute son dossier au profil de connexion de l'hôte, puis réessaie.")
+    }
+
+    func testAnotherRemoteExitCodeKeepsItsOwnFailure() async throws {
+        let backend = try await openedBackend(answering: "3 Traceback: profil illisible\n")
+        do {
+            _ = try await backend.readProfileList(tunnel)
+            XCTFail("readProfileList a réussi avec le code 3")
+        } catch let failure as RemoteCommandFailure {
+            XCTAssertEqual(failure, RemoteCommandFailure(status: 3, detail: "Traceback: profil illisible"))
+        }
+        let key = try await backend.readAPIKey(tunnel, profile: "cyber")
+        XCTAssertNil(key)
+    }
+
+    func testTheBackendReturnsOnlyWhatFollowsTheLoginProfileOutput() async throws {
+        let backend = try await openedBackend(answering: "0 \n", stdout: "Welcome\nHERMED_BOTS_REPLY\nprofile-key-VALUE\nrest\n")
+        let key = try await backend.readAPIKey(tunnel, profile: "cyber")
+        XCTAssertEqual(key, "profile-key-VALUE")
+        let list = try await backend.readProfileList(tunnel)
+        XCTAssertEqual(list, "profile-key-VALUE\nrest\n")
+    }
+
+    @MainActor
+    func testAMissingToolIsNotSwallowedByTheKeyReadGuard() async throws {
+        var store = InMemorySecretStore(apiKey: nil)
+        let fetches = APIKeyFetches()
+        var reads = 0
+        func read(_ name: String) async throws -> String? {
+            reads += 1
+            throw SSHFailure.remoteToolNotFound
+        }
+        do {
+            _ = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+            XCTFail("127 a été avalé")
+        } catch let failure as SSHFailure {
+            XCTAssertEqual(failure, .remoteToolNotFound)
+        }
+        // le même refus ne relit pas, et ne rend pas non plus nil (« clé introuvable ») : l'outil manque toujours
+        do {
+            _ = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+            XCTFail("la garde a rendu nil au lieu de nommer l'outil")
+        } catch let failure as SSHFailure {
+            XCTAssertEqual(failure, .remoteToolNotFound)
+        }
+        XCTAssertEqual(reads, 1)
+        // une autre panne reste silencieuse : la bannière « refusée » ou « introuvable » la dit déjà
+        let other = APIKeyFetches()
+        let silent = try await other.fetch(profile: "cyber", into: &store) { _ in throw SSHFailure.unreachable("coupure") }
+        XCTAssertNil(silent)
+        // un nouvel essai explicite relit
+        fetches.reset()
+        do {
+            _ = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+            XCTFail("127 a été avalé après reset")
+        } catch is SSHFailure {}
+        XCTAssertEqual(reads, 2)
+    }
+
+    @MainActor
+    func testAToolNotFoundStopsTheAutomaticProfileReadsUntilAnExplicitRetry() async throws {
+        var reads = 0
+        var toolPresent = false
+        let bots = BotsModel(
+            interval: .milliseconds(10),
+            readProfiles: {
+                reads += 1
+                if !toolPresent { throw SSHFailure.remoteToolNotFound }
+                return []
+            },
+            client: { nil },
+            connection: { "lab.invalid" }
+        )
+        let loop = Task { await bots.run() }
+        addTeardownBlock { loop.cancel() }
+        try await Task.sleep(for: .milliseconds(200))
+        // sans l'arrêt, une lecture ssh partirait à chaque intervalle
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(bots.phase, .toolNotFound(SSHFailure.remoteToolNotFound.message))
+        // « Réessayer » relit une fois, toujours sans l'outil
+        await bots.refresh()
+        XCTAssertEqual(reads, 2)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(reads, 2)
+        // l'outil est là : la relecture explicite réussit et la boucle reprend
+        toolPresent = true
+        await bots.refresh()
+        XCTAssertEqual(bots.phase, .ready)
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertGreaterThan(reads, 3)
+    }
+
+    @MainActor
+    func testAToolNotFoundAfterASuccessfulListStopsTheAutomaticReads() async throws {
+        var reads = 0
+        var toolPresent = true
+        let bots = BotsModel(
+            interval: .milliseconds(10),
+            readProfiles: {
+                reads += 1
+                if !toolPresent { throw SSHFailure.remoteToolNotFound }
+                return []
+            },
+            client: { nil },
+            connection: { "lab.invalid" }
+        )
+        await bots.refresh()
+        XCTAssertEqual(bots.phase, .ready)
+        // la liste lue reste affichée quand l'outil disparaît ensuite
+        toolPresent = false
+        let loop = Task { await bots.run() }
+        addTeardownBlock { loop.cancel() }
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(bots.phase, .ready)
+        // la première lecture de la boucle voit le 127 ; sans l'arrêt, une lecture ssh partirait à chaque intervalle
+        XCTAssertEqual(reads, 2)
+        // « Réessayer » relit une fois, puis la boucle reste arrêtée
+        await bots.refresh()
+        XCTAssertEqual(reads, 3)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(reads, 3)
+        // l'outil revient : la relecture explicite réussit et la boucle reprend
+        toolPresent = true
+        await bots.refresh()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertGreaterThan(reads, 5)
+    }
+
+    @MainActor
+    func testAToolNotFoundOnTheHostIsNotReportedAsAnUnresponsiveHermes() async {
+        let bots = BotsModel(readProfiles: { throw SSHFailure.remoteToolNotFound }, client: { nil }, connection: { "lab.invalid" })
+        await bots.refresh()
+        XCTAssertEqual(bots.phase, .toolNotFound(SSHFailure.remoteToolNotFound.message))
+        let other = BotsModel(readProfiles: { throw RemoteCommandFailure(status: 1, detail: "x") }, client: { nil }, connection: { "lab.invalid" })
+        await other.refresh()
+        XCTAssertEqual(other.phase, .failed("La commande « hermes profile list » a échoué (code 1) : x"))
+    }
+}
+
+/// `ssh -G` d'un alias qui reste sur la route du tunnel de ces tests
+private struct HostAgreeingResolver: SSHConfigResolving {
+    private let dump = SSHConfigDump(stdout: "hostname example.invalid\nuser user\nport 2200\n")
+
+    func dump(alias: String, invocation: SSHInvocation, agentSocket: String?) async throws -> SSHConfigDump { dump }
+
+    func dumpAPIKey(alias: String, profile: String, agentSocket: String?) async throws -> SSHConfigDump { dump }
 }
 
 private actor FakeBackend: SSHBackend {

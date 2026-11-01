@@ -25,6 +25,8 @@ enum SSHFailure: Error, Equatable, Sendable {
     case noIdentity
     /// L'exécutable SSH a écrit `<nom>_failure=<code>` : son échec est nommé et ne se réessaie pas
     case wrapperFailure(name: String, code: String)
+    /// La commande distante a rendu 127 : `hermes` n'est pas dans le PATH du shell de connexion de l'hôte ; un nouvel essai ne le règle pas
+    case remoteToolNotFound
     case agentLockedOrEmpty(String)
     case certificateExpired(String)
     case wrongKey(String)
@@ -86,6 +88,7 @@ extension SSHFailure {
         case .missingWrapper: String(localized: "L'exécutable SSH configuré est introuvable. Vérifie le chemin dans Réglages.")
         case .noIdentity: String(localized: "Aucune identité SSH n'est disponible. Charge une clé dans l'agent ou indique une commande de clé dans Réglages, puis réessaie.")
         case .wrapperFailure(let name, let code): String(localized: "L'exécutable SSH a échoué : \(name) (code \(code)). Le tunnel reste fermé.")
+        case .remoteToolNotFound: String(localized: "Outil introuvable sur l'hôte : la commande hermes n'est pas dans le PATH du shell de connexion. Ajoute son dossier au profil de connexion de l'hôte, puis réessaie.")
         case .agentLockedOrEmpty: String(localized: "L'agent SSH est verrouillé ou vide. Déverrouille-le ou charge une identité, puis réessaie.")
         case .certificateExpired: String(localized: "Le certificat SSH a expiré. Renouvelle-le, puis réessaie.")
         case .wrongKey: String(localized: "Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie.")
@@ -105,6 +108,33 @@ enum SSHInvocation: CaseIterable, Sendable {
     case tunnel
     case profileList
     case profileLocks
+}
+
+/// La commande distante dans un shell de connexion
+/// Pour `ssh hôte commande`, sshd lance le shell du compte sans connexion : le PATH que le profil ajoute (dossier bin personnel) n'y est pas, et un outil installé là rend 127
+enum RemoteShell {
+    /// Un mot sûr reste lisible ; tout autre est entre apostrophes, l'apostrophe devenant `'\''`
+    static func quote(_ word: String) -> String {
+        if !word.isEmpty, word.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || "_-./".contains($0)) }) { return word }
+        return "'" + word.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
+    }
+
+    /// Ligne que la commande écrit avant l'outil : le profil de connexion écrit sur stdout avant elle (motd, diagnostic), `reply` retire ce texte
+    static let marker = "HERMED_BOTS_REPLY"
+
+    /// L'unique argument que ssh envoie après l'alias : `sh -lc 'echo; echo <marqueur>; <mots>'`, chaque mot cité deux fois (pour `sh -c`, puis pour le shell du compte)
+    /// Le premier `echo` termine la dernière ligne du profil : une bannière sans saut de ligne ne se colle pas au marqueur
+    // shortcut: `sh -l` lit /etc/profile et ~/.profile seulement, un PATH posé dans ~/.zprofile ou ~/.bash_profile reste invisible (code 127 nommé), à remplacer par un chemin d'outil réglable si le cas se présente
+    static func loginCommand(_ words: [String]) -> String {
+        "sh -lc " + quote("echo; echo \(marker); " + words.map(quote).joined(separator: " "))
+    }
+
+    /// La sortie de l'outil : ce qui suit la dernière ligne marqueur ; sans marqueur, la sortie entière
+    static func reply(_ stdout: String) -> String {
+        let lines = stdout.split(separator: "\n", omittingEmptySubsequences: false)
+        guard let mark = lines.lastIndex(of: Substring(marker)) else { return stdout }
+        return lines[(mark + 1)...].joined(separator: "\n")
+    }
 }
 
 /// Là où le tunnel se connecte et ce qu'il redirige : un port local vers `127.0.0.1:remotePort` de l'hôte
@@ -156,7 +186,7 @@ struct SSHTunnelConfig: Equatable, Sendable {
     }
 
     static func apiKeyLaunchArguments(alias: String, profile: String) throws -> [String] {
-        common([]) + [alias] + HermesAPIKey.remoteCommand(profile: try HermesAPIKey.validate(profile))
+        common([]) + [alias, RemoteShell.loginCommand(HermesAPIKey.remoteCommand(profile: try HermesAPIKey.validate(profile)))]
     }
 
     /// Place `IdentityAgent` en tête des `-o` : ssh retient la première valeur, donc l'agent temporaire l'emporte
@@ -175,7 +205,7 @@ struct SSHTunnelConfig: Equatable, Sendable {
     static func arguments(_ invocation: SSHInvocation, alias: String, localPort: Int = 1, remotePort: Int = 8642) -> [String] {
         switch invocation {
         case .tunnel: common(["-N"]) + ["-L", "127.0.0.1:\(localPort):127.0.0.1:\(remotePort)", alias]
-        case .profileList: common([]) + [alias, "hermes", "profile", "list"]
+        case .profileList: common([]) + [alias, RemoteShell.loginCommand(["hermes", "profile", "list"])]
         case .profileLocks: common([]) + [alias, ProfileLock.command]
         }
     }
@@ -233,6 +263,49 @@ enum SSHChildEnvironment {
         }
         environment["LC_ALL"] = "C"
         return environment
+    }
+}
+
+/// PATH d'un outil lancé par l'utilisateur (l'exécutable SSH) : celui de son shell de connexion
+/// Une app ouverte depuis le Finder ne reçoit que le PATH minimal de launchd, sans Homebrew ni dossier bin personnel
+struct LoginPath: Sendable {
+    /// nil : le shell de connexion du compte
+    let shell: String?
+    let timeout: Duration
+
+    init(shell: String? = nil, timeout: Duration = .seconds(5)) {
+        self.shell = shell
+        self.timeout = timeout
+    }
+
+    static let usualDirectories = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin", "/usr/local/sbin"]
+
+    /// Le PATH du shell de connexion, sinon le repli ; ne lève jamais : un shell lent, absent ou en échec ne bloque pas le tunnel
+    func resolve(session: [String: String]) async -> String {
+        let shell = shell ?? Self.accountShell()
+        guard SSHLaunchPath.isExecutable(shell),
+              let output = try? await Spawn.runGuarded(shell, ["-l", "-c", #"printf '%s\n' "$PATH""#], environment: SSHChildEnvironment.forUserTool(session), timeout: timeout),
+              output.status == 0,
+              // un rc peut écrire avant : le PATH est la dernière ligne
+              let line = output.stdout.split(whereSeparator: \.isNewline).last.map({ $0.trimmingCharacters(in: .whitespaces) }),
+              !line.isEmpty, line.unicodeScalars.allSatisfy({ !CharacterSet.controlCharacters.contains($0) })
+        else { return Self.fallback(session: session) }
+        return line
+    }
+
+    /// Le PATH de l'app suivi des emplacements usuels, sans doublon
+    static func fallback(session: [String: String]) -> String {
+        var entries = (session["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin").split(separator: ":").map(String.init)
+        var extra = usualDirectories
+        if let home = session["HOME"], !home.isEmpty { extra += [home + "/.local/bin", home + "/bin"] }
+        for directory in extra where !entries.contains(directory) { entries.append(directory) }
+        return entries.joined(separator: ":")
+    }
+
+    /// `SHELL` n'existe pas toujours dans l'environnement d'une app ouverte depuis le Finder : le compte nomme son shell
+    private static func accountShell() -> String {
+        guard let entry = getpwuid(getuid()), let shell = entry.pointee.pw_shell else { return "/bin/zsh" }
+        return String(cString: shell)
     }
 }
 
@@ -563,17 +636,35 @@ enum APIKeyRecovery {
 @MainActor
 final class APIKeyFetches {
     private var attempted: Set<String> = []
+    private var toolMissing: Set<String> = []
 
     /// nil si la garde est fermée pour ce profil, si la lecture échoue ou si la clé est introuvable ; la valeur n'est pas journalisée
-    func fetch(profile: String, into secrets: inout some SecretStore, read: (String) async throws -> String?) async -> String? {
-        guard attempted.insert(profile).inserted else { return nil }
-        return try? await APIKeyRecovery.refresh(profile: profile, into: &secrets, fetch: read)
+    /// L'outil absent de l'hôte est la seule panne qui remonte : le message « Outil introuvable » vaut mieux que « Clé API introuvable »
+    func fetch(profile: String, into secrets: inout some SecretStore, read: (String) async throws -> String?) async throws -> String? {
+        guard attempted.insert(profile).inserted else {
+            if toolMissing.contains(profile) { throw SSHFailure.remoteToolNotFound }
+            return nil
+        }
+        do {
+            return try await APIKeyRecovery.refresh(profile: profile, into: &secrets, fetch: read)
+        } catch SSHFailure.remoteToolNotFound {
+            toolMissing.insert(profile)
+            throw SSHFailure.remoteToolNotFound
+        } catch {
+            return nil
+        }
     }
 
     /// Le profil a répondu : le prochain refus peut relire
-    func settle(_ profile: String) { attempted.remove(profile) }
+    func settle(_ profile: String) {
+        attempted.remove(profile)
+        toolMissing.remove(profile)
+    }
 
-    func reset() { attempted.removeAll() }
+    func reset() {
+        attempted.removeAll()
+        toolMissing.removeAll()
+    }
 }
 
 /// Un ssh vivant : son port local est déjà ouvert quand la session existe
@@ -693,6 +784,9 @@ actor SystemSSHBackend: SSHBackend {
     private let client: SSHClientSettings
     private let keySource: (any SSHPrivateKeySource)?
     private let identityLifetime: Int
+    private let loginPath: LoginPath
+    /// lu une fois par backend, au premier lancement de l'exécutable
+    private var userToolPath: String?
     private var watchdog: Child?
     /// le gardien en préparation, que `close()` arrête sans attendre la fin de l'ouverture
     private var preparing: Child?
@@ -709,7 +803,8 @@ actor SystemSSHBackend: SSHBackend {
         localUser: String = NSUserName(),
         client: SSHClientSettings = SSHClientSettings(),
         keySource: (any SSHPrivateKeySource)? = nil,
-        identityLifetime: Int = EphemeralSSHAgent.lifetimeSeconds
+        identityLifetime: Int = EphemeralSSHAgent.lifetimeSeconds,
+        loginPath: LoginPath = LoginPath()
     ) {
         self.environment = environment
         self.resolver = resolver
@@ -718,6 +813,7 @@ actor SystemSSHBackend: SSHBackend {
         self.client = client
         self.keySource = keySource
         self.identityLifetime = identityLifetime
+        self.loginPath = loginPath
     }
 
     func open(_ config: SSHTunnelConfig) async throws -> SSHSession {
@@ -783,12 +879,13 @@ actor SystemSSHBackend: SSHBackend {
         } catch {
             throw SSHFailure.unreachable("ssh ne démarre pas")
         }
-        // 255 : ssh lui-même a échoué (identité refusée, hôte injoignable) ; tout autre code vient de la commande distante
+        // 255 : ssh lui-même a échoué (identité refusée, hôte injoignable) ; 127 : l'outil manque sur l'hôte ; tout autre code vient de la commande distante
         if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr, status: output.status) }
+        if output.status == 127 { throw SSHFailure.remoteToolNotFound }
         guard output.status == 0 else {
             throw RemoteCommandFailure(status: output.status, detail: output.stderr.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? "")
         }
-        return output.stdout
+        return RemoteShell.reply(output.stdout)
     }
 
     /// Lit `API_SERVER_KEY` du profil par le même ssh que le tunnel ; la valeur ne quitte pas cette fonction que vers l'appelant
@@ -816,8 +913,9 @@ actor SystemSSHBackend: SSHBackend {
             throw SSHFailure.unreachable("ssh ne démarre pas")
         }
         if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr, status: output.status) }
+        if output.status == 127 { throw SSHFailure.remoteToolNotFound }
         guard output.status == 0 else { return nil }
-        return HermesAPIKey.parse(output.stdout)
+        return HermesAPIKey.parse(RemoteShell.reply(output.stdout))
     }
 
     func readProfileLocks(_ config: SSHTunnelConfig) async throws -> Data {
@@ -856,7 +954,9 @@ actor SystemSSHBackend: SSHBackend {
 
     private var sshEnvironment: [String: String] {
         if client.authMode == .wrapper {
-            return SSHChildEnvironment.forUserTool(environment)
+            var tool = SSHChildEnvironment.forUserTool(environment)
+            tool["PATH"] = userToolPath ?? LoginPath.fallback(session: environment)
+            return tool
         }
         return SSHChildEnvironment.make(environment, agentSocket: identityAgentSocket)
     }
@@ -898,6 +998,7 @@ actor SystemSSHBackend: SSHBackend {
             return
         case .wrapper:
             guard SSHLaunchPath.isExecutable(client.wrapperPath) else { throw SSHFailure.missingWrapper }
+            if userToolPath == nil { userToolPath = await loginPath.resolve(session: environment) }
         case .ephemeralAgent:
             if usesPrivateEphemeralAgent {
                 try await startEphemeralAgent(joining: leader)

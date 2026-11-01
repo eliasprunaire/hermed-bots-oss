@@ -35,7 +35,7 @@ struct BotListView: View {
         switch model.phase {
         case .loading where model.list.shown == nil:
             ProgressView().controlSize(.small)
-        case .failed(let message):
+        case .failed(let message), .toolNotFound(let message):
             VStack(spacing: 8) {
                 Text("La liste des bots n'a pas pu être lue : \(message)").multilineTextAlignment(.center).accessibilityID(.botsError)
                 Button("Réessayer") { Task { await model.refresh() } }.accessibilityID(.botsRetry)

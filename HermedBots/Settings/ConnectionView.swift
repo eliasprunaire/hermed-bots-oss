@@ -67,8 +67,11 @@ struct ConnectionView: View {
                 LabeledContent("Identité") {
                     Text(verbatim: model.preview?.identity.label ?? "—").accessibilityID(.connectionIdentity)
                 }
-                LabeledContent(model.preview?.identityPresentTitle ?? String(localized: "Clé publique")) {
-                    Text(verbatim: model.preview?.identityPresentLabel ?? "—").accessibilityID(.connectionIdentityPresent)
+                // en mode Exécutable, l'app ne lit aucune clé : une ligne « présente / absente » serait fausse
+                if model.preview?.identity != .executable {
+                    LabeledContent(model.preview?.identityPresentTitle ?? String(localized: "Clé publique")) {
+                        Text(verbatim: model.preview?.identityPresentLabel ?? "—").accessibilityID(.connectionIdentityPresent)
+                    }
                 }
                 LabeledContent("Tunnel") { Text(model.tunnel.state.label).accessibilityID(.connectionTunnelState) }
                 LabeledContent("Version de Hermes") { model.version.text.accessibilityID(.connectionVersion) }

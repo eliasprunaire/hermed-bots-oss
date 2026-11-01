@@ -75,7 +75,8 @@ final class AppModel {
         do {
             return try await resumeAPI(apiURL).start(profile: bot, input: text, session: session, model: model, key: key)
         } catch {
-            guard Self.isUnauthorized(error), await fetchRemoteAPIKey(bot) != nil else { throw error }
+            // l'envoi garde son refus d'origine : l'outil absent de l'hôte est dit par la bannière de version
+            guard Self.isUnauthorized(error), (try? await fetchRemoteAPIKey(bot)) != nil else { throw error }
             return try await resumeAPI(apiURL).start(profile: bot, input: text, session: session, model: model, key: key)
         }
     }
@@ -398,6 +399,9 @@ final class AppModel {
                 case .failed:
                     version = .unknown
                     apiError = String(localized: "Hermes ne répond pas. Vérifiez la liaison puis réessayez.")
+                case .toolNotFound(let message):
+                    version = .unknown
+                    apiError = message
                 }
             }
             return
@@ -473,7 +477,7 @@ final class AppModel {
         do {
             return try await versionClient(baseURL).readVersion(profile: profile)
         } catch {
-            guard Self.isUnauthorized(error), await fetchRemoteAPIKey(profile) != nil else { throw error }
+            guard Self.isUnauthorized(error), try await fetchRemoteAPIKey(profile) != nil else { throw error }
             return try await versionClient(baseURL).readVersion(profile: profile)
         }
     }
@@ -488,9 +492,14 @@ final class AppModel {
     }
 
     private func recoverKey(of profile: String) async {
-        if await fetchRemoteAPIKey(profile) != nil {
-            apiError = nil
-            await recheckAPI()
+        do {
+            if try await fetchRemoteAPIKey(profile) != nil {
+                apiError = nil
+                await recheckAPI()
+                return
+            }
+        } catch {
+            apiError = Self.apiMessage(error)
             return
         }
         let holdsKey = (try? environment.secrets.resolvedAPIKey(profile: profile)) != nil
@@ -501,7 +510,7 @@ final class AppModel {
 
     /// Une lecture SSH par profil et par refus : le Trousseau est mis à jour, la valeur n'est pas journalisée
     @discardableResult
-    private func fetchRemoteAPIKey(_ profile: String) async -> String? {
+    private func fetchRemoteAPIKey(_ profile: String) async throws -> String? {
         let read: @MainActor (String) async throws -> String?
         if let apiKeyReader {
             read = apiKeyReader
@@ -511,7 +520,7 @@ final class AppModel {
             return nil
         }
         var secrets = environment.secrets
-        let key = await apiKeyFetches.fetch(profile: profile, into: &secrets, read: read)
+        let key = try await apiKeyFetches.fetch(profile: profile, into: &secrets, read: read)
         if key != nil {
             environment.secrets = secrets
             // un dépli parti avant la clé a gardé son 401 : on relit les fils de ce profil s'il est déplié
@@ -543,6 +552,7 @@ final class AppModel {
     }
 
     private static func apiMessage(_ error: Error) -> String {
+        if case SSHFailure.remoteToolNotFound = error { return SSHFailure.remoteToolNotFound.message }
         if case HermesError.apiKeyMissing(let name) = error {
             return HermesAPIKey.missingMessage(profile: name)
         }
