@@ -47,6 +47,8 @@ enum AccessibilityID: String, CaseIterable {
     case approvalKillSwitch = "hd.approval.kill-switch"
     case toolCurrent = "hd.tool.current"
     case bannerDegraded = "hd.banner.degraded"
+    /// L'avis d'une version de Hermes non testée dont tous les contrats répondent : le bandeau n'est pas en mode dégradé
+    case bannerVersionNotice = "hd.banner.version-notice"
     case bannerWaiting = "hd.banner.waiting"
     case bannerLoopPause = "hd.banner.loop-pause"
     case loopClose = "hd.loop.close"

@@ -39,6 +39,9 @@ public struct CapabilityMap: Equatable, Sendable {
         return isVersionKnown ? nil : "Hermes \(version) non testée"
     }
 
+    /// Le bandeau se montre pour un mode dégradé ou pour une version non testée, même quand tous les contrats répondent
+    public var showsBanner: Bool { isDegraded || versionNotice != nil }
+
     /// `majeure.mineure` d'un numéro `majeure.mineure.correctif` fait de chiffres seulement ; nil pour toute autre forme
     private static func minor(of version: String) -> String? {
         let parts = version.split(separator: ".", omittingEmptySubsequences: false)

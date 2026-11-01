@@ -305,6 +305,26 @@ final class CapabilitiesTests: XCTestCase {
         XCTAssertNil(previous.versionNotice)
     }
 
+    /// Le correctif non testé d'une mineure testée n'est pas dégradé, mais son avis de version doit rester visible
+    func testUntestedPatchVersionShowsItsBannerWithoutBeingDegraded() async throws {
+        try serve(.patch)
+        let patch = try await capabilities()
+        XCTAssertFalse(patch.isDegraded)
+        XCTAssertNotNil(patch.versionNotice)
+        XCTAssertTrue(patch.showsBanner)
+
+        // une version testée sans fonction perdue ne montre rien ; une fonction perdue ou une autre mineure montre le bandeau
+        try serve()
+        let current = try await capabilities()
+        XCTAssertFalse(current.showsBanner)
+        try serve(dropped: [.setModel])
+        let dropped = try await capabilities()
+        XCTAssertTrue(dropped.showsBanner)
+        try serve(overrides: [.version: .http(200, Data(#"{"status": "ok", "version": "0.23.0"}"#.utf8))])
+        let other = try await capabilities()
+        XCTAssertTrue(other.showsBanner)
+    }
+
     func testKnownVersionsAreTheFixtureVersions() throws {
         let versions = try FixtureVersion.allCases.map { try XCTUnwrap(Fixture.load($0).root["version"] as? String) }
         XCTAssertEqual(CapabilityMap.knownVersions, Set(versions))
