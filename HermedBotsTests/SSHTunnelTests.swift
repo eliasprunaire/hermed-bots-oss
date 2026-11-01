@@ -975,7 +975,8 @@ final class RemoteLoginShellTests: XCTestCase {
     }
 
     /// Un exécutable qui tient le port du tunnel ouvert, puis répond aux lectures auxiliaires avec le code et la sortie d'erreur de `status`
-    private func answeringWrapper(status: String, stdout: String = "") throws -> String {
+    /// `stderr` remplace la sortie d'erreur d'une ligne que `status` donne après le code
+    private func answeringWrapper(status: String, stdout: String = "", stderr: String? = nil) throws -> String {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hb-answer-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
@@ -992,20 +993,21 @@ final class RemoteLoginShellTests: XCTestCase {
         fi
         cat "\(dir.path)/stdout"
         code=$(cut -d' ' -f1 "\(dir.path)/answer")
-        cut -d' ' -f2- "\(dir.path)/answer" >&2
+        if [ -f "\(dir.path)/stderr" ]; then cat "\(dir.path)/stderr" >&2; else cut -d' ' -f2- "\(dir.path)/answer" >&2; fi
         exit "$code"
         """.write(toFile: wrapper, atomically: true, encoding: .utf8)
+        if let stderr { try stderr.write(toFile: dir.appendingPathComponent("stderr").path, atomically: true, encoding: .utf8) }
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper)
         try status.write(toFile: dir.appendingPathComponent("answer").path, atomically: true, encoding: .utf8)
         try stdout.write(toFile: dir.appendingPathComponent("stdout").path, atomically: true, encoding: .utf8)
         return wrapper
     }
 
-    private func openedBackend(answering status: String, stdout: String = "") async throws -> SystemSSHBackend {
+    private func openedBackend(answering status: String, stdout: String = "", stderr: String? = nil) async throws -> SystemSSHBackend {
         let backend = SystemSSHBackend(
             environment: ["PATH": "/usr/bin:/bin", "HOME": "/tmp/example-home", "USER": "user", "LOGNAME": "user"],
             resolver: HostAgreeingResolver(),
-            client: SSHClientSettings(authMode: .wrapper, wrapperPath: try answeringWrapper(status: status, stdout: stdout)),
+            client: SSHClientSettings(authMode: .wrapper, wrapperPath: try answeringWrapper(status: status, stdout: stdout, stderr: stderr)),
             loginPath: LoginPath(shell: "/bin/sh", timeout: .seconds(5))
         )
         addTeardownBlock { await backend.close() }
@@ -1043,8 +1045,12 @@ final class RemoteLoginShellTests: XCTestCase {
         } catch let failure as RemoteCommandFailure {
             XCTAssertEqual(failure, RemoteCommandFailure(status: 3, detail: "Traceback: profil illisible"))
         }
-        let key = try await backend.readAPIKey(tunnel, profile: "cyber")
-        XCTAssertNil(key)
+        do {
+            _ = try await backend.readAPIKey(tunnel, profile: "cyber")
+            XCTFail("readAPIKey a avalé le code 3")
+        } catch let failure as APIKeyReadFailure {
+            XCTAssertEqual(failure, .commandFailed(status: 3, detail: "Traceback: profil illisible"))
+        }
     }
 
     func testTheBackendReturnsOnlyWhatFollowsTheLoginProfileOutput() async throws {
@@ -1053,6 +1059,193 @@ final class RemoteLoginShellTests: XCTestCase {
         XCTAssertEqual(key, "profile-key-VALUE")
         let list = try await backend.readProfileList(tunnel)
         XCTAssertEqual(list, "profile-key-VALUE\nrest\n")
+    }
+
+    /// Hermes 0.22.2 (relevé sur l'instance de test) : la valeur seule sur stdout, les diagnostics des sources de secrets sur stderr
+    private let fakeHermesWithInjectedSecrets = #"""
+    if [ -s "$HOME/.injected" ]; then
+      echo "  Command helper: applied 1 secret" >&2
+      cat "$HOME/.injected"
+    else
+      echo "[secrets:command] helper failed; resolving no value: code=1 signal=none" >&2
+      echo "  Command helper: helper command failed (see structured fields above); no secrets applied" >&2
+      echo "Config key not set: API_SERVER_KEY" >&2
+      exit 1
+    fi
+    """#
+
+    /// La config du profil n'a pas la clé ; la source de secrets l'injecte au démarrage de la commande, comme pour la gateway
+    func testApiKeyIsReadFromInjectedSecretsWhenConfigHasNone() async throws {
+        let secret = "injected-profile-key-VALUE"
+        let home = try homeWithTool("hermes", body: fakeHermesWithInjectedSecrets)
+        try secret.write(toFile: home + "/.injected", atomically: true, encoding: .utf8)
+        let key = try config().apiKeyArguments(profile: "cyber").last!
+        for outer in outerShells {
+            let read = try await replay(key, outer: outer, home: home)
+            XCTAssertEqual(read.status, 0, outer)
+            // la ligne de diagnostic de la source est sur stderr : elle ne devient pas la clé
+            XCTAssertTrue(read.stderr.contains("applied 1 secret"), outer)
+            XCTAssertEqual(HermesAPIKey.parse(RemoteShell.reply(read.stdout)), secret, outer)
+        }
+        // sans injection, la même commande échoue : stderr nomme la cause et la clé reste absente
+        try FileManager.default.removeItem(atPath: home + "/.injected")
+        let missing = try await replay(key, outer: "/bin/sh", home: home)
+        XCTAssertEqual(missing.status, 1)
+        XCTAssertTrue(missing.stderr.contains("Config key not set"))
+    }
+
+    func testAKeyNotSetReplyCarriesTheSourceDiagnostics() async throws {
+        let stderr = """
+        [secrets:command] helper failed; resolving no value: code=1 signal=none
+          Command helper: helper command failed (see structured fields above); no secrets applied
+        Config key not set: API_SERVER_KEY
+
+        """
+        let backend = try await openedBackend(answering: "1 ", stderr: stderr)
+        do {
+            _ = try await backend.readAPIKey(tunnel, profile: "cyber")
+            XCTFail("readAPIKey a rendu nil au lieu de nommer la cause")
+        } catch let failure as APIKeyReadFailure {
+            guard case .keyNotSet(let detail) = failure else { return XCTFail("\(failure)") }
+            XCTAssertTrue(detail.contains("helper failed"), detail)
+            XCTAssertTrue(detail.contains("no secrets applied"), detail)
+            // la dernière ligne ne fait que répéter le diagnostic
+            XCTAssertFalse(detail.contains("Config key not set"), detail)
+            let message = failure.message(profile: "cyber", holdsKey: false)
+            XCTAssertTrue(message.contains("profil cyber"), message)
+            XCTAssertTrue(message.contains("source de secrets"), message)
+            XCTAssertTrue(message.contains("no secrets applied"), message)
+        }
+        // sans diagnostic de source, la cause reste nommée
+        let bare = try await openedBackend(answering: "1 ", stderr: "Config key not set: API_SERVER_KEY\n")
+        do {
+            _ = try await bare.readAPIKey(tunnel, profile: "cyber")
+            XCTFail("readAPIKey a rendu nil")
+        } catch let failure as APIKeyReadFailure {
+            XCTAssertEqual(failure, .keyNotSet(detail: ""))
+        }
+        // un code 0 sans sortie reste « introuvable » : aucune cause à nommer
+        let empty = try await openedBackend(answering: "0 ", stdout: "HERMED_BOTS_REPLY\n")
+        let none = try await empty.readAPIKey(tunnel, profile: "cyber")
+        XCTAssertNil(none)
+    }
+
+    func testAKeyReadFailureNamesTheHeldKeyThatHermesRefuses() {
+        let failure = APIKeyReadFailure.keyNotSet(detail: "Command helper: no secrets applied")
+        let held = failure.message(profile: "cyber", holdsKey: true)
+        XCTAssertTrue(held.contains("clé API est refusée pour le profil cyber"), held)
+        XCTAssertTrue(held.contains("no secrets applied"), held)
+        XCTAssertFalse(failure.message(profile: "cyber", holdsKey: false).contains("refusée"))
+    }
+
+    /// Ce que le processus écrit sur stdout et stderr (`print`, `NSLog`) pendant `body`
+    private func capturedStandardStreams(_ body: () async throws -> Void) async rethrows -> String {
+        fflush(stdout)
+        fflush(stderr)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("hb-capture-\(UUID().uuidString.prefix(8))")
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        let capture = open(file.path, O_CREAT | O_RDWR, 0o600)
+        let savedOut = dup(STDOUT_FILENO)
+        let savedErr = dup(STDERR_FILENO)
+        dup2(capture, STDOUT_FILENO)
+        dup2(capture, STDERR_FILENO)
+        func restore() {
+            fflush(stdout)
+            fflush(stderr)
+            dup2(savedOut, STDOUT_FILENO)
+            dup2(savedErr, STDERR_FILENO)
+            close(savedOut)
+            close(savedErr)
+            close(capture)
+        }
+        do { try await body() } catch { restore(); throw error }
+        restore()
+        return (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+    }
+
+    /// La valeur de la clé ne sort jamais de la lecture que vers l'appelant : ni message, ni description, ni sortie du processus
+    func testApiKeyValueNeverReachesLogs() async throws {
+        let secret = "leaky-key-VALUE-0123456789abcdefghij"
+        let stderr = """
+        API_SERVER_KEY=\(secret)
+        authorization: Bearer \(secret)
+        source failed for token \(secret)
+        Config key not set: API_SERVER_KEY
+
+        """
+        let backend = try await openedBackend(answering: "1 ", stderr: stderr)
+        let ok = try await openedBackend(answering: "0 ", stdout: "HERMED_BOTS_REPLY\n\(secret)\n")
+        var surfaces: [String] = []
+        var read: String?
+        let streams = await capturedStandardStreams {
+            do {
+                _ = try await backend.readAPIKey(tunnel, profile: "cyber")
+                XCTFail("readAPIKey a réussi")
+            } catch {
+                guard let failure = error as? APIKeyReadFailure else { return XCTFail("\(error)") }
+                surfaces = [
+                    failure.message(profile: "cyber", holdsKey: false), failure.message(profile: "cyber", holdsKey: true),
+                    "\(failure)", String(describing: failure), String(reflecting: failure), (failure as NSError).localizedDescription,
+                ]
+                var dumped = ""
+                dump(failure, to: &dumped)
+                surfaces.append(dumped)
+            }
+            // la lecture qui réussit rend la valeur à l'appelant seulement
+            read = try? await ok.readAPIKey(tunnel, profile: "cyber")
+        }
+        XCTAssertEqual(read, secret)
+        XCTAssertEqual(surfaces.count, 7)
+        for surface in surfaces { XCTAssertFalse(surface.contains(secret), surface) }
+        // le masque garde le nom de la variable et la cause, pas la valeur
+        XCTAssertTrue(surfaces.first?.contains("API_SERVER_KEY") == true, surfaces.first ?? "")
+        XCTAssertFalse(streams.contains(secret), "la valeur a été écrite sur stdout ou stderr")
+    }
+
+    func testDiagnosticMaskingKeepsTheCauseAndDropsTheValues() {
+        let masked = HermesAPIKey.diagnostic(of: """
+        OPENAI_API_KEY=sk-live-0123456789abcdef0123456789
+        helper failed token=short client_secret: abcdef
+        un jeton sans nom 0123456789abcdefghijklmnopqrstuv fin
+        """)
+        for value in ["sk-live-0123456789abcdef0123456789", "abcdef", "short", "0123456789abcdefghijklmnopqrstuv"] {
+            XCTAssertFalse(masked.contains(value), masked)
+        }
+        XCTAssertTrue(masked.contains("OPENAI_API_KEY"), masked)
+        XCTAssertTrue(masked.contains("helper failed"), masked)
+        // un chemin et un mot courant gardent leur forme
+        XCTAssertEqual(HermesAPIKey.diagnostic(of: "PermissionError: /srv/hermes/profiles/cyber/.env illisible"), "PermissionError: /srv/hermes/profiles/cyber/.env illisible")
+        // trois lignes au plus, 400 caractères au plus, sans caractère de contrôle
+        let long = HermesAPIKey.diagnostic(of: (1...10).map { "ligne \($0) " + String(repeating: "x", count: 20) }.joined(separator: "\n") + "\u{1b}[31m")
+        XCTAssertLessThanOrEqual(long.split(separator: "\n").count, 3)
+        XCTAssertFalse(long.contains("\u{1b}"))
+        XCTAssertLessThanOrEqual(HermesAPIKey.diagnostic(of: String(repeating: "mot ", count: 500)).count, 400)
+    }
+
+    @MainActor
+    func testAKeyReadFailureWithAReasonIsRememberedByTheKeyReadGuard() async throws {
+        var store = InMemorySecretStore(apiKey: nil)
+        let fetches = APIKeyFetches()
+        var reads = 0
+        func read(_ name: String) async throws -> String? {
+            reads += 1
+            throw APIKeyReadFailure.keyNotSet(detail: "Command helper: no secrets applied")
+        }
+        for attempt in 1...2 {
+            do {
+                _ = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+                XCTFail("la cause a été avalée à l'essai \(attempt)")
+            } catch let failure as APIKeyReadFailure {
+                XCTAssertEqual(failure, .keyNotSet(detail: "Command helper: no secrets applied"))
+            }
+        }
+        XCTAssertEqual(reads, 1)
+        // un autre profil lit pour lui-même ; un nouvel essai explicite relit
+        _ = try? await fetches.fetch(profile: "sport", into: &store, read: read)
+        XCTAssertEqual(reads, 2)
+        fetches.reset()
+        _ = try? await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertEqual(reads, 3)
     }
 
     @MainActor

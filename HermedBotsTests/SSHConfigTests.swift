@@ -1522,7 +1522,7 @@ final class AppModelConnectTests: XCTestCase {
 
     /// `/health` répond 200 : les sondes authentifiées reçoivent 401, la lecture de la clé part et l'outil manque sur l'hôte
     func testAMissingToolOnTheHostIsNamedWhenTheKeyCannotBeRead() async {
-        let reads = KeyReads(failure: .remoteToolNotFound) { _, _ in nil }
+        let reads = KeyReads(failure: SSHFailure.remoteToolNotFound) { _, _ in nil }
         let model = keyModel(profiles: ["hv-bot-a"], reads: reads) { $0.url?.path.hasSuffix("/health") == true ? 200 : 401 }
         await model.bots.refresh()
         await model.refreshVersion()
@@ -1541,13 +1541,45 @@ final class AppModelConnectTests: XCTestCase {
 
     /// Même cas quand c'est la lecture de la version qui reçoit le 401
     func testAMissingToolOnTheHostIsNamedWhenTheVersionReadIsRefused() async {
-        let reads = KeyReads(failure: .remoteToolNotFound) { _, _ in nil }
+        let reads = KeyReads(failure: SSHFailure.remoteToolNotFound) { _, _ in nil }
         let model = keyModel(profiles: ["hv-bot-a"], reads: reads) { _ in 401 }
         await model.bots.refresh()
         await model.refreshVersion()
         XCTAssertEqual(reads.profiles, ["hv-bot-a"])
         XCTAssertEqual(model.apiError, SSHFailure.remoteToolNotFound.message)
         XCTAssertFalse(model.isCheckingAPI)
+    }
+
+    /// La lecture SSH échoue avec une cause (source de secrets en échec) : la bannière la dit au lieu de « introuvable »
+    func testTheReasonOfAnUnreadableKeyIsShownInTheBanner() async {
+        let failure = APIKeyReadFailure.keyNotSet(detail: "Command helper: no secrets applied")
+        let reads = KeyReads(failure: failure) { _, _ in nil }
+        let model = keyModel(profiles: ["hv-bot-a"], reads: reads) { $0.url?.path.hasSuffix("/health") == true ? 200 : 401 }
+        await model.bots.refresh()
+        await model.refreshVersion()
+        XCTAssertEqual(reads.profiles, ["hv-bot-a"])
+        XCTAssertEqual(model.apiError, failure.message(profile: "hv-bot-a", holdsKey: false))
+        XCTAssertTrue(model.apiError?.contains("no secrets applied") == true)
+        // un second refus du même profil ne relit pas et garde la cause
+        await model.handleAPIError(refusal(), profile: "hv-bot-a")
+        XCTAssertEqual(reads.profiles, ["hv-bot-a"])
+        XCTAssertEqual(model.apiError, failure.message(profile: "hv-bot-a", holdsKey: false))
+        // « Réessayer » relit une fois
+        await model.retryAPI()
+        XCTAssertEqual(reads.profiles, ["hv-bot-a", "hv-bot-a"])
+        XCTAssertEqual(model.apiError, failure.message(profile: "hv-bot-a", holdsKey: false))
+        XCTAssertFalse(model.isCheckingAPI)
+    }
+
+    func testTheReasonNamesAHeldKeyThatHermesRefusesWhenTheHostCannotBeRead() async {
+        let failure = APIKeyReadFailure.commandFailed(status: 2, detail: "PermissionError")
+        let reads = KeyReads(failure: failure) { _, _ in nil }
+        let model = keyModel(keys: ["hv-bot-a": "held-key"], profiles: ["hv-bot-a"], reads: reads) { $0.url?.path.hasSuffix("/health") == true ? 200 : 401 }
+        await model.bots.refresh()
+        await model.refreshVersion()
+        XCTAssertEqual(model.apiError, failure.message(profile: "hv-bot-a", holdsKey: true))
+        XCTAssertTrue(model.apiError?.contains("refusée") == true)
+        XCTAssertFalse(model.apiError?.contains("held-key") == true)
     }
 
     func testRetryReadsTheKeyOfTheRefusedProfileAndNotOfTheOneOnScreen() async {
@@ -1632,10 +1664,10 @@ final class AppModelConnectTests: XCTestCase {
 private final class KeyReads {
     private(set) var profiles: [String] = []
     private let answer: (Int, String) -> String?
-    private let failure: SSHFailure
+    private let failure: Error
 
     /// Une réponse nil échoue avec `failure`
-    init(failure: SSHFailure = .unreachable("simulé"), _ answer: @escaping (Int, String) -> String?) {
+    init(failure: Error = SSHFailure.unreachable("simulé"), _ answer: @escaping (Int, String) -> String?) {
         self.failure = failure
         self.answer = answer
     }

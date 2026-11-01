@@ -484,6 +484,7 @@ final class AppModel {
 
     /// `profile` est celui de la requête refusée, pas forcément celui qui est à l'écran
     func handleAPIError(_ error: Error, profile: String) async {
+        if let failure = error as? APIKeyReadFailure { return showUnreadableKey(failure, profile: profile) }
         guard Self.isUnauthorized(error) else {
             apiError = Self.apiMessage(error)
             return
@@ -498,12 +499,23 @@ final class AppModel {
                 await recheckAPI()
                 return
             }
+        } catch let failure as APIKeyReadFailure {
+            showUnreadableKey(failure, profile: profile)
+            return
         } catch {
             apiError = Self.apiMessage(error)
             return
         }
         let holdsKey = (try? environment.secrets.resolvedAPIKey(profile: profile)) != nil
         let message = HermesAPIKey.unauthorizedMessage(profile: profile, holdsKey: holdsKey)
+        refusal = (profile, message)
+        apiError = message
+    }
+
+    /// La cause de la lecture ratée remplace « introuvable » ; « Réessayer » relit la clé de ce profil
+    private func showUnreadableKey(_ failure: APIKeyReadFailure, profile: String) {
+        let holdsKey = (try? environment.secrets.resolvedAPIKey(profile: profile)) != nil
+        let message = failure.message(profile: profile, holdsKey: holdsKey)
         refusal = (profile, message)
         apiError = message
     }

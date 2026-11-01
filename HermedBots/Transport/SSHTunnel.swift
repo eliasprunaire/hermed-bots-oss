@@ -612,6 +612,27 @@ enum HermesAPIKey {
         String(localized: "Clé API introuvable sur l'hôte pour le profil \(profile).")
     }
 
+    /// La ligne que `hermes config get` écrit quand ni le .env du profil ni une source de secrets ne donne la clé
+    static let keyNotSetMarker = "Config key not set"
+
+    /// Les dernières lignes de la sortie d'erreur d'Hermes pour la bannière : bornées par `SSHFailure.detail`, sans la ligne qui nomme la clé absente, valeurs de secret masquées
+    /// Hermes ne devrait jamais écrire la valeur ; le masque couvre `NOM=valeur`, `Bearer valeur` et tout mot de 24 caractères ou plus
+    static func diagnostic(of stderr: String) -> String {
+        let lines = stderr.split(whereSeparator: \.isNewline)
+            .filter { !$0.contains(keyNotSetMarker) }
+            .map { mask(String($0)) }
+        return SSHFailure.detail(of: lines.joined(separator: "\n"))
+    }
+
+    private static func mask(_ line: String) -> String {
+        let rules = [
+            (#"(?i)\bbearer\s+\S+"#, "Bearer ****"),
+            (#"(?i)([A-Za-z0-9_]*(?:key|token|secret|password|passwd|authorization))\s*[=:]\s*\S+"#, "$1=****"),
+            (#"[A-Za-z0-9_\-]{24,}"#, "****"),
+        ]
+        return rules.reduce(line) { $0.replacingOccurrences(of: $1.0, with: $1.1, options: .regularExpression) }
+    }
+
     /// Une clé détenue que Hermes refuse n'est pas une clé introuvable
     static func unauthorizedMessage(profile: String, holdsKey: Bool) -> String {
         holdsKey ? String(localized: "La clé API est refusée pour le profil \(profile).") : missingMessage(profile: profile)
@@ -620,6 +641,38 @@ enum HermesAPIKey {
 
 enum HermesProfileName: Error, Equatable {
     case invalid
+}
+
+/// Pourquoi `hermes config get API_SERVER_KEY` n'a pas rendu de clé sur l'hôte ; le détail est la sortie d'erreur, bornée et sans secret
+/// Un 255 de ssh et un 127 (outil absent) gardent leur `SSHFailure`
+enum APIKeyReadFailure: Error, Equatable, Sendable {
+    /// Hermes répond « Config key not set » : le détail porte les diagnostics des sources de secrets qui précèdent cette ligne
+    case keyNotSet(detail: String)
+    /// Un autre code non nul : config illisible, source de secrets en échec
+    case commandFailed(status: Int32, detail: String)
+
+    init(status: Int32, stderr: String) {
+        let detail = HermesAPIKey.diagnostic(of: stderr)
+        self = stderr.contains(HermesAPIKey.keyNotSetMarker) ? .keyNotSet(detail: detail) : .commandFailed(status: status, detail: detail)
+    }
+
+    /// `holdsKey` : le Trousseau a une clé que Hermes refuse ; le refus passe avant l'échec de la relecture
+    func message(profile: String, holdsKey: Bool) -> String {
+        let head = holdsKey
+            ? String(localized: "La clé API est refusée pour le profil \(profile) et sa relecture sur l'hôte a échoué.")
+            : String(localized: "La clé API du profil \(profile) n'a pas pu être lue sur l'hôte.")
+        let cause: String
+        let detail: String
+        switch self {
+        case .keyNotSet(let text):
+            cause = String(localized: "Hermes ne la trouve ni dans le .env du profil ni dans une source de secrets.")
+            detail = text
+        case .commandFailed(let status, let text):
+            cause = String(localized: "La commande hermes a rendu le code \(status).")
+            detail = text
+        }
+        return [head, cause, detail].filter { !$0.isEmpty }.joined(separator: "\n")
+    }
 }
 
 enum APIKeyRecovery {
@@ -636,20 +689,24 @@ enum APIKeyRecovery {
 @MainActor
 final class APIKeyFetches {
     private var attempted: Set<String> = []
-    private var toolMissing: Set<String> = []
+    /// La panne qui a une cause à dire : l'outil absent de l'hôte ou la sortie d'erreur d'Hermes
+    private var failures: [String: Error] = [:]
 
-    /// nil si la garde est fermée pour ce profil, si la lecture échoue ou si la clé est introuvable ; la valeur n'est pas journalisée
-    /// L'outil absent de l'hôte est la seule panne qui remonte : le message « Outil introuvable » vaut mieux que « Clé API introuvable »
+    /// nil si la garde est fermée pour ce profil, si la lecture échoue sans cause à dire ou si la clé est introuvable ; la valeur n'est pas journalisée
+    /// Deux pannes remontent : l'outil absent de l'hôte et une sortie d'erreur d'Hermes ; leur message vaut mieux que « Clé API introuvable »
     func fetch(profile: String, into secrets: inout some SecretStore, read: (String) async throws -> String?) async throws -> String? {
         guard attempted.insert(profile).inserted else {
-            if toolMissing.contains(profile) { throw SSHFailure.remoteToolNotFound }
+            if let failure = failures[profile] { throw failure }
             return nil
         }
         do {
             return try await APIKeyRecovery.refresh(profile: profile, into: &secrets, fetch: read)
         } catch SSHFailure.remoteToolNotFound {
-            toolMissing.insert(profile)
+            failures[profile] = SSHFailure.remoteToolNotFound
             throw SSHFailure.remoteToolNotFound
+        } catch let failure as APIKeyReadFailure {
+            failures[profile] = failure
+            throw failure
         } catch {
             return nil
         }
@@ -658,12 +715,12 @@ final class APIKeyFetches {
     /// Le profil a répondu : le prochain refus peut relire
     func settle(_ profile: String) {
         attempted.remove(profile)
-        toolMissing.remove(profile)
+        failures[profile] = nil
     }
 
     func reset() {
         attempted.removeAll()
-        toolMissing.removeAll()
+        failures.removeAll()
     }
 }
 
@@ -914,7 +971,7 @@ actor SystemSSHBackend: SSHBackend {
         }
         if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr, status: output.status) }
         if output.status == 127 { throw SSHFailure.remoteToolNotFound }
-        guard output.status == 0 else { return nil }
+        guard output.status == 0 else { throw APIKeyReadFailure(status: output.status, stderr: output.stderr) }
         return HermesAPIKey.parse(RemoteShell.reply(output.stdout))
     }
 
