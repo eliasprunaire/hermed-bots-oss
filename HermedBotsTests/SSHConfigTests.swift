@@ -1626,6 +1626,60 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertEqual(items.values.count, 1)
     }
 
+    /// Une lecture SSH partie avant la saisie rend la main après elle : sa valeur ne remplace pas la clé saisie
+    func testASuspendedSSHReadDoesNotOverwriteAManualKey() async throws {
+        let (model, items, seen, gate) = try await suspendedReadModel()
+        let recovery = Task { await model.handleAPIError(HermesError.http(contract: "list_sessions", status: 401, detail: nil), profile: "hv-bot-a") }
+        await eventually { gate.started }
+        try await model.storeAPIKey("manual-VALUE", profile: "hv-bot-a")
+        XCTAssertEqual(items.values["\(KeychainSecretStore.account):hv-bot-a"], Data("manual-VALUE".utf8))
+
+        gate.finish(.success("host-VALUE"))
+        await recovery.value
+        XCTAssertEqual(items.values["\(KeychainSecretStore.account):hv-bot-a"], Data("manual-VALUE".utf8), "la clé lue sur l'hôte a écrasé la saisie")
+        XCTAssertEqual(items.values.count, 1)
+        // la requête qui suit reprend la clé saisie, et aucune bannière ne reste
+        XCTAssertNil(model.apiError)
+        XCTAssertEqual(model.version, .known("0.22.1"))
+        XCTAssertTrue(seen.values.contains("Bearer manual-VALUE"))
+        XCTAssertFalse(seen.values.contains("Bearer host-VALUE"))
+    }
+
+    /// Une lecture périmée qui échoue ne montre pas sa panne et ne la mémorise pas
+    func testASuspendedSSHReadThatFailsAfterAManualKeyShowsNoBanner() async throws {
+        let (model, items, _, gate) = try await suspendedReadModel()
+        let recovery = Task { await model.handleAPIError(HermesError.http(contract: "list_sessions", status: 401, detail: nil), profile: "hv-bot-a") }
+        await eventually { gate.started }
+        try await model.storeAPIKey("manual-VALUE", profile: "hv-bot-a")
+
+        gate.finish(.failure(APIKeyReadFailure.keyNotSet(detail: "Command helper: no secrets applied")))
+        await recovery.value
+        XCTAssertNil(model.apiError)
+        XCTAssertEqual(items.values["\(KeychainSecretStore.account):hv-bot-a"], Data("manual-VALUE".utf8))
+        XCTAssertEqual(model.version, .known("0.22.1"))
+    }
+
+    /// Un modèle dont la lecture SSH attend `gate.finish`, sur un Trousseau simulé qui n'accepte que `manual-VALUE`
+    private func suspendedReadModel() async throws -> (AppModel, FakeKeychainItems, SeenAuthorizations, GatedKeyRead) {
+        let items = FakeKeychainItems()
+        let table = "Profile  Model  Gateway  Alias  Distribution\n  hv-bot-a   hv-fake-1   running   —   —"
+        let environment = AppEnvironment(
+            secrets: items.store, baseURL: URL(string: "http://hermes.invalid"), ssh: nil, isTestMode: true,
+            defaults: isolatedDefaults(), testProfileTable: table
+        )
+        let seen = SeenAuthorizations()
+        KeyStubProtocol.serve = { request in
+            seen.record(request.value(forHTTPHeaderField: "Authorization"))
+            return request.url?.path.hasSuffix("/health") == true || request.value(forHTTPHeaderField: "Authorization") == "Bearer manual-VALUE" ? 200 : 401
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [KeyStubProtocol.self]
+        let gate = GatedKeyRead()
+        let model = AppModel(environment: environment, apiKeyReader: gate.read, urlConfiguration: configuration)
+        await model.bots.refresh()
+        return (model, items, seen, gate)
+    }
+
     func testManualApiKeyRefusesWhatIsNotAKeyOrAProfile() async throws {
         let items = FakeKeychainItems()
         let environment = AppEnvironment(secrets: items.store, baseURL: URL(string: "http://hermes.invalid"), ssh: nil, isTestMode: true, defaults: isolatedDefaults())
@@ -1799,6 +1853,23 @@ private final class KeyReads {
         profiles.append(profile)
         guard let key = answer(profiles.count, profile) else { throw failure }
         return key
+    }
+}
+
+/// Une lecture SSH qui n'a pas de réponse tant que le test ne la donne pas
+@MainActor
+private final class GatedKeyRead {
+    private(set) var started = false
+    private var continuation: CheckedContinuation<String?, Error>?
+
+    func read(_ profile: String) async throws -> String? {
+        started = true
+        return try await withCheckedThrowingContinuation { continuation = $0 }
+    }
+
+    func finish(_ result: Result<String?, Error>) {
+        continuation?.resume(with: result)
+        continuation = nil
     }
 }
 

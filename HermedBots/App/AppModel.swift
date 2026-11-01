@@ -537,18 +537,31 @@ final class AppModel {
     }
 
     /// Une lecture SSH par profil et par refus : le Trousseau est mis à jour, la valeur n'est pas journalisée
+    /// Une saisie de clé ou un nouvel essai pendant la lecture la périme : sa valeur et sa panne sont jetées, la clé du Trousseau reste
     @discardableResult
     private func fetchRemoteAPIKey(_ profile: String) async throws -> String? {
-        let read: @MainActor (String) async throws -> String?
+        let source: @MainActor (String) async throws -> String?
         if let apiKeyReader {
-            read = apiKeyReader
+            source = apiKeyReader
         } else if let sshBackend, let sshConfig, case .open = tunnel.state {
-            read = { try await sshBackend.readAPIKey(sshConfig, profile: $0) }
+            source = { try await sshBackend.readAPIKey(sshConfig, profile: $0) }
         } else {
             return nil
         }
+        let generation = apiKeyFetches.generation
+        let read: @MainActor (String) async throws -> String? = { [apiKeyFetches] name in
+            do {
+                let value = try await source(name)
+                return apiKeyFetches.generation == generation ? value : nil
+            } catch {
+                guard apiKeyFetches.generation == generation else { return nil }
+                throw error
+            }
+        }
         var secrets = environment.secrets
         let key = try await apiKeyFetches.fetch(profile: profile, into: &secrets, read: read)
+        // lecture périmée : la clé du Trousseau, saisie entre-temps, est celle que l'appelant reprend
+        guard apiKeyFetches.generation == generation else { return try? environment.secrets.resolvedAPIKey(profile: profile) }
         if key != nil {
             environment.secrets = secrets
             // un dépli parti avant la clé a gardé son 401 : on relit les fils de ce profil s'il est déplié

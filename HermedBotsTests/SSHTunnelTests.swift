@@ -1223,6 +1223,55 @@ final class RemoteLoginShellTests: XCTestCase {
         XCTAssertLessThanOrEqual(RemoteShell.diagnostic(of: String(repeating: "mot ", count: 500)).count, 400)
     }
 
+    /// Une sortie d'erreur JSON, citée ou échappée garde le nom de la variable et perd la valeur, même courte
+    func testDiagnosticMaskingCoversJsonAndQuotedValues() {
+        let cases: [(line: String, values: [String])] = [
+            (#"{"API_SERVER_KEY": "s3cr-7"}"#, ["s3cr-7"]),
+            (#"{"detail":"refus","API_SERVER_KEY":"s3cr-7","code":401}"#, ["s3cr-7"]),
+            (#"API_SERVER_KEY="qx7 zk9""#, ["qx7", "zk9"]),
+            ("API_SERVER_KEY='qx7 zk9'", ["qx7", "zk9"]),
+            ("export API_SERVER_KEY: \"qx7\"", ["qx7"]),
+            ("{'API_SERVER_KEY': 'qx7 zk9'}", ["qx7", "zk9"]),
+            (#"{"error": "{\"API_SERVER_KEY\": \"qx7\"}"}"#, ["qx7"]),
+            (#"{"API_SERVER_KEY": "qx7 zk9"#, ["qx7", "zk9"]),
+            (#"{"Authorization": "Bearer qx7"}"#, ["qx7"]),
+            (#"{"client_secret": 12345}"#, ["12345"]),
+        ]
+        for (line, values) in cases {
+            let masked = RemoteShell.diagnostic(of: line)
+            for value in values { XCTAssertFalse(masked.contains(value), "\(line) -> \(masked)") }
+            XCTAssertTrue(masked.contains("****"), "\(line) -> \(masked)")
+        }
+        // le nom reste, comme la cause qui l'entoure
+        let kept = RemoteShell.diagnostic(of: #"{"API_SERVER_KEY": "s3cr-7"}"# + "\nhelper failed")
+        XCTAssertTrue(kept.contains("API_SERVER_KEY"), kept)
+        XCTAssertTrue(kept.contains("helper failed"), kept)
+    }
+
+    /// La bannière et chaque description de l'échec reprennent la sortie masquée, y compris pour un JSON à valeur courte
+    func testApiKeyValueInJsonDiagnosticNeverReachesTheBanner() async throws {
+        let stderr = """
+        {"API_SERVER_KEY": "s3cr-7"}
+        API_SERVER_KEY="qx7 zk9"
+        Config key not set: API_SERVER_KEY
+
+        """
+        let backend = try await openedBackend(answering: "1 ", stderr: stderr)
+        do {
+            _ = try await backend.readAPIKey(tunnel, profile: "cyber")
+            XCTFail("readAPIKey a réussi")
+        } catch let failure as APIKeyReadFailure {
+            let surfaces = [
+                failure.message(profile: "cyber", holdsKey: false), failure.message(profile: "cyber", holdsKey: true),
+                "\(failure)", String(reflecting: failure), (failure as NSError).localizedDescription,
+            ]
+            for surface in surfaces {
+                for value in ["s3cr-7", "qx7", "zk9"] { XCTAssertFalse(surface.contains(value), surface) }
+            }
+            XCTAssertTrue(surfaces[0].contains("API_SERVER_KEY"), surfaces[0])
+        }
+    }
+
     @MainActor
     func testAKeyReadFailureWithAReasonIsRememberedByTheKeyReadGuard() async throws {
         var store = InMemorySecretStore(apiKey: nil)

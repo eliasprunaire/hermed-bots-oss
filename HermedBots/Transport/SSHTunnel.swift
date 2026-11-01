@@ -137,7 +137,8 @@ enum RemoteShell {
     }
 
     /// La fin de la sortie d'erreur d'une commande distante pour un message : bornée par `SSHFailure.detail`, valeurs de secret masquées
-    /// Hermes ne devrait jamais écrire une valeur ; le masque couvre `NOM=valeur`, `Bearer valeur` et tout mot de 24 caractères ou plus
+    /// Hermes ne devrait jamais écrire une valeur ; le masque couvre `NOM=valeur`, `NOM: "valeur"` (JSON, guillemets simples, guillemets échappés), `Bearer valeur` et tout mot de 24 caractères ou plus
+    // shortcut: une paire `{"name": "NOM", "value": "x"}` où le nom et la valeur sont deux champs reste visible, à couvrir si Hermes écrit ce format
     static func diagnostic(of stderr: String) -> String {
         SSHFailure.detail(of: stderr.split(whereSeparator: \.isNewline).map { mask(String($0)) }.joined(separator: "\n"))
     }
@@ -145,7 +146,8 @@ enum RemoteShell {
     private static func mask(_ line: String) -> String {
         let rules = [
             (#"(?i)\bbearer\s+\S+"#, "Bearer ****"),
-            (#"(?i)([A-Za-z0-9_]*(?:key|token|secret|password|passwd|authorization))\s*[=:]\s*\S+"#, "$1=****"),
+            // la valeur citée va jusqu'à son guillemet fermant, ou jusqu'à la fin de la ligne si une coupure l'a emporté
+            (#"(?i)((?:\\?["'])?[A-Za-z0-9_]*(?:key|token|secret|password|passwd|authorization)(?:\\?["'])?)\s*[=:]\s*(?:\\"(?:(?!\\").)*(?:\\")?|"(?:[^"\\]|\\.)*"?|'[^']*'?|\S+)"#, "$1=****"),
             (#"[A-Za-z0-9_\-]{24,}"#, "****"),
         ]
         return rules.reduce(line) { $0.replacingOccurrences(of: $1.0, with: $1.1, options: .regularExpression) }
@@ -693,6 +695,8 @@ final class APIKeyFetches {
     private var attempted: Set<String> = []
     /// La panne qui a une cause à dire : l'outil absent de l'hôte ou la sortie d'erreur d'Hermes
     private var failures: [String: Error] = [:]
+    /// Change à chaque `reset()` : une lecture lancée avant lui est périmée (saisie de clé, nouvelle connexion, nouvel essai)
+    private(set) var generation = 0
 
     /// nil si la garde est fermée pour ce profil, si la lecture échoue sans cause à dire ou si la clé est introuvable ; la valeur n'est pas journalisée
     /// Deux pannes remontent : l'outil absent de l'hôte et une sortie d'erreur d'Hermes ; leur message vaut mieux que « Clé API introuvable »
@@ -721,6 +725,7 @@ final class APIKeyFetches {
     }
 
     func reset() {
+        generation += 1
         attempted.removeAll()
         failures.removeAll()
     }
