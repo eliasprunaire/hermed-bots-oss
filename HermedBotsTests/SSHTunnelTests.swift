@@ -1248,6 +1248,30 @@ final class RemoteLoginShellTests: XCTestCase {
         XCTAssertTrue(kept.contains("helper failed"), kept)
     }
 
+    /// Une valeur qui contient un guillemet, dans un JSON de JSON, est masquée en entier : rien ne reste après le guillemet interne
+    func testDiagnosticMaskingHidesTheWholeValueOfNestedJson() throws {
+        let verifierLine = #"{"error":"{\"API_SERVER_KEY\":\"a\\\"exposed-fragment-1234\"}"}"#
+        let masked = RemoteShell.diagnostic(of: verifierLine)
+        XCTAssertFalse(masked.contains("exposed-fragment-1234"), masked)
+        XCTAssertTrue(masked.contains("API_SERVER_KEY"), masked)
+
+        // chaque niveau d'imbrication ré-échappe les guillemets et les barres obliques inverses de la valeur
+        let values = [#"a"exposed-fragment-1234"#, #"ab\"cd\\ef-short"#, #"tail-end\\"#, #"q'uote"after-77"#]
+        for value in values {
+            for name in ["API_SERVER_KEY", "client_secret", "Authorization"] {
+                var line = String(decoding: try JSONSerialization.data(withJSONObject: [name: value]), as: UTF8.self)
+                for level in 0...4 {
+                    let masked = RemoteShell.diagnostic(of: line)
+                    for fragment in ["exposed-fragment-1234", "cd", "ef-short", "tail-end", "after-77", "uote"] where value.contains(fragment) {
+                        XCTAssertFalse(masked.contains(fragment), "niveau \(level), \(name) : \(line) -> \(masked)")
+                    }
+                    XCTAssertTrue(masked.contains(name), "niveau \(level), \(name) : \(line) -> \(masked)")
+                    line = String(decoding: try JSONSerialization.data(withJSONObject: ["error": line]), as: UTF8.self)
+                }
+            }
+        }
+    }
+
     /// La bannière et chaque description de l'échec reprennent la sortie masquée, y compris pour un JSON à valeur courte
     func testApiKeyValueInJsonDiagnosticNeverReachesTheBanner() async throws {
         let stderr = """
