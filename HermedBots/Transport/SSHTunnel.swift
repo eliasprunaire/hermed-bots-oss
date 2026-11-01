@@ -122,10 +122,11 @@ enum RemoteShell {
     /// Ligne que la commande écrit avant l'outil : le profil de connexion écrit sur stdout avant elle (motd, diagnostic), `reply` retire ce texte
     static let marker = "HERMED_BOTS_REPLY"
 
-    /// L'unique argument que ssh envoie après l'alias : `sh -lc 'echo <marqueur>; <mots>'`, chaque mot cité deux fois (pour `sh -c`, puis pour le shell du compte)
+    /// L'unique argument que ssh envoie après l'alias : `sh -lc 'echo; echo <marqueur>; <mots>'`, chaque mot cité deux fois (pour `sh -c`, puis pour le shell du compte)
+    /// Le premier `echo` termine la dernière ligne du profil : une bannière sans saut de ligne ne se colle pas au marqueur
     // shortcut: `sh -l` lit /etc/profile et ~/.profile seulement, un PATH posé dans ~/.zprofile ou ~/.bash_profile reste invisible (code 127 nommé), à remplacer par un chemin d'outil réglable si le cas se présente
     static func loginCommand(_ words: [String]) -> String {
-        "sh -lc " + quote("echo \(marker); " + words.map(quote).joined(separator: " "))
+        "sh -lc " + quote("echo; echo \(marker); " + words.map(quote).joined(separator: " "))
     }
 
     /// La sortie de l'outil : ce qui suit la dernière ligne marqueur ; sans marqueur, la sortie entière

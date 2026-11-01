@@ -52,7 +52,7 @@ final class SSHTunnelConfigTests: XCTestCase {
 
     func testTheProfileListReadRunsOnlyHermesProfileListWithNoForward() throws {
         let args = try config().profileListArguments()
-        XCTAssertEqual(Array(args.suffix(2)), ["lab.invalid", "sh -lc 'echo HERMED_BOTS_REPLY; hermes profile list'"])
+        XCTAssertEqual(Array(args.suffix(2)), ["lab.invalid", "sh -lc 'echo; echo HERMED_BOTS_REPLY; hermes profile list'"])
         for absent in ["-N", "-L", "-R", "-D", "-F", "-i", "-l", "-p"] { XCTAssertFalse(args.contains(absent), absent) }
         for required in ["-T", "BatchMode=yes", "ForwardAgent=no", "ControlMaster=no", "ControlPath=none", "ConnectTimeout=5"] {
             XCTAssertTrue(args.contains(required), required)
@@ -68,7 +68,7 @@ final class SSHTunnelConfigTests: XCTestCase {
 
     func testTheAPIKeyReadRunsOnlyTheFrozenHermesConfigGetWithTheSameAlias() throws {
         let args = try config().apiKeyArguments(profile: "cyber")
-        XCTAssertEqual(Array(args.suffix(2)), ["lab.invalid", "sh -lc 'echo HERMED_BOTS_REPLY; hermes -p cyber config get API_SERVER_KEY --raw'"])
+        XCTAssertEqual(Array(args.suffix(2)), ["lab.invalid", "sh -lc 'echo; echo HERMED_BOTS_REPLY; hermes -p cyber config get API_SERVER_KEY --raw'"])
         XCTAssertEqual(HermesAPIKey.remoteCommand(profile: "cyber"), ["hermes", "-p", "cyber", "config", "get", "API_SERVER_KEY", "--raw"])
         for absent in ["-N", "-L", "-R", "-D", "-F", "-i", "-l"] { XCTAssertFalse(args.contains(absent), absent) }
         // le `-p` de hermes est dans la chaîne distante : ssh lui-même n'en reçoit aucun
@@ -876,13 +876,14 @@ final class RemoteLoginShellTests: XCTestCase {
     }
 
     /// Un HOME dont `.profile` ajoute `.local/bin` au PATH, où `tool` est un script : l'installation d'un outil dans un dossier bin personnel
-    private func homeWithTool(_ tool: String, body: String, banner: String? = nil) throws -> String {
+    private func homeWithTool(_ tool: String, body: String, banner: String? = nil, terminated: Bool = true) throws -> String {
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("hb-remote-\(UUID().uuidString.prefix(8))")
         let bin = home.appendingPathComponent(".local/bin")
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: home) }
         // un profil bavard écrit sur stdout avant la commande : motd, conseil du jour, diagnostic
-        let chatter = banner.map { "echo '\($0)'\n" } ?? ""
+        // `terminated: false` : la dernière ligne de la bannière n'a pas de saut de ligne (printf sans \n)
+        let chatter = banner.map { terminated ? "echo '\($0)'\n" : "printf '%s' '\($0)'\n" } ?? ""
         try "\(chatter)PATH=\"\(bin.path):$PATH\"\nexport PATH\n".write(to: home.appendingPathComponent(".profile"), atomically: true, encoding: .utf8)
         let path = bin.appendingPathComponent(tool).path
         try "#!/bin/sh\n\(body)\n".write(toFile: path, atomically: true, encoding: .utf8)
@@ -931,7 +932,7 @@ final class RemoteLoginShellTests: XCTestCase {
         XCTAssertEqual(RemoteShell.quote(""), "''")
         XCTAssertEqual(RemoteShell.quote("it's"), #"'it'\''s'"#)
         XCTAssertEqual(RemoteShell.quote("a b"), "'a b'")
-        XCTAssertEqual(RemoteShell.loginCommand(["hermes", "a b"]), #"sh -lc 'echo HERMED_BOTS_REPLY; hermes '\''a b'\'''"#)
+        XCTAssertEqual(RemoteShell.loginCommand(["hermes", "a b"]), #"sh -lc 'echo; echo HERMED_BOTS_REPLY; hermes '\''a b'\'''"#)
     }
 
     func testAChattyLoginProfileDoesNotReplaceTheAPIKey() async throws {
@@ -944,6 +945,21 @@ final class RemoteLoginShellTests: XCTestCase {
             // sans l'isolation, la bannière est la première ligne : elle serait gardée comme clé
             XCTAssertEqual(HermesAPIKey.parse(read.stdout), "Welcome to the host", outer)
             XCTAssertEqual(HermesAPIKey.parse(RemoteShell.reply(read.stdout)), secret, outer)
+        }
+    }
+
+    func testAnUnterminatedLoginBannerDoesNotReplaceTheAPIKey() async throws {
+        let secret = "profile-key-VALUE"
+        let home = try homeWithTool("hermes", body: "printf '%s\\n' '\(secret)'", banner: "Welcome to the host", terminated: false)
+        let key = try config().apiKeyArguments(profile: "cyber").last!
+        let list = try config().profileListArguments().last!
+        for outer in outerShells {
+            let read = try await replay(key, outer: outer, home: home)
+            XCTAssertEqual(read.status, 0, outer)
+            // sans le saut de ligne avant le marqueur, la bannière et le marqueur forment une seule ligne que `reply` ne reconnaît pas
+            XCTAssertEqual(HermesAPIKey.parse(RemoteShell.reply(read.stdout)), secret, outer)
+            let listed = try await replay(list, outer: outer, home: home)
+            XCTAssertEqual(RemoteShell.reply(listed.stdout), "\(secret)\n", outer)
         }
     }
 
@@ -1106,6 +1122,42 @@ final class RemoteLoginShellTests: XCTestCase {
         XCTAssertEqual(bots.phase, .ready)
         try await Task.sleep(for: .milliseconds(200))
         XCTAssertGreaterThan(reads, 3)
+    }
+
+    @MainActor
+    func testAToolNotFoundAfterASuccessfulListStopsTheAutomaticReads() async throws {
+        var reads = 0
+        var toolPresent = true
+        let bots = BotsModel(
+            interval: .milliseconds(10),
+            readProfiles: {
+                reads += 1
+                if !toolPresent { throw SSHFailure.remoteToolNotFound }
+                return []
+            },
+            client: { nil },
+            connection: { "lab.invalid" }
+        )
+        await bots.refresh()
+        XCTAssertEqual(bots.phase, .ready)
+        // la liste lue reste affichée quand l'outil disparaît ensuite
+        toolPresent = false
+        let loop = Task { await bots.run() }
+        addTeardownBlock { loop.cancel() }
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(bots.phase, .ready)
+        // la première lecture de la boucle voit le 127 ; sans l'arrêt, une lecture ssh partirait à chaque intervalle
+        XCTAssertEqual(reads, 2)
+        // « Réessayer » relit une fois, puis la boucle reste arrêtée
+        await bots.refresh()
+        XCTAssertEqual(reads, 3)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(reads, 3)
+        // l'outil revient : la relecture explicite réussit et la boucle reprend
+        toolPresent = true
+        await bots.refresh()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertGreaterThan(reads, 5)
     }
 
     @MainActor

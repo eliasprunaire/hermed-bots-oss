@@ -32,6 +32,8 @@ final class BotsModel {
     private struct Host {
         var list = BotList()
         var phase = Phase.waiting
+        /// La dernière lecture de la liste a rendu 127 : `run()` ne relit plus d'elle-même, même quand une liste déjà lue reste affichée (la phase reste alors `ready`)
+        var toolMissing = false
         var threads: [String: Threads] = [:]
         /// Le numéro de la lecture rangée de la liste des fils de chaque bot, pris à son départ : la conversation le compare à la confirmation d'un choix
         var reads: [String: Int] = [:]
@@ -69,10 +71,12 @@ final class BotsModel {
     /// Relit la liste tout de suite puis à chaque intervalle, jusqu'à l'annulation de la tâche
     func run() async {
         let host = connection()
+        // une nouvelle boucle (tunnel rouvert) lit une fois, comme avant l'arrêt
+        hosts[host, default: Host()].toolMissing = false
         if hosts[host, default: Host()].list.shown == nil { hosts[host, default: Host()].phase = .loading }
         while !Task.isCancelled {
             // `hermes` manque sur l'hôte : un relevé de plus ne change rien, seul « Réessayer » relit
-            if case .toolNotFound = phase {} else { await refresh() }
+            if !shown.toolMissing { await refresh() }
             try? await Task.sleep(for: interval)
         }
     }
@@ -83,8 +87,10 @@ final class BotsModel {
             let profiles = try await readProfiles()
             hosts[host, default: Host()].list.receive(profiles.map { Bot(id: $0.id, name: $0.displayName, model: $0.model) })
             hosts[host, default: Host()].phase = .ready
+            hosts[host, default: Host()].toolMissing = false
         } catch {
             if Task.isCancelled { return }
+            hosts[host, default: Host()].toolMissing = (error as? SSHFailure) == .remoteToolNotFound
             // une liste déjà affichée reste : la panne passagère d'une relecture ne la remplace pas
             if hosts[host, default: Host()].list.shown == nil { hosts[host, default: Host()].phase = Self.failure(error) }
         }

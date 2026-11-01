@@ -473,7 +473,7 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertEqual(args.first, "-G")
         XCTAssertFalse(args.contains("-vv"))
         // la résolution reçoit la même commande distante que le lancement : une chaîne, le shell de connexion
-        XCTAssertEqual(Array(args.suffix(2)), ["lab.invalid", "sh -lc 'echo HERMED_BOTS_REPLY; hermes -p hv-bot-a config get API_SERVER_KEY --raw'"])
+        XCTAssertEqual(Array(args.suffix(2)), ["lab.invalid", "sh -lc 'echo; echo HERMED_BOTS_REPLY; hermes -p hv-bot-a config get API_SERVER_KEY --raw'"])
         XCTAssertEqual(try SystemSSHConfigResolver.apiKeyArguments(alias: "lab.invalid", profile: "hv-bot-b").last?.contains("hv-bot-a"), false)
     }
 
