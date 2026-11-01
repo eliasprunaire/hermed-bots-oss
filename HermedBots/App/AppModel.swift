@@ -448,6 +448,22 @@ final class AppModel {
         }
     }
 
+    /// Saisie des réglages : la clé du profil va au Trousseau, remplace celle qui s'y trouve et sert aux requêtes suivantes
+    /// La valeur ne revient jamais à l'écran ni dans un journal ; les espaces d'un collage sont retirés
+    /// Une erreur de l'API après la saisie s'affiche dans la bannière, elle ne fait pas échouer l'enregistrement
+    func storeAPIKey(_ key: String, profile: String) async throws {
+        let profile = try HermesAPIKey.validate(profile)
+        let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, !key.contains(where: \.isNewline) else { throw ManualAPIKeyError.invalidKey }
+        var secrets = environment.secrets
+        try secrets.setAPIKey(key, profile: profile)
+        environment.secrets = secrets
+        // une clé neuve rouvre la lecture SSH, que la garde avait fermée pour ce refus
+        apiKeyFetches.reset()
+        bots.reload(profile)
+        if apiError != nil { await recheckAPI() }
+    }
+
     /// Bouton « Réessayer » : une lecture SSH échouée plus tôt peut repartir, pour le profil refusé
     func retryAPI() async {
         guard !isCheckingAPI else { return }
@@ -576,4 +592,9 @@ final class AppModel {
         }
         return String(localized: "Hermes ne répond pas. Vérifiez la liaison puis réessayez.")
     }
+}
+
+enum ManualAPIKeyError: Error, Equatable {
+    /// Vide, ou sur plusieurs lignes : ce n'est pas une clé
+    case invalidKey
 }

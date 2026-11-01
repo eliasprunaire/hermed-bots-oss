@@ -1,5 +1,6 @@
 import AppSettings
 import HermesAdapter
+import Security
 import XCTest
 
 final class SSHConfigTests: XCTestCase {
@@ -1582,6 +1583,90 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertFalse(model.apiError?.contains("held-key") == true)
     }
 
+    /// Une clé saisie dans les réglages va au Trousseau, remplace la précédente et part avec les requêtes suivantes
+    func testManualApiKeyIsStoredInKeychainAndUsed() async throws {
+        let items = FakeKeychainItems()
+        let table = "Profile  Model  Gateway  Alias  Distribution\n  hv-bot-a   hv-fake-1   running   —   —"
+        let environment = AppEnvironment(
+            secrets: items.store, baseURL: URL(string: "http://hermes.invalid"), ssh: nil, isTestMode: true,
+            defaults: isolatedDefaults(), testProfileTable: table
+        )
+        let seen = SeenAuthorizations()
+        KeyStubProtocol.serve = { request in
+            seen.record(request.value(forHTTPHeaderField: "Authorization"))
+            let accepted = request.url?.path.hasSuffix("/health") == true || request.value(forHTTPHeaderField: "Authorization") == "Bearer manual-VALUE"
+            return accepted ? 200 : 401
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [KeyStubProtocol.self]
+        let reads = KeyReads(failure: APIKeyReadFailure.keyNotSet(detail: "")) { _, _ in nil }
+        let model = AppModel(environment: environment, apiKeyReader: reads.read, urlConfiguration: configuration)
+        await model.bots.refresh()
+        await model.refreshVersion()
+        // sans clé : Hermes refuse, l'hôte ne la donne pas
+        XCTAssertNotNil(model.apiError)
+        XCTAssertTrue(items.values.isEmpty)
+
+        // les espaces et le saut de ligne d'un collage ne font pas partie de la clé
+        try await model.storeAPIKey("  manual-VALUE \n", profile: "hv-bot-a")
+        XCTAssertEqual(items.values["\(KeychainSecretStore.account):hv-bot-a"], Data("manual-VALUE".utf8))
+        XCTAssertEqual(items.values.count, 1, "seul le profil nommé reçoit la clé")
+        // la clé est utilisée aussitôt : la bannière disparaît sans autre action
+        XCTAssertNil(model.apiError)
+        XCTAssertTrue(seen.values.contains("Bearer manual-VALUE"))
+        XCTAssertEqual(model.version, .known("0.22.1"))
+        // la saisie remet la lecture SSH à neuf : un refus ultérieur relit l'hôte une fois
+        let readsBefore = reads.profiles.count
+        await model.handleAPIError(HermesError.http(contract: "list_sessions", status: 401, detail: nil), profile: "hv-bot-a")
+        XCTAssertEqual(reads.profiles.count, readsBefore + 1)
+
+        // remplacer une clé : même entrée du Trousseau
+        try await model.storeAPIKey("replacement-VALUE", profile: "hv-bot-a")
+        XCTAssertEqual(items.values["\(KeychainSecretStore.account):hv-bot-a"], Data("replacement-VALUE".utf8))
+        XCTAssertEqual(items.values.count, 1)
+    }
+
+    func testManualApiKeyRefusesWhatIsNotAKeyOrAProfile() async throws {
+        let items = FakeKeychainItems()
+        let environment = AppEnvironment(secrets: items.store, baseURL: URL(string: "http://hermes.invalid"), ssh: nil, isTestMode: true, defaults: isolatedDefaults())
+        let model = AppModel(environment: environment)
+        for key in ["", "   ", "\n", "deux\nlignes"] {
+            do {
+                try await model.storeAPIKey(key, profile: "hv-bot-a")
+                XCTFail("la clé \(key.debugDescription) a été acceptée")
+            } catch let error as ManualAPIKeyError {
+                XCTAssertEqual(error, .invalidKey)
+            }
+        }
+        for profile in ["", "-p", "a b", "a;id", "../x", String(repeating: "p", count: 65)] {
+            do {
+                try await model.storeAPIKey("manual-VALUE", profile: profile)
+                XCTFail("le profil \(profile.debugDescription) a été accepté")
+            } catch let error as HermesProfileName {
+                XCTAssertEqual(error, .invalid)
+            }
+        }
+        XCTAssertTrue(items.values.isEmpty, "rien n'est écrit au Trousseau")
+    }
+
+    /// Le Trousseau refuse : l'erreur remonte, la clé n'est pas dite enregistrée
+    func testManualApiKeyReportsAKeychainFailure() async {
+        let environment = AppEnvironment(
+            secrets: KeychainSecretStore(copyMatching: { _, _ in errSecItemNotFound }, update: { _, _ in errSecItemNotFound }, add: { _ in errSecInteractionNotAllowed }),
+            baseURL: URL(string: "http://hermes.invalid"), ssh: nil, isTestMode: true, defaults: isolatedDefaults()
+        )
+        let model = AppModel(environment: environment)
+        do {
+            try await model.storeAPIKey("manual-VALUE", profile: "hv-bot-a")
+            XCTFail("l'échec du Trousseau a été avalé")
+        } catch let error as KeychainError {
+            XCTAssertEqual(error.status, errSecInteractionNotAllowed)
+            XCTAssertFalse(error.description.contains("manual-VALUE"))
+        } catch {
+            XCTFail("\(error)")
+        }
+    }
+
     func testRetryReadsTheKeyOfTheRefusedProfileAndNotOfTheOneOnScreen() async {
         let reads = KeyReads { count, _ in count == 1 ? nil : "key-a" }
         let model = keyModel(keys: ["hv-bot-b": "key-b"], profiles: ["hv-bot-b", "hv-bot-a"], reads: reads) { _ in 200 }
@@ -1658,6 +1743,44 @@ final class AppModelConnectTests: XCTestCase {
         }
         XCTFail("condition jamais vraie")
     }
+}
+
+/// Un Trousseau en mémoire : les entrées par compte, sans toucher au vrai
+private final class FakeKeychainItems: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [String: Data] = [:]
+
+    var values: [String: Data] { lock.withLock { storage } }
+
+    var store: KeychainSecretStore {
+        KeychainSecretStore(copyMatching: { query, result in
+            self.lock.withLock {
+                guard let value = self.storage[(query as NSDictionary)[kSecAttrAccount] as! String] else { return errSecItemNotFound }
+                result?.pointee = value as CFData
+                return errSecSuccess
+            }
+        }, update: { query, attributes in
+            self.lock.withLock {
+                let account = (query as NSDictionary)[kSecAttrAccount] as! String
+                guard self.storage[account] != nil else { return errSecItemNotFound }
+                self.storage[account] = (attributes as NSDictionary)[kSecValueData] as? Data
+                return errSecSuccess
+            }
+        }, add: { query in
+            self.lock.withLock {
+                self.storage[(query as NSDictionary)[kSecAttrAccount] as! String] = (query as NSDictionary)[kSecValueData] as? Data
+                return errSecSuccess
+            }
+        })
+    }
+}
+
+private final class SeenAuthorizations: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seen: [String?] = []
+
+    func record(_ value: String?) { lock.withLock { seen.append(value) } }
+    var values: [String?] { lock.withLock { seen } }
 }
 
 @MainActor

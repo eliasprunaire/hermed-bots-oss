@@ -26,10 +26,41 @@ extension SSHTunnel.State {
     }
 }
 
-/// L'alias du tunnel et les champs déduits de `ssh -G` ; aucun secret, aucune saisie de clé API
+/// L'alias du tunnel, les champs déduits de `ssh -G`, et la saisie de la clé API d'un profil
+/// La clé saisie va au Trousseau ; aucun champ ne la montre
 struct ConnectionView: View {
     @Bindable var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @State private var keyProfile = ""
+    @State private var keyDraft = ""
+    @State private var keyStatus: String?
+
+    /// Les profils lus sur l'hôte ; vide tant que la liste n'est pas lue
+    private var knownProfiles: [String] { (model.bots.list.shown ?? []).map(\.id) }
+
+    private var chosenProfile: String {
+        let typed = keyProfile.trimmingCharacters(in: .whitespacesAndNewlines)
+        return typed.isEmpty ? (model.versionProfile ?? "") : typed
+    }
+
+    private func saveKey() {
+        let profile = chosenProfile
+        let draft = keyDraft
+        // le champ est vidé avant tout : la valeur ne reste pas dans la vue, quel que soit le résultat
+        keyDraft = ""
+        Task {
+            do {
+                try await model.storeAPIKey(draft, profile: profile)
+                keyStatus = String(localized: "Clé enregistrée dans le Trousseau pour le profil \(profile).")
+            } catch is ManualAPIKeyError {
+                keyStatus = String(localized: "La clé est vide ou sur plusieurs lignes. Colle la clé sur une seule ligne.")
+            } catch is HermesProfileName {
+                keyStatus = String(localized: "Le nom du profil n'est pas valide.")
+            } catch {
+                keyStatus = String(localized: "Le Trousseau a refusé la clé. Déverrouille-le, puis réessaie.")
+            }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -77,6 +108,26 @@ struct ConnectionView: View {
                 LabeledContent("Version de Hermes") { model.version.text.accessibilityID(.connectionVersion) }
                 if let message = model.tunnel.state.failureMessage {
                     Text(message).foregroundStyle(.red).accessibilityID(.connectionMessage)
+                }
+                Section("Clé API d'un profil") {
+                    if knownProfiles.isEmpty {
+                        TextField("Profil", text: $keyProfile, prompt: Text(verbatim: model.versionProfile ?? ""))
+                            .accessibilityID(.connectionApiKeyProfile)
+                    } else {
+                        Picker("Profil", selection: Binding(get: { chosenProfile }, set: { keyProfile = $0 })) {
+                            ForEach(knownProfiles, id: \.self) { Text(verbatim: $0).tag($0) }
+                        }
+                        .accessibilityID(.connectionApiKeyProfile)
+                    }
+                    SecureField("Clé API", text: $keyDraft)
+                        .accessibilityID(.connectionApiKey)
+                    Button("Enregistrer la clé") { saveKey() }
+                        .disabled(keyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chosenProfile.isEmpty)
+                        .accessibilityID(.connectionApiKeySave)
+                        .accessibilityRespondsToUserInteraction(true)
+                    if let keyStatus {
+                        Text(keyStatus).accessibilityID(.connectionApiKeyStatus)
+                    }
                 }
             }
             .formStyle(.grouped)
