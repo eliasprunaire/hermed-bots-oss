@@ -120,6 +120,7 @@ enum RemoteShell {
     }
 
     /// L'unique argument que ssh envoie après l'alias : `sh -lc '<mots>'`, chaque mot cité deux fois (pour `sh -c`, puis pour le shell du compte)
+    // shortcut: `sh -l` lit /etc/profile et ~/.profile seulement, un PATH posé dans ~/.zprofile ou ~/.bash_profile reste invisible (code 127 nommé), à remplacer par un chemin d'outil réglable si le cas se présente
     static func loginCommand(_ words: [String]) -> String {
         "sh -lc " + quote(words.map(quote).joined(separator: " "))
     }
