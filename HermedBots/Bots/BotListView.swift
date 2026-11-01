@@ -17,7 +17,7 @@ struct BotListView: View {
                 BotChangeNotice(change: change, apply: model.validateChange)
             }
             ForEach(model.list.shown ?? []) { bot in
-                BotRow(bot: bot, isExpanded: model.expanded.contains(bot.id), lockReason: profileLock.state(bot.id).reason) {
+                BotRow(bot: bot, isExpanded: model.expanded.contains(bot.id), lockReason: profileLock.reason(bot.id)) {
                     if profileLock.state(bot.id) == .free { model.toggle(bot.id) }
                     select(bot.id)
                 }

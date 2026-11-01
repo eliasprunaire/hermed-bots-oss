@@ -976,7 +976,7 @@ final class RemoteLoginShellTests: XCTestCase {
 
     /// Un exécutable qui tient le port du tunnel ouvert, puis répond aux lectures auxiliaires avec le code et la sortie d'erreur de `status`
     /// `stderr` remplace la sortie d'erreur d'une ligne que `status` donne après le code
-    private func answeringWrapper(status: String, stdout: String = "", stderr: String? = nil) throws -> String {
+    private func answeringWrapper(status: String, stdout: String = "", stderr: String? = nil, delay: Int = 0) throws -> String {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hb-answer-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
@@ -991,6 +991,7 @@ final class RemoteLoginShellTests: XCTestCase {
           port=$(printf '%s' "$forward" | awk -F: '{print $2}')
           exec /usr/bin/python3 -c 'import socket,sys,time; p=int(sys.argv[1]); s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("127.0.0.1",p)); s.listen(1); s.settimeout(30); c,_=s.accept(); time.sleep(8)' "$port"
         fi
+        sleep \(delay)
         cat "\(dir.path)/stdout"
         code=$(cut -d' ' -f1 "\(dir.path)/answer")
         if [ -f "\(dir.path)/stderr" ]; then cat "\(dir.path)/stderr" >&2; else cut -d' ' -f2- "\(dir.path)/answer" >&2; fi
@@ -1003,11 +1004,11 @@ final class RemoteLoginShellTests: XCTestCase {
         return wrapper
     }
 
-    private func openedBackend(answering status: String, stdout: String = "", stderr: String? = nil) async throws -> SystemSSHBackend {
+    private func openedBackend(answering status: String, stdout: String = "", stderr: String? = nil, delay: Int = 0) async throws -> SystemSSHBackend {
         let backend = SystemSSHBackend(
             environment: ["PATH": "/usr/bin:/bin", "HOME": "/tmp/example-home", "USER": "user", "LOGNAME": "user"],
             resolver: HostAgreeingResolver(),
-            client: SSHClientSettings(authMode: .wrapper, wrapperPath: try answeringWrapper(status: status, stdout: stdout, stderr: stderr)),
+            client: SSHClientSettings(authMode: .wrapper, wrapperPath: try answeringWrapper(status: status, stdout: stdout, stderr: stderr, delay: delay)),
             loginPath: LoginPath(shell: "/bin/sh", timeout: .seconds(5))
         )
         addTeardownBlock { await backend.close() }
@@ -1203,7 +1204,7 @@ final class RemoteLoginShellTests: XCTestCase {
     }
 
     func testDiagnosticMaskingKeepsTheCauseAndDropsTheValues() {
-        let masked = HermesAPIKey.diagnostic(of: """
+        let masked = RemoteShell.diagnostic(of: """
         OPENAI_API_KEY=sk-live-0123456789abcdef0123456789
         helper failed token=short client_secret: abcdef
         un jeton sans nom 0123456789abcdefghijklmnopqrstuv fin
@@ -1214,12 +1215,12 @@ final class RemoteLoginShellTests: XCTestCase {
         XCTAssertTrue(masked.contains("OPENAI_API_KEY"), masked)
         XCTAssertTrue(masked.contains("helper failed"), masked)
         // un chemin et un mot courant gardent leur forme
-        XCTAssertEqual(HermesAPIKey.diagnostic(of: "PermissionError: /srv/hermes/profiles/cyber/.env illisible"), "PermissionError: /srv/hermes/profiles/cyber/.env illisible")
+        XCTAssertEqual(RemoteShell.diagnostic(of: "PermissionError: /srv/hermes/profiles/cyber/.env illisible"), "PermissionError: /srv/hermes/profiles/cyber/.env illisible")
         // trois lignes au plus, 400 caractères au plus, sans caractère de contrôle
-        let long = HermesAPIKey.diagnostic(of: (1...10).map { "ligne \($0) " + String(repeating: "x", count: 20) }.joined(separator: "\n") + "\u{1b}[31m")
+        let long = RemoteShell.diagnostic(of: (1...10).map { "ligne \($0) " + String(repeating: "x", count: 20) }.joined(separator: "\n") + "\u{1b}[31m")
         XCTAssertLessThanOrEqual(long.split(separator: "\n").count, 3)
         XCTAssertFalse(long.contains("\u{1b}"))
-        XCTAssertLessThanOrEqual(HermesAPIKey.diagnostic(of: String(repeating: "mot ", count: 500)).count, 400)
+        XCTAssertLessThanOrEqual(RemoteShell.diagnostic(of: String(repeating: "mot ", count: 500)).count, 400)
     }
 
     @MainActor
@@ -1246,6 +1247,217 @@ final class RemoteLoginShellTests: XCTestCase {
         fetches.reset()
         _ = try? await fetches.fetch(profile: "cyber", into: &store, read: read)
         XCTAssertEqual(reads, 3)
+    }
+
+    // MARK: sonde Desktop
+
+    /// Réponses de la sonde pour reconnaître l'interpréteur qui l'a lancée
+    private let viaHermes = #"{"held": ["via-hermes"]}"#
+    private let viaSystem = #"{"held": ["via-system"]}"#
+
+    private func writeScript(_ path: String, _ body: String) throws {
+        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try body.write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+    }
+
+    private enum HermesLayout {
+        /// `hermes` est un script dont la ligne #! nomme `venv/bin/python` (nil) ou une autre ligne
+        case shebang(String?)
+        /// Comme Hermes 0.22.2 : `.local/bin/hermes` mène par deux liens relatifs à `racine/libexec/hermes`, l'interpréteur est `racine/.venv/bin/python`
+        case launcher
+    }
+
+    /// Un HOME où `python3` du PATH de connexion répond `viaSystem`, et où l'interpréteur de Hermes répond `viaHermes` en notant ses arguments
+    private func homeWithProbeInterpreters(layout: HermesLayout = .shebang(nil), venvBody: String? = nil, banner: String? = nil) throws -> String {
+        let home = try homeWithTool("python3", body: "echo '\(viaSystem)'", banner: banner)
+        let body = "#!/bin/sh\n" + (venvBody ?? "printf '%s\\n' \"$@\" > \"$HOME/venv-args\"\necho '\(viaHermes)'") + "\n"
+        switch layout {
+        case .shebang(let line):
+            let venv = home + "/venv/bin/python"
+            try writeScript(venv, body)
+            try writeScript(home + "/.local/bin/hermes", "\(line ?? "#!" + venv)\nprint('hermes')\n")
+        case .launcher:
+            let root = home + "/hermes-root"
+            try writeScript(root + "/.venv/bin/python", body)
+            try writeScript(root + "/libexec/hermes", "#!/usr/bin/env bash\nexit 0\n")
+            try FileManager.default.createDirectory(atPath: root + "/bin", withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(atPath: root + "/bin/hermes", withDestinationPath: "../libexec/hermes")
+            try FileManager.default.createSymbolicLink(atPath: home + "/.local/bin/hermes", withDestinationPath: "../../hermes-root/bin/hermes")
+        }
+        return home
+    }
+
+    func testProbeRunsWithHermesInterpreter() async throws {
+        for layout in [HermesLayout.shebang(nil), .launcher] {
+            let home = try homeWithProbeInterpreters(layout: layout)
+            for outer in outerShells {
+                let output = try await replay(ProfileLock.command, outer: outer, home: home)
+                XCTAssertEqual(output.status, 0, "\(layout) \(outer) \(output.stderr)")
+                XCTAssertEqual(RemoteShell.reply(output.stdout), viaHermes + "\n", "\(layout) \(outer)")
+            }
+            // l'interpréteur reçoit la sonde elle-même, en `-c`
+            let args = try String(contentsOfFile: home + "/venv-args", encoding: .utf8)
+            XCTAssertEqual(args, "-c\n" + ProfileLock.probe + "\n", "\(layout)")
+        }
+        // et la commande envoyée à ssh n'est que le lanceur : le PATH de connexion s'applique
+        XCTAssertTrue(ProfileLock.command.hasPrefix("sh -lc "), ProfileLock.command)
+    }
+
+    func testProbeFallsBackToSystemPython() async throws {
+        let cases: [(String, String?, String?)] = [
+            ("ligne #! en env", "#!/usr/bin/env python3", nil),
+            ("interpréteur absent", "#!/nonexistent/venv/bin/python", nil),
+            ("interpréteur sans psutil", nil, "echo 'module psutil absent' >&2\nexit 3"),
+        ]
+        for (label, line, venvBody) in cases {
+            let home = try homeWithProbeInterpreters(layout: .shebang(line), venvBody: venvBody)
+            for outer in outerShells {
+                let output = try await replay(ProfileLock.command, outer: outer, home: home)
+                XCTAssertEqual(output.status, 0, "\(label) \(outer) \(output.stderr)")
+                XCTAssertEqual(RemoteShell.reply(output.stdout), viaSystem + "\n", "\(label) \(outer)")
+            }
+        }
+        // un lanceur dont l'interpréteur n'a pas psutil : repli sur python3
+        let launcherWithoutModule = try homeWithProbeInterpreters(layout: .launcher, venvBody: "echo 'module psutil absent' >&2\nexit 3")
+        let fallback = try await replay(ProfileLock.command, outer: "/bin/sh", home: launcherWithoutModule)
+        XCTAssertEqual(RemoteShell.reply(fallback.stdout), viaSystem + "\n")
+        // aucun hermes dans le PATH
+        let bare = try homeWithTool("python3", body: "echo '\(viaSystem)'")
+        let output = try await replay(ProfileLock.command, outer: "/bin/sh", home: bare)
+        XCTAssertEqual(RemoteShell.reply(output.stdout), viaSystem + "\n")
+        // une erreur de l'interpréteur de Hermes autre que le module manquant n'est pas masquée par le repli
+        let broken = try homeWithProbeInterpreters(venvBody: "echo 'ValueError: profil illisible' >&2\nexit 1")
+        let failed = try await replay(ProfileLock.command, outer: "/bin/sh", home: broken)
+        XCTAssertEqual(failed.status, 1)
+        XCTAssertTrue(failed.stderr.contains("profil illisible"), failed.stderr)
+    }
+
+    func testTheProbeSourceExitsWithTheDedicatedStatusWhenPsutilIsMissing() async throws {
+        // `sys.modules["psutil"] = None` fait échouer l'import comme un module absent
+        let blocked = try await Spawn.run(
+            "/usr/bin/python3",
+            ["-c", "import sys; sys.modules['psutil'] = None; exec(sys.argv[1])", ProfileLock.probe],
+            environment: ["PATH": "/usr/bin:/bin", "LC_ALL": "C"], timeout: .seconds(10)
+        )
+        XCTAssertEqual(blocked.status, ProfileLock.moduleMissingStatus)
+        XCTAssertTrue(blocked.stderr.contains("psutil"), blocked.stderr)
+        XCTAssertEqual(blocked.stdout, "")
+    }
+
+    func testTheProbeAnswersThroughAChattyLoginProfile() async throws {
+        let home = try homeWithProbeInterpreters(banner: "Welcome to the host")
+        let output = try await replay(ProfileLock.command, outer: "/bin/sh", home: home)
+        XCTAssertEqual(output.status, 0, output.stderr)
+        XCTAssertEqual(RemoteShell.reply(output.stdout), viaHermes + "\n")
+        XCTAssertTrue(output.stdout.contains("Welcome to the host"))
+    }
+
+    func testTheBackendNamesEachProbeFailure() async throws {
+        let cases: [(status: String, stderr: String?, expected: ProfileProbeFailure)] = [
+            ("3 ", "module psutil absent\n", .moduleMissing("psutil")),
+            ("127 ", "sh: python3: not found\n", .toolNotFound),
+            ("1 ", "Traceback (most recent call last):\n  File \"<string>\", line 4\nValueError: boom\n", .failed(status: 1, detail: "Traceback (most recent call last):\nFile \"<string>\", line 4\nValueError: boom")),
+        ]
+        for (status, stderr, expected) in cases {
+            let backend = try await openedBackend(answering: status, stderr: stderr)
+            do {
+                _ = try await backend.readProfileLocks(tunnel)
+                XCTFail("readProfileLocks a réussi avec \(status)")
+            } catch let failure as ProfileProbeFailure {
+                XCTAssertEqual(failure, expected)
+            }
+        }
+        // ssh lui-même refuse : la cause de ssh, pas celle de la sonde
+        let refused = try await openedBackend(answering: "255 ", stderr: "user@example.invalid: Permission denied (publickey).\n")
+        do {
+            _ = try await refused.readProfileLocks(tunnel)
+            XCTFail("readProfileLocks a réussi avec 255")
+        } catch let failure as SSHFailure {
+            XCTAssertEqual(failure, .wrongKey(""))
+        }
+        // la réponse n'est que ce qui suit le marqueur de connexion
+        let ok = try await openedBackend(answering: "0 ", stdout: "Welcome\nHERMED_BOTS_REPLY\n{\"held\": []}\n")
+        let data = try await ok.readProfileLocks(tunnel)
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), "{\"held\": []}\n")
+    }
+
+    func testAProbeThatTimesOutIsNamed() async throws {
+        let slow = try await openedBackend(answering: "0 ", stdout: "HERMED_BOTS_REPLY\n{\"held\": []}\n", delay: 3)
+        do {
+            _ = try await slow.readProfileLocks(tunnel, timeout: .milliseconds(500))
+            XCTFail("la sonde lente a répondu")
+        } catch let failure as ProfileProbeFailure {
+            XCTAssertEqual(failure, .timedOut)
+        }
+    }
+
+    /// La bannière dit pourquoi la détection de Desktop est indisponible, au lieu de « indisponible » seul
+    @MainActor
+    func testProbeFailureShowsItsReason() async {
+        var failure: Error = ProfileProbeFailure.moduleMissing("psutil")
+        var answering = false
+        let lock = ProfileLock(connection: { "host-a" }, read: {
+            if answering { return Data(#"{"held": ["hv-bot-b"]}"#.utf8) }
+            throw failure
+        })
+        // avant toute lecture : l'état est inconnu, sans cause à dire
+        XCTAssertEqual(lock.state("hv-bot-a"), .unknown)
+        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.unknown.reason)
+
+        for (error, expected) in [
+            (ProfileProbeFailure.moduleMissing("psutil") as Error, "psutil"),
+            (ProfileProbeFailure.toolNotFound, "introuvable"),
+            (ProfileProbeFailure.failed(status: 1, detail: "ValueError: boom"), "ValueError: boom"),
+            (ProfileProbeFailure.timedOut, "n'a pas répondu"),
+            (SSHFailure.unreachable("Connection refused"), "Connection refused"),
+        ] {
+            failure = error
+            let read = await lock.refresh()
+            XCTAssertFalse(read)
+            XCTAssertEqual(lock.state("hv-bot-a"), .unknown)
+            let reason = lock.reason("hv-bot-a") ?? ""
+            XCTAssertTrue(reason.hasPrefix(ProfileLock.State.unknown.reason ?? "?"), reason)
+            XCTAssertTrue(reason.contains(expected), "\(expected) absent de : \(reason)")
+        }
+        // une panne sans cause nommée garde le message d'origine
+        failure = CocoaError(.fileReadUnknown)
+        _ = await lock.refresh()
+        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.unknown.reason)
+
+        // la sonde répond : la cause disparaît avec l'état inconnu
+        answering = true
+        let read = await lock.refresh()
+        XCTAssertTrue(read)
+        XCTAssertNil(lock.reason("hv-bot-a"))
+        XCTAssertEqual(lock.reason("hv-bot-b"), ProfileLock.State.held.reason)
+        // une panne suivante nomme sa propre cause, pas celle d'avant
+        answering = false
+        failure = ProfileProbeFailure.timedOut
+        _ = await lock.refresh()
+        let latest = lock.reason("hv-bot-a") ?? ""
+        XCTAssertTrue(latest.contains("n'a pas répondu"), latest)
+        XCTAssertFalse(latest.contains("CocoaError"), latest)
+    }
+
+    /// La cause d'un hôte ne s'affiche pas pour un autre
+    @MainActor
+    func testTheProbeFailureReasonBelongsToItsHost() async {
+        var host = "host-a"
+        var broken = true
+        let lock = ProfileLock(connection: { host }, read: {
+            if broken { throw ProfileProbeFailure.moduleMissing("psutil") }
+            return Data(#"{"held": []}"#.utf8)
+        })
+        _ = await lock.refresh()
+        XCTAssertTrue(lock.reason("hv-bot-a")?.contains("psutil") == true)
+        host = "host-b"
+        broken = false
+        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.unknown.reason)
+        _ = await lock.refresh()
+        XCTAssertNil(lock.reason("hv-bot-a"))
+        host = "host-a"
+        XCTAssertTrue(lock.reason("hv-bot-a")?.contains("psutil") == true, "l'hôte A garde sa propre cause")
     }
 
     @MainActor

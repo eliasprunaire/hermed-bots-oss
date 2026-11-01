@@ -23,6 +23,8 @@ final class ProfileLock {
         let at: ContinuousClock.Instant
     }
     private var snapshots: [String: Snapshot] = [:]
+    /// Pourquoi la dernière lecture de cet hôte a échoué ; absent quand elle a réussi ou que l'erreur n'a rien à dire
+    private var causes: [String: String] = [:]
     private var reads: [String: Int] = [:]
     private let connection: @MainActor () -> String
     private let read: @MainActor () async throws -> Data
@@ -35,6 +37,13 @@ final class ProfileLock {
     func state(_ profile: String, on host: String? = nil) -> State {
         guard let snapshot = snapshots[host ?? connection()], ContinuousClock.now - snapshot.at < .seconds(3) else { return .unknown }
         return snapshot.held.contains(profile) ? .held : .free
+    }
+
+    /// Le texte de `state(_:on:).reason`, suivi de la cause de la panne de la sonde quand elle est connue
+    func reason(_ profile: String, on host: String? = nil) -> String? {
+        let state = state(profile, on: host)
+        guard state == .unknown, let base = state.reason, let cause = causes[host ?? connection()] else { return state.reason }
+        return base + "\n" + String(localized: "Cause : \(cause)")
     }
 
     func run() async {
@@ -51,15 +60,26 @@ final class ProfileLock {
         reads[host, default: 0] += 1
         let revision = reads[host]!
         let held: Set<String>?
+        var cause: String?
         do {
             struct Result: Decodable { let held: [String] }
             held = Set(try JSONDecoder().decode(Result.self, from: await read()).held)
         } catch {
             held = nil
+            cause = Self.cause(of: error)
         }
         guard !Task.isCancelled, host == connection(), reads[host] == revision else { return false }
         snapshots[host] = held.map { Snapshot(held: $0, at: .now) }
+        causes[host] = cause
         return held != nil
+    }
+
+    private static func cause(of error: Error) -> String? {
+        switch error {
+        case let failure as ProfileProbeFailure: failure.message
+        case let failure as SSHFailure: failure.message
+        default: nil
+        }
     }
 
     func permits(_ profile: String, on host: String) async -> Bool {
@@ -67,13 +87,62 @@ final class ProfileLock {
         return state(profile, on: host) == .free
     }
 
+    /// Code de sortie de la sonde quand `psutil` manque : le lanceur essaie alors `python3`, puis l'app nomme le module
+    nonisolated static let moduleMissingStatus: Int32 = 3
+
     // La commande reste fixe : aucun nom de profil ni argument utilisateur n'entre dans le shell distant
-    nonisolated static var command: String { "python3 -c '" + probe.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+    // Elle passe par le shell de connexion, comme `hermes` : le PATH du profil de l'hôte (dossier bin personnel, environnement de Hermes) s'applique
+    nonisolated static var command: String { RemoteShell.loginCommand(["sh", "-c", launcher, "hb-probe", probe]) }
+
+    /// Lance la sonde (`$1`) avec l'interpréteur de Hermes ; sans lui, ou s'il rend 3 (module absent), avec `python3`
+    /// L'interpréteur se lit comme le lanceur `libexec/hermes` le calcule : liens suivis, `<racine>/.venv/bin/python` avec `<racine>` au-dessus du dossier du lanceur
+    /// À défaut, la ligne #! d'un script `hermes` en Python
+    /// Un autre code de l'interpréteur de Hermes est rendu tel quel : le repli ne masque pas une vraie erreur
+    // shortcut: deux dispositions de Hermes sont reconnues (lanceur avec .venv, script Python), à remplacer par un chemin d'interpréteur réglable si une autre apparaît
+    nonisolated static let launcher = #"""
+    interpreter=
+    tool=$(command -v hermes 2>/dev/null)
+    if [ -f "$tool" ] && [ -r "$tool" ]; then
+      self=$tool
+      while [ -L "$self" ]; do
+        target=$(readlink "$self")
+        case $target in
+          /*) self=$target ;;
+          *) self=$(dirname "$self")/$target ;;
+        esac
+      done
+      root=$(cd "$(dirname "$self")/.." 2>/dev/null && pwd)
+      if [ -n "$root" ] && [ -x "$root/.venv/bin/python" ]; then
+        interpreter=$root/.venv/bin/python
+      else
+        IFS= read -r first < "$tool"
+        case $first in
+          '#!'/*)
+            interpreter=${first#'#!'}
+            interpreter=${interpreter%% *}
+            case ${interpreter##*/} in python*) ;; *) interpreter= ;; esac ;;
+        esac
+      fi
+    fi
+    if [ -n "$interpreter" ] && [ -x "$interpreter" ]; then
+      "$interpreter" -c "$1"
+      status=$?
+      [ "$status" -eq 3 ] || exit "$status"
+    fi
+    exec python3 -c "$1"
+    """#
+
     nonisolated static let probe = #"""
 import json
 import os
 from pathlib import Path
-import psutil
+import sys
+
+try:
+    import psutil
+except ImportError:
+    sys.stderr.write('module psutil absent\n')
+    sys.exit(3)
 
 held = set()
 for process in psutil.process_iter():
@@ -100,4 +169,24 @@ for process in psutil.process_iter():
         continue
 print(json.dumps({'held': sorted(held)}))
 """#
+}
+
+/// Pourquoi la sonde de Hermes Desktop n'a pas répondu ; le détail est la fin de sa sortie d'erreur, bornée et sans secret
+enum ProfileProbeFailure: Error, Equatable, Sendable {
+    /// Ni l'interpréteur de Hermes ni `python3` n'a le module
+    case moduleMissing(String)
+    /// Le shell de connexion de l'hôte ne trouve pas `python3` (code 127)
+    case toolNotFound
+    case failed(status: Int32, detail: String)
+    case timedOut
+
+    /// La cause, pour la fin du message du verrou de profil
+    var message: String {
+        switch self {
+        case .moduleMissing(let name): String(localized: "le module Python \(name) est absent de l'interpréteur de Hermes et de python3 sur l'hôte")
+        case .toolNotFound: String(localized: "python3 est introuvable dans le PATH du shell de connexion de l'hôte")
+        case .failed(let status, let detail): detail.isEmpty ? String(localized: "la sonde a échoué (code \(status))") : String(localized: "la sonde a échoué (code \(status)) : \(detail)")
+        case .timedOut: String(localized: "la sonde n'a pas répondu à temps")
+        }
+    }
 }

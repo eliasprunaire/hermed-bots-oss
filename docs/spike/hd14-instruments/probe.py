@@ -1,7 +1,13 @@
 import json
 import os
 from pathlib import Path
-import psutil
+import sys
+
+try:
+    import psutil
+except ImportError:
+    sys.stderr.write('module psutil absent\n')
+    sys.exit(3)
 
 held = set()
 for process in psutil.process_iter():

@@ -135,6 +135,21 @@ enum RemoteShell {
         guard let mark = lines.lastIndex(of: Substring(marker)) else { return stdout }
         return lines[(mark + 1)...].joined(separator: "\n")
     }
+
+    /// La fin de la sortie d'erreur d'une commande distante pour un message : bornée par `SSHFailure.detail`, valeurs de secret masquées
+    /// Hermes ne devrait jamais écrire une valeur ; le masque couvre `NOM=valeur`, `Bearer valeur` et tout mot de 24 caractères ou plus
+    static func diagnostic(of stderr: String) -> String {
+        SSHFailure.detail(of: stderr.split(whereSeparator: \.isNewline).map { mask(String($0)) }.joined(separator: "\n"))
+    }
+
+    private static func mask(_ line: String) -> String {
+        let rules = [
+            (#"(?i)\bbearer\s+\S+"#, "Bearer ****"),
+            (#"(?i)([A-Za-z0-9_]*(?:key|token|secret|password|passwd|authorization))\s*[=:]\s*\S+"#, "$1=****"),
+            (#"[A-Za-z0-9_\-]{24,}"#, "****"),
+        ]
+        return rules.reduce(line) { $0.replacingOccurrences(of: $1.0, with: $1.1, options: .regularExpression) }
+    }
 }
 
 /// Là où le tunnel se connecte et ce qu'il redirige : un port local vers `127.0.0.1:remotePort` de l'hôte
@@ -615,22 +630,9 @@ enum HermesAPIKey {
     /// La ligne que `hermes config get` écrit quand ni le .env du profil ni une source de secrets ne donne la clé
     static let keyNotSetMarker = "Config key not set"
 
-    /// Les dernières lignes de la sortie d'erreur d'Hermes pour la bannière : bornées par `SSHFailure.detail`, sans la ligne qui nomme la clé absente, valeurs de secret masquées
-    /// Hermes ne devrait jamais écrire la valeur ; le masque couvre `NOM=valeur`, `Bearer valeur` et tout mot de 24 caractères ou plus
+    /// Les dernières lignes de la sortie d'erreur d'Hermes pour la bannière, sans la ligne qui nomme la clé absente
     static func diagnostic(of stderr: String) -> String {
-        let lines = stderr.split(whereSeparator: \.isNewline)
-            .filter { !$0.contains(keyNotSetMarker) }
-            .map { mask(String($0)) }
-        return SSHFailure.detail(of: lines.joined(separator: "\n"))
-    }
-
-    private static func mask(_ line: String) -> String {
-        let rules = [
-            (#"(?i)\bbearer\s+\S+"#, "Bearer ****"),
-            (#"(?i)([A-Za-z0-9_]*(?:key|token|secret|password|passwd|authorization))\s*[=:]\s*\S+"#, "$1=****"),
-            (#"[A-Za-z0-9_\-]{24,}"#, "****"),
-        ]
-        return rules.reduce(line) { $0.replacingOccurrences(of: $1.0, with: $1.1, options: .regularExpression) }
+        RemoteShell.diagnostic(of: stderr.split(whereSeparator: \.isNewline).filter { !$0.contains(keyNotSetMarker) }.joined(separator: "\n"))
     }
 
     /// Une clé détenue que Hermes refuse n'est pas une clé introuvable
@@ -975,18 +977,32 @@ actor SystemSSHBackend: SSHBackend {
         return HermesAPIKey.parse(RemoteShell.reply(output.stdout))
     }
 
-    func readProfileLocks(_ config: SSHTunnelConfig) async throws -> Data {
+    /// Lance la sonde Desktop par un ssh de plus ; rend le JSON de la sonde, sans la sortie du profil de connexion
+    /// Chaque échec a sa cause : `ProfileProbeFailure` pour la sonde, `SSHFailure` quand ssh lui-même échoue
+    func readProfileLocks(_ config: SSHTunnelConfig, timeout: Duration = .seconds(3)) async throws -> Data {
         try ensureLive()
         guard let watchdog else { throw SSHFailure.tunnelClosed }
         try await revalidate(config, invocation: .profileLocks)
         try await renewIdentityIfDue(joining: watchdog.pid)
-        let output = try await Spawn.run(
-            sshBinary, launchArguments(config.profileLocksArguments()),
-            environment: sshEnvironment,
-            joining: watchdog.pid, timeout: .seconds(3)
-        )
-        guard output.status == 0 else { throw SSHFailure.unreachable("détection Desktop indisponible") }
-        return Data(output.stdout.utf8)
+        let output: Spawn.Output
+        do {
+            output = try await Spawn.run(
+                sshBinary, launchArguments(config.profileLocksArguments()),
+                environment: sshEnvironment,
+                joining: watchdog.pid, timeout: timeout
+            )
+        } catch SpawnError.timedOut {
+            throw ProfileProbeFailure.timedOut
+        } catch {
+            throw SSHFailure.unreachable("ssh ne démarre pas")
+        }
+        switch output.status {
+        case 0: return Data(RemoteShell.reply(output.stdout).utf8)
+        case 255: throw SSHFailure.classify(stderr: output.stderr, status: output.status)
+        case 127: throw ProfileProbeFailure.toolNotFound
+        case ProfileLock.moduleMissingStatus: throw ProfileProbeFailure.moduleMissing("psutil")
+        default: throw ProfileProbeFailure.failed(status: output.status, detail: RemoteShell.diagnostic(of: output.stderr))
+        }
     }
 
     func close() async {
