@@ -8,8 +8,8 @@ struct DegradedBanner: View {
         if let map, map.isDegraded {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Mode dégradé").fontWeight(.semibold).accessibilityID(.bannerDegraded)
-                if !map.isVersionKnown {
-                    Text("Version de Hermes inconnue. Les fonctions disponibles restent utilisables.")
+                if let notice = map.versionNotice {
+                    Text(verbatim: notice + ". Les fonctions disponibles restent utilisables.")
                 }
                 ForEach(map.entries, id: \.contract) { entry in
                     if case .disabled(let message) = entry.state {

@@ -338,7 +338,7 @@ do {
         let map = try await client.capabilities(profile: profile)
         print("version: \(map.version ?? "absente") (\(map.isVersionKnown ? "connue" : "inconnue"))")
         var reasons: [String] = []
-        if !map.isVersionKnown { reasons.append("version inconnue") }
+        if !map.isVersionSupported { reasons.append(map.versionNotice ?? "version inconnue") }
         if map.entries.contains(where: { $0.state != .available }) { reasons.append("fonction désactivée") }
         print("degraded: " + (reasons.isEmpty ? "no" : "yes (\(reasons.joined(separator: ", ")))"))
         for entry in map.entries {
