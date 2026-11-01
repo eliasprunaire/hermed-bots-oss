@@ -56,14 +56,18 @@ final class ProfileKeys: HD12Harness {
         HVShot.capture("hd17-crossed-key", app)
     }
 
-    func testConnectionHasNoAPIKeyEntry() {
+    /// La section « Clé API d'un profil » : une seule saisie sécurisée, bouton éteint tant qu'elle est vide, valeur saisie jamais relue à l'écran
+    func testConnectionHasOneAPIKeyEntry() {
         let app = launch()
         XCTAssertTrue(element(AccessibilityID.botRow("cyber")).waitForExistence(timeout: 20))
         click(AccessibilityID.connectionOpen.rawValue)
         XCTAssertTrue(element(AccessibilityID.connectionHost.rawValue).waitForExistence(timeout: 10))
-        XCTAssertFalse(app.staticTexts["Clé API par profil"].exists)
-        XCTAssertFalse(app.staticTexts["Nouvelle clé API"].exists)
-        XCTAssertEqual(app.secureTextFields.count, 0)
+        let field = element(AccessibilityID.connectionApiKey.rawValue)
+        XCTAssertTrue(field.waitForExistence(timeout: 10))
+        XCTAssertEqual(app.secureTextFields.count, 1)
+        XCTAssertTrue(element(AccessibilityID.connectionApiKeyProfile.rawValue).exists)
+        let save = element(AccessibilityID.connectionApiKeySave.rawValue)
+        XCTAssertFalse(save.isEnabled, "enregistrer sans clé saisie")
         let settings = app.windows.containing(.any, identifier: AccessibilityID.connectionConnect.rawValue).firstMatch
         XCTAssertTrue(settings.waitForExistence(timeout: 10))
         XCTAssertEqual(settings.frame.width, 1024, accuracy: 1)
@@ -77,6 +81,20 @@ final class ProfileKeys: HD12Harness {
             XCTAssertTrue(button.isHittable, "élément inaccessible : \(id)")
             XCTAssertTrue(settings.frame.contains(button.frame), "\(id) hors de la fenêtre")
         }
-        HVShot.capture("hd17-connection-no-key", settings)
+        HVShot.capture("hd17-connection-api-key", settings)
+
+        let typed = "ui-typed-key-VALUE"
+        field.click()
+        field.typeText(typed)
+        XCTAssertTrue(save.isEnabled)
+        save.click()
+        let status = element(AccessibilityID.connectionApiKeyStatus.rawValue)
+        XCTAssertTrue(status.waitForExistence(timeout: 10))
+        XCTAssertTrue(text(AccessibilityID.connectionApiKeyStatus.rawValue).contains("enregistrée"))
+        // le champ est vidé et la valeur n'est lisible dans aucun élément de la fenêtre
+        XCTAssertFalse((field.value as? String ?? "").contains(typed))
+        XCTAssertFalse(save.isEnabled)
+        let shown = NSPredicate(format: "label CONTAINS %@ OR value CONTAINS %@", typed, typed)
+        XCTAssertEqual(settings.descendants(matching: .any).matching(shown).count, 0)
     }
 }

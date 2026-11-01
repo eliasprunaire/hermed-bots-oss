@@ -1424,6 +1424,10 @@ final class RemoteLoginShellTests: XCTestCase {
         failure = CocoaError(.fileReadUnknown)
         _ = await lock.refresh()
         XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.unknown.reason)
+        // un tunnel fermé a sa propre bannière : il n'est pas une cause de la sonde
+        failure = SSHFailure.tunnelClosed
+        _ = await lock.refresh()
+        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.unknown.reason)
 
         // la sonde répond : la cause disparaît avec l'état inconnu
         answering = true

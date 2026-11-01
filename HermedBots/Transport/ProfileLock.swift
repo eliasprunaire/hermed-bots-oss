@@ -77,7 +77,8 @@ final class ProfileLock {
     private static func cause(of error: Error) -> String? {
         switch error {
         case let failure as ProfileProbeFailure: failure.message
-        case let failure as SSHFailure: failure.message
+        // un tunnel fermé ou en réouverture a sa propre bannière : ce n'est pas une panne de la sonde
+        case let failure as SSHFailure where failure != .tunnelClosed: failure.message
         default: nil
         }
     }
