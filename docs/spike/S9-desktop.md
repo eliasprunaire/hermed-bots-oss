@@ -52,8 +52,9 @@ docker exec -i -u hermes hv-hermes-test python3 /tmp/hd14-s9.py < docs/spike/hd1
 
 La sonde de production est intégrée dans `ProfileLock.swift`.
 `probe.py` conserve le même programme pour la reproduction sur OrbStack.
-`python3` et `psutil` doivent être disponibles dans le PATH du compte SSH.
-Leur absence affiche le mode dégradé et bloque les écritures.
+L'app lance la sonde avec l'interpréteur de Hermes, résolu sur l'hôte, et se replie sur `python3` du PATH de connexion quand il manque ou n'a pas `psutil`.
+Si aucun des deux n'a `psutil`, la sonde sort avec le code 3 et le mode dégradé nomme le module manquant.
+Ce mode bloque les écritures du profil.
 
 ## Limites observées
 
