@@ -71,7 +71,8 @@ final class BotsModel {
         let host = connection()
         if hosts[host, default: Host()].list.shown == nil { hosts[host, default: Host()].phase = .loading }
         while !Task.isCancelled {
-            await refresh()
+            // `hermes` manque sur l'hôte : un relevé de plus ne change rien, seul « Réessayer » relit
+            if case .toolNotFound = phase {} else { await refresh() }
             try? await Task.sleep(for: interval)
         }
     }

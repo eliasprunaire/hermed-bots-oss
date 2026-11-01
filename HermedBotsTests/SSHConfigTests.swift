@@ -473,7 +473,7 @@ final class SSHConfigTests: XCTestCase {
         XCTAssertEqual(args.first, "-G")
         XCTAssertFalse(args.contains("-vv"))
         // la résolution reçoit la même commande distante que le lancement : une chaîne, le shell de connexion
-        XCTAssertEqual(Array(args.suffix(2)), ["lab.invalid", "sh -lc 'hermes -p hv-bot-a config get API_SERVER_KEY --raw'"])
+        XCTAssertEqual(Array(args.suffix(2)), ["lab.invalid", "sh -lc 'echo HERMED_BOTS_REPLY; hermes -p hv-bot-a config get API_SERVER_KEY --raw'"])
         XCTAssertEqual(try SystemSSHConfigResolver.apiKeyArguments(alias: "lab.invalid", profile: "hv-bot-b").last?.contains("hv-bot-a"), false)
     }
 
@@ -1520,6 +1520,36 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertFalse(model.isCheckingAPI)
     }
 
+    /// `/health` répond 200 : les sondes authentifiées reçoivent 401, la lecture de la clé part et l'outil manque sur l'hôte
+    func testAMissingToolOnTheHostIsNamedWhenTheKeyCannotBeRead() async {
+        let reads = KeyReads(failure: .remoteToolNotFound) { _, _ in nil }
+        let model = keyModel(profiles: ["hv-bot-a"], reads: reads) { $0.url?.path.hasSuffix("/health") == true ? 200 : 401 }
+        await model.bots.refresh()
+        await model.refreshVersion()
+        XCTAssertEqual(reads.profiles, ["hv-bot-a"])
+        XCTAssertEqual(model.apiError, SSHFailure.remoteToolNotFound.message)
+        // un second refus du même profil ne relit pas et garde le message de l'outil, pas « Clé API introuvable »
+        await model.handleAPIError(refusal(), profile: "hv-bot-a")
+        XCTAssertEqual(reads.profiles, ["hv-bot-a"])
+        XCTAssertEqual(model.apiError, SSHFailure.remoteToolNotFound.message)
+        // « Réessayer » relit une fois
+        await model.retryAPI()
+        XCTAssertEqual(reads.profiles, ["hv-bot-a", "hv-bot-a"])
+        XCTAssertEqual(model.apiError, SSHFailure.remoteToolNotFound.message)
+        XCTAssertFalse(model.isCheckingAPI)
+    }
+
+    /// Même cas quand c'est la lecture de la version qui reçoit le 401
+    func testAMissingToolOnTheHostIsNamedWhenTheVersionReadIsRefused() async {
+        let reads = KeyReads(failure: .remoteToolNotFound) { _, _ in nil }
+        let model = keyModel(profiles: ["hv-bot-a"], reads: reads) { _ in 401 }
+        await model.bots.refresh()
+        await model.refreshVersion()
+        XCTAssertEqual(reads.profiles, ["hv-bot-a"])
+        XCTAssertEqual(model.apiError, SSHFailure.remoteToolNotFound.message)
+        XCTAssertFalse(model.isCheckingAPI)
+    }
+
     func testRetryReadsTheKeyOfTheRefusedProfileAndNotOfTheOneOnScreen() async {
         let reads = KeyReads { count, _ in count == 1 ? nil : "key-a" }
         let model = keyModel(keys: ["hv-bot-b": "key-b"], profiles: ["hv-bot-b", "hv-bot-a"], reads: reads) { _ in 200 }
@@ -1602,12 +1632,17 @@ final class AppModelConnectTests: XCTestCase {
 private final class KeyReads {
     private(set) var profiles: [String] = []
     private let answer: (Int, String) -> String?
+    private let failure: SSHFailure
 
-    init(_ answer: @escaping (Int, String) -> String?) { self.answer = answer }
+    /// Une réponse nil échoue avec `failure`
+    init(failure: SSHFailure = .unreachable("simulé"), _ answer: @escaping (Int, String) -> String?) {
+        self.failure = failure
+        self.answer = answer
+    }
 
     func read(_ profile: String) async throws -> String? {
         profiles.append(profile)
-        guard let key = answer(profiles.count, profile) else { throw SSHFailure.unreachable("simulé") }
+        guard let key = answer(profiles.count, profile) else { throw failure }
         return key
     }
 }

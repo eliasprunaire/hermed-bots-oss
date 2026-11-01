@@ -119,10 +119,20 @@ enum RemoteShell {
         return "'" + word.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
     }
 
-    /// L'unique argument que ssh envoie après l'alias : `sh -lc '<mots>'`, chaque mot cité deux fois (pour `sh -c`, puis pour le shell du compte)
+    /// Ligne que la commande écrit avant l'outil : le profil de connexion écrit sur stdout avant elle (motd, diagnostic), `reply` retire ce texte
+    static let marker = "HERMED_BOTS_REPLY"
+
+    /// L'unique argument que ssh envoie après l'alias : `sh -lc 'echo <marqueur>; <mots>'`, chaque mot cité deux fois (pour `sh -c`, puis pour le shell du compte)
     // shortcut: `sh -l` lit /etc/profile et ~/.profile seulement, un PATH posé dans ~/.zprofile ou ~/.bash_profile reste invisible (code 127 nommé), à remplacer par un chemin d'outil réglable si le cas se présente
     static func loginCommand(_ words: [String]) -> String {
-        "sh -lc " + quote(words.map(quote).joined(separator: " "))
+        "sh -lc " + quote("echo \(marker); " + words.map(quote).joined(separator: " "))
+    }
+
+    /// La sortie de l'outil : ce qui suit la dernière ligne marqueur ; sans marqueur, la sortie entière
+    static func reply(_ stdout: String) -> String {
+        let lines = stdout.split(separator: "\n", omittingEmptySubsequences: false)
+        guard let mark = lines.lastIndex(of: Substring(marker)) else { return stdout }
+        return lines[(mark + 1)...].joined(separator: "\n")
     }
 }
 
@@ -625,17 +635,35 @@ enum APIKeyRecovery {
 @MainActor
 final class APIKeyFetches {
     private var attempted: Set<String> = []
+    private var toolMissing: Set<String> = []
 
     /// nil si la garde est fermée pour ce profil, si la lecture échoue ou si la clé est introuvable ; la valeur n'est pas journalisée
-    func fetch(profile: String, into secrets: inout some SecretStore, read: (String) async throws -> String?) async -> String? {
-        guard attempted.insert(profile).inserted else { return nil }
-        return try? await APIKeyRecovery.refresh(profile: profile, into: &secrets, fetch: read)
+    /// L'outil absent de l'hôte est la seule panne qui remonte : le message « Outil introuvable » vaut mieux que « Clé API introuvable »
+    func fetch(profile: String, into secrets: inout some SecretStore, read: (String) async throws -> String?) async throws -> String? {
+        guard attempted.insert(profile).inserted else {
+            if toolMissing.contains(profile) { throw SSHFailure.remoteToolNotFound }
+            return nil
+        }
+        do {
+            return try await APIKeyRecovery.refresh(profile: profile, into: &secrets, fetch: read)
+        } catch SSHFailure.remoteToolNotFound {
+            toolMissing.insert(profile)
+            throw SSHFailure.remoteToolNotFound
+        } catch {
+            return nil
+        }
     }
 
     /// Le profil a répondu : le prochain refus peut relire
-    func settle(_ profile: String) { attempted.remove(profile) }
+    func settle(_ profile: String) {
+        attempted.remove(profile)
+        toolMissing.remove(profile)
+    }
 
-    func reset() { attempted.removeAll() }
+    func reset() {
+        attempted.removeAll()
+        toolMissing.removeAll()
+    }
 }
 
 /// Un ssh vivant : son port local est déjà ouvert quand la session existe
@@ -856,7 +884,7 @@ actor SystemSSHBackend: SSHBackend {
         guard output.status == 0 else {
             throw RemoteCommandFailure(status: output.status, detail: output.stderr.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? "")
         }
-        return output.stdout
+        return RemoteShell.reply(output.stdout)
     }
 
     /// Lit `API_SERVER_KEY` du profil par le même ssh que le tunnel ; la valeur ne quitte pas cette fonction que vers l'appelant
@@ -886,7 +914,7 @@ actor SystemSSHBackend: SSHBackend {
         if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr, status: output.status) }
         if output.status == 127 { throw SSHFailure.remoteToolNotFound }
         guard output.status == 0 else { return nil }
-        return HermesAPIKey.parse(output.stdout)
+        return HermesAPIKey.parse(RemoteShell.reply(output.stdout))
     }
 
     func readProfileLocks(_ config: SSHTunnelConfig) async throws -> Data {
