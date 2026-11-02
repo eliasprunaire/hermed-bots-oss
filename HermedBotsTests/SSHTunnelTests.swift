@@ -1511,6 +1511,38 @@ final class RemoteLoginShellTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testPermitsSucceedsWhenBackgroundRefreshOverlaps() async throws {
+        let host = "lab.invalid"
+        let lock = ProfileLock(connection: { host }, read: {
+            try await Task.sleep(for: .milliseconds(1500))
+            return Data(#"{"held": []}"#.utf8)
+        })
+        let loop = Task { await lock.run() }
+        addTeardownBlock { loop.cancel() }
+        try await Task.sleep(for: .milliseconds(1200))
+        let allowed = await lock.permits("hv-bot-a", on: host)
+        XCTAssertTrue(allowed)
+        XCTAssertEqual(lock.state("hv-bot-a", on: host), .free)
+    }
+
+    @MainActor
+    func testFreshSnapshotIsReusedWithoutNewRead() async {
+        let host = "lab.invalid"
+        var reads = 0
+        let lock = ProfileLock(connection: { host }, read: {
+            reads += 1
+            return Data(#"{"held": []}"#.utf8)
+        })
+        let read = await lock.refresh()
+        XCTAssertTrue(read)
+        XCTAssertEqual(reads, 1)
+        let allowed = await lock.permits("hv-bot-a", on: host)
+        XCTAssertTrue(allowed)
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(lock.state("hv-bot-a", on: host), .free)
+    }
+
     /// La bannière dit pourquoi la détection de Desktop est indisponible, au lieu de « indisponible » seul
     @MainActor
     func testProbeFailureShowsItsReason() async {

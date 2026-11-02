@@ -25,7 +25,9 @@ final class ProfileLock {
     private var snapshots: [String: Snapshot] = [:]
     /// Pourquoi la dernière lecture de cet hôte a échoué ; absent quand elle a réussi ou que l'erreur n'a rien à dire
     private var causes: [String: String] = [:]
-    private var reads: [String: Int] = [:]
+    private var applied: [String: ContinuousClock.Instant] = [:]
+    private var inflight: [String: Task<Bool, Never>] = [:]
+    private var generations: [String: Int] = [:]
     private let connection: @MainActor () -> String
     private let read: @MainActor () async throws -> Data
 
@@ -57,8 +59,22 @@ final class ProfileLock {
     @discardableResult
     func refresh() async -> Bool {
         let host = connection()
-        reads[host, default: 0] += 1
-        let revision = reads[host]!
+        if let existing = inflight[host] {
+            return await existing.value
+        }
+        let started = ContinuousClock.now
+        let generation = generations[host, default: 0] + 1
+        generations[host] = generation
+        let task = Task { @MainActor in await self.finish(host: host, started: started) }
+        inflight[host] = task
+        let ok = await task.value
+        if generations[host] == generation {
+            inflight[host] = nil
+        }
+        return ok
+    }
+
+    private func finish(host: String, started: ContinuousClock.Instant) async -> Bool {
         let held: Set<String>?
         var cause: String?
         do {
@@ -68,7 +84,11 @@ final class ProfileLock {
             held = nil
             cause = Self.cause(of: error)
         }
-        guard !Task.isCancelled, host == connection(), reads[host] == revision else { return false }
+        guard !Task.isCancelled, host == connection() else { return false }
+        if let previous = applied[host], previous > started {
+            return snapshots[host] != nil
+        }
+        applied[host] = started
         snapshots[host] = held.map { Snapshot(held: $0, at: .now) }
         causes[host] = cause
         return held != nil
@@ -84,8 +104,15 @@ final class ProfileLock {
     }
 
     func permits(_ profile: String, on host: String) async -> Bool {
-        guard host == connection(), await refresh(), host == connection() else { return false }
-        return state(profile, on: host) == .free
+        guard host == connection() else { return false }
+        switch state(profile, on: host) {
+        case .free: return true
+        case .held: return false
+        case .unknown:
+            _ = await refresh()
+            guard host == connection() else { return false }
+            return state(profile, on: host) == .free
+        }
     }
 
     /// Code de sortie de la sonde quand `psutil` manque : le lanceur essaie alors `python3`, puis l'app nomme le module
