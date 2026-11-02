@@ -145,6 +145,31 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(reads, ["cyber", "cyber", "sport", "cyber"])
     }
 
+    @MainActor
+    func testACancelledKeyReadDoesNotKeepTheFailedAttempt() async throws {
+        let secret = "fetched-profile-key-VALUE"
+        var store = InMemorySecretStore(apiKey: nil)
+        let fetches = APIKeyFetches()
+        var reads = 0
+        var started = false
+        func read(_ name: String) async throws -> String? {
+            reads += 1
+            started = true
+            if reads == 1 { try await Task.sleep(for: .seconds(5)) }
+            return secret
+        }
+
+        let first = Task { try await fetches.fetch(profile: "cyber", into: &store, read: read) }
+        while !started { try await Task.sleep(for: .milliseconds(1)) }
+        first.cancel()
+        _ = try? await first.value
+
+        let recovered = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertEqual(recovered, secret)
+        XCTAssertEqual(try store.apiKey(profile: "cyber"), secret)
+        XCTAssertEqual(reads, 2)
+    }
+
     func testAHeldKeyThatHermesRefusesIsNotReportedAsMissing() {
         XCTAssertTrue(HermesAPIKey.unauthorizedMessage(profile: "cyber", holdsKey: true).contains("clé API est refusée pour le profil cyber"))
         XCTAssertEqual(HermesAPIKey.unauthorizedMessage(profile: "cyber", holdsKey: false), HermesAPIKey.missingMessage(profile: "cyber"))

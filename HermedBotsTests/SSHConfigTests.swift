@@ -1491,7 +1491,14 @@ final class AppModelConnectTests: XCTestCase {
         await model.tunnel.stop()
     }
 
-    private func keyModel(keys: [String: String] = [:], profiles: [String], reads: KeyReads, apiURL: String = "http://hermes.invalid", serve: @escaping @Sendable (URLRequest) -> Int) -> AppModel {
+    private func keyModel(
+        keys: [String: String] = [:],
+        profiles: [String],
+        reads: KeyReads,
+        reader: (@MainActor (String) async throws -> String?)? = nil,
+        apiURL: String = "http://hermes.invalid",
+        serve: @escaping @Sendable (URLRequest) -> Int
+    ) -> AppModel {
         let table = (["Profile  Model  Gateway  Alias  Distribution"] + profiles.map { "  \($0)   hv-fake-1   running   —   —" }).joined(separator: "\n")
         let environment = AppEnvironment.resolve(
             [
@@ -1507,7 +1514,7 @@ final class AppModelConnectTests: XCTestCase {
         KeyStubProtocol.probes = []
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [KeyStubProtocol.self]
-        return AppModel(environment: environment, apiKeyReader: reads.read, urlConfiguration: configuration)
+        return AppModel(environment: environment, apiKeyReader: reader ?? reads.read, urlConfiguration: configuration)
     }
 
     private func refusal(_ status: Int = 401) -> HermesError { .http(contract: "list_sessions", status: status, detail: nil) }
@@ -1867,6 +1874,46 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertFalse(probes.contains { $0.path.contains("/p/hv-bot-c/") }, "une sonde est partie pour un profil sans clé")
         XCTAssertTrue(probes.allSatisfy { $0.authorization != nil }, "une sonde KillSwitch est partie sans clé")
         XCTAssertFalse(model.killSwitch.isDisabled)
+    }
+
+    /// Changement A vers B pendant la lecture anticipée de B : la clé de B est utilisable sans Réessayer
+    func testSwitchingProfileDuringListedKeyPrefetchStillFindsTheNewKey() async {
+        final class Hold: @unchecked Sendable { var beganB = false }
+        let hold = Hold()
+        let reads = KeyReads { _, profile in profile == "hv-bot-b" ? "key-b" : nil }
+        let reader: @MainActor (String) async throws -> String? = { profile in
+            if profile == "hv-bot-b" {
+                hold.beganB = true
+                try await Task.sleep(for: .milliseconds(400))
+            }
+            return try await reads.read(profile)
+        }
+        let model = keyModel(
+            keys: ["hv-bot-a": "key-a"],
+            profiles: ["hv-bot-a", "hv-bot-b"],
+            reads: reads,
+            reader: reader
+        ) { request in
+            let path = request.url?.path ?? ""
+            let auth = request.value(forHTTPHeaderField: "Authorization")
+            if path.hasSuffix("/health") { return 200 }
+            if path.contains("/p/hv-bot-a/") { return auth == "Bearer key-a" ? 200 : 401 }
+            return auth == "Bearer key-b" ? 200 : 401
+        }
+        await model.bots.refresh()
+        XCTAssertEqual(model.versionProfile, "hv-bot-a")
+        let prefetch = Task { await model.refreshVersion() }
+        await eventually { hold.beganB }
+        model.conversation.select(bot: "hv-bot-b")
+        prefetch.cancel()
+        await model.refreshVersion()
+        XCTAssertEqual(model.versionProfile, "hv-bot-b")
+        XCTAssertNil(model.apiError, "la clé de B est restée introuvable jusqu'à Réessayer")
+        XCTAssertFalse(model.isCheckingAPI)
+        let probes = KeyStubProtocol.probes.filter { $0.path.contains("/p/hv-bot-b/") && !$0.path.hasSuffix("/health") }
+        XCTAssertTrue(probes.contains { $0.authorization == "Bearer key-b" }, "aucune requête authentifiée du profil B")
+        XCTAssertTrue(probes.allSatisfy { $0.authorization == "Bearer key-b" }, "une requête du profil B est partie sans sa clé")
+        XCTAssertFalse(probes.contains { $0.status == 401 }, "une requête du profil B a reçu 401")
     }
 
     /// Clé du profil chargé puis refusée par Hermes : le 401 reste affiché
