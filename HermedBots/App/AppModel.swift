@@ -446,7 +446,7 @@ final class AppModel {
             } catch {
                 guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
                 version = .unknown
-                apiError = Self.apiMessage(error)
+                await handleAPIError(error, profile: profile)
                 return
             }
             guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }

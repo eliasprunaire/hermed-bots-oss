@@ -1773,14 +1773,35 @@ final class AppModelConnectTests: XCTestCase {
         }
         await model.bots.refresh()
         model.bots.toggle("hv-bot-a")
-        await eventually { model.bots.threads["hv-bot-a"] == .loading }
-        if case .failed? = model.bots.threads["hv-bot-a"] { XCTFail("un 401 sans clé ne doit pas remplacer le chargement") }
+        await eventually { model.bots.threads["hv-bot-a"] != nil }
         XCTAssertEqual(reads.profiles, [])
         XCTAssertFalse(KeyStubProtocol.probes.contains { $0.path.contains("/p/hv-bot-a/") && $0.status == 401 })
         await model.refreshVersion()
         XCTAssertEqual(reads.profiles, ["hv-bot-a"])
         await eventually { model.bots.threads["hv-bot-a"] == .loaded([]) }
         XCTAssertNil(model.apiError)
+    }
+
+    /// Après une récupération de clé définitivement infructueuse, déplier le profil affiche l'échec
+    func testExpandingAProfileAfterItsKeyRecoveryFailedShowsAnError() async {
+        let reads = KeyReads { _, _ in nil }
+        let model = keyModel(keys: ["hv-bot-a": "key-a"], profiles: ["hv-bot-a", "hv-bot-b"], reads: reads) { request in
+            let path = request.url?.path ?? ""
+            let auth = request.value(forHTTPHeaderField: "Authorization")
+            if path.hasSuffix("/health") { return 200 }
+            if path.contains("/p/hv-bot-a/") { return auth == "Bearer key-a" ? 200 : 401 }
+            return 401
+        }
+        await model.bots.refresh()
+        await model.refreshVersion()
+        XCTAssertEqual(model.versionProfile, "hv-bot-a")
+        model.bots.toggle("hv-bot-b")
+        await eventually {
+            if case .failed? = model.bots.threads["hv-bot-b"] { return true }
+            return false
+        }
+        XCTAssertEqual(model.bots.threads["hv-bot-b"], .failed(HermesAPIKey.missingMessage(profile: "hv-bot-b")))
+        if case .loading? = model.bots.threads["hv-bot-b"] { XCTFail("les fils restent en chargement après un échec définitif sans clé") }
     }
 
     /// Un bot replié n'est pas lu : la clé récupérée ne déplie rien
@@ -1945,10 +1966,11 @@ final class AppModelConnectTests: XCTestCase {
         await model.bots.refresh()
         let refreshA = Task { await model.refreshVersion() }
         await eventually { hold.beganB }
-        XCTAssertEqual(model.version, .loading)
         model.conversation.select(bot: "hv-bot-b")
         refreshA.cancel()
-        await model.refreshVersion()
+        let refreshB = Task { await model.refreshVersion() }
+        await eventually { model.version == .loading }
+        await refreshB.value
         _ = await refreshA.result
         XCTAssertEqual(model.versionProfile, "hv-bot-b")
         XCTAssertEqual(model.version, .known("0.22.1"))
@@ -2159,7 +2181,7 @@ private final class KillSwitchProbeRecorder: @unchecked Sendable {
         let readCount = recv(client, &buffer, buffer.count, 0)
         guard readCount > 0 else { return }
         let text = String(decoding: buffer.prefix(readCount), as: UTF8.self)
-        let lines = text.split(whereSeparator: { $0 == "\r" || $0 == "\n" })
+        let lines = text.split(whereSeparator: \.isNewline)
         let path = lines.first.flatMap { line -> String? in
             let parts = line.split(separator: " ")
             guard parts.count >= 2 else { return nil }

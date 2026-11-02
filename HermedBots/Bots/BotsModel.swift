@@ -140,11 +140,11 @@ final class BotsModel {
             case .disabled(let message): result = .disabled(message)
             }
         } catch {
-            if case HermesError.apiKeyMissing = error {
-                guard read == hosts[host, default: Host()].issued[id] else { return }
-                return
+            if case HermesError.apiKeyMissing(let name) = error {
+                result = .failed(HermesAPIKey.missingMessage(profile: name))
+            } else {
+                result = .failed(Self.message(error))
             }
-            result = .failed(Self.message(error))
         }
         guard read == hosts[host, default: Host()].issued[id] else { return }
         hosts[host, default: Host()].threads[id] = result
