@@ -21,10 +21,50 @@ final class AppSettingsTests: XCTestCase {
         return defaults
     }
 
-    func testThePanesAreConnectionThenUpdates() {
-        XCTAssertEqual(SettingsPane.allCases.map(\.title), ["Connexion", "Mises à jour"])
+    func testThePanesAreConnectionThenAbout() {
+        XCTAssertEqual(SettingsPane.allCases.map(\.title), ["Connexion", "À propos"])
         XCTAssertEqual(SettingsPane.allCases.map(\.accessibilityID), ["hd.settings.connection", "hd.settings.updates"])
         XCTAssertEqual(SettingsCopy.checkForUpdates, "Rechercher les mises à jour…")
+    }
+
+    func testAboutDisplaysKnownVersions() {
+        let snapshot = AboutVersionSnapshot(
+            appVersion: "1.2.3",
+            appBuild: "45",
+            hermesCLI: "0.22.2",
+            macOS: "27.0.1",
+            updateChannel: "1.2.3"
+        )
+        XCTAssertEqual(snapshot.displayedAppVersion, "1.2.3")
+        XCTAssertEqual(snapshot.displayedAppBuild, "45")
+        XCTAssertEqual(snapshot.displayedHermesCLI, "0.22.2")
+        XCTAssertEqual(snapshot.displayedMacOS, "27.0.1")
+        XCTAssertEqual(snapshot.displayedUpdateChannel, "1.2.3")
+        XCTAssertEqual(AboutVersionSnapshot.macOSString(major: 27, minor: 0, patch: 1), "27.0.1")
+        XCTAssertEqual(
+            snapshot.versionRows.map { $0.title },
+            [
+                AboutVersionSnapshot.appVersionTitle,
+                AboutVersionSnapshot.appBuildTitle,
+                AboutVersionSnapshot.hermesCLITitle,
+                AboutVersionSnapshot.macOSTitle,
+                AboutVersionSnapshot.updateChannelTitle,
+            ]
+        )
+        XCTAssertEqual(snapshot.versionRows.last?.title, AboutVersionSnapshot.updateChannelTitle)
+        XCTAssertEqual(SettingsCopy.checkForUpdates, "Rechercher les mises à jour…")
+    }
+
+    func testAboutDisplaysUnknownWhenAVersionIsMissingOrBlank() {
+        let snapshot = AboutVersionSnapshot(appVersion: "  ", appBuild: "", hermesCLI: nil, macOS: nil, updateChannel: " \n")
+        XCTAssertEqual(snapshot.displayedAppVersion, "inconnue")
+        XCTAssertEqual(snapshot.displayedAppBuild, "inconnue")
+        XCTAssertEqual(snapshot.displayedHermesCLI, "inconnue")
+        XCTAssertEqual(snapshot.displayedMacOS, "inconnue")
+        XCTAssertEqual(snapshot.displayedUpdateChannel, "inconnue")
+        XCTAssertEqual(AboutVersionSnapshot.display(nil), "inconnue")
+        XCTAssertEqual(AboutVersionSnapshot.display(""), "inconnue")
+        XCTAssertEqual(AboutVersionSnapshot.unknownLabel, "inconnue")
     }
 
     func testTheSettingsLayoutDefaultSizeIs1024By680Points() {

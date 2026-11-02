@@ -23,6 +23,12 @@ Evidence is `scripts/sparkle-update-proof.sh`. The proof is a failure (nonzero) 
 
 See `features/sparkle-update.md`.
 
+## À propos
+
+Lire `features/about.md`.
+
+L'onglet Réglages « À propos » (`hd.settings.updates`) affiche la version de l'app (version et build), la version de Hermes CLI de la connexion active, macOS, et la version du canal de mise à jour. Une version inconnue s'affiche « inconnue ». Le bouton « Rechercher les mises à jour… » (`hd.updates.check`) reste le dernier contrôle de l'onglet.
+
 ## Connexion
 
 Lire `features/connection.md`.

@@ -7,7 +7,7 @@ public enum SettingsPane: String, CaseIterable, Sendable {
     public var title: String {
         switch self {
         case .connection: "Connexion"
-        case .updates: "Mises à jour"
+        case .updates: "À propos"
         }
     }
 

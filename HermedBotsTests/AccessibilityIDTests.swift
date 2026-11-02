@@ -35,6 +35,11 @@ final class AccessibilityIDTests: XCTestCase {
         XCTAssertEqual(AccessibilityID.updatesCheck.rawValue, "hd.updates.check")
         XCTAssertEqual(AccessibilityID.settingsConnection.rawValue, SettingsPane.connection.accessibilityID)
         XCTAssertEqual(AccessibilityID.settingsUpdates.rawValue, SettingsPane.updates.accessibilityID)
+        XCTAssertEqual(AccessibilityID.aboutAppVersion.rawValue, "hd.about.app-version")
+        XCTAssertEqual(AccessibilityID.aboutAppBuild.rawValue, "hd.about.app-build")
+        XCTAssertEqual(AccessibilityID.aboutHermes.rawValue, "hd.about.hermes")
+        XCTAssertEqual(AccessibilityID.aboutMacOS.rawValue, "hd.about.macos")
+        XCTAssertEqual(AccessibilityID.aboutChannel.rawValue, "hd.about.channel")
     }
 
     func testTheBotListIdsAreStable() {
