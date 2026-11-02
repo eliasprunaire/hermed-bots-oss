@@ -142,11 +142,6 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Connection" } }
       }
     },
-    "Connexion à Hermes" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connection to Hermes" } }
-      }
-    },
     "Écrire à %@…" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Message %@…" } }
@@ -446,11 +441,6 @@
     "Tunnel" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Tunnel" } }
-      }
-    },
-    "Un tunnel SSH vers le serveur API de votre instance." : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "An SSH tunnel to the API server of your instance." } }
       }
     },
     "Utilisateur" : {

@@ -64,20 +64,6 @@ struct ConnectionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 14) {
-                Image(systemName: "point.3.connected.trianglepath.dotted")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(.white)
-                    .frame(width: 44, height: 44)
-                    .background(Palette.gradient(Palette.brand), in: .rect(cornerRadius: 13))
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Connexion à Hermes").font(.system(.title3, design: .rounded, weight: .bold))
-                    Text("Un tunnel SSH vers le serveur API de votre instance.").foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding([.horizontal, .top], 20)
             Form {
                 TextField("Alias SSH", text: $model.host).accessibilityID(.connectionHost)
                 Picker("Mode SSH", selection: Binding(
