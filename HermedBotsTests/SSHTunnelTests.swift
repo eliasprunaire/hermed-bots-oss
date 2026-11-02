@@ -1511,6 +1511,37 @@ final class RemoteLoginShellTests: XCTestCase {
         }
     }
 
+    /// Une lecture de 1,5 s et la boucle à 1 s : « Nouvelle session » attend la sonde en cours au lieu de la compter comme un échec
+    @MainActor
+    func testPermitsSucceedsWhenBackgroundRefreshOverlaps() async throws {
+        let host = "lab.invalid"
+        let lock = ProfileLock(connection: { host }, read: {
+            try await Task.sleep(for: .milliseconds(1500))
+            return Data(#"{"held": []}"#.utf8)
+        })
+        let loop = Task { await lock.run() }
+        addTeardownBlock { loop.cancel() }
+        try await Task.sleep(for: .milliseconds(1200))
+        XCTAssertTrue(await lock.permits("hv-bot-a", on: host))
+        XCTAssertEqual(lock.state("hv-bot-a", on: host), .free)
+    }
+
+    /// Un instantané de moins de 3 s suffit : aucune sonde de plus
+    @MainActor
+    func testFreshSnapshotIsReusedWithoutNewRead() async {
+        let host = "lab.invalid"
+        var reads = 0
+        let lock = ProfileLock(connection: { host }, read: {
+            reads += 1
+            return Data(#"{"held": []}"#.utf8)
+        })
+        XCTAssertTrue(await lock.refresh())
+        XCTAssertEqual(reads, 1)
+        XCTAssertTrue(await lock.permits("hv-bot-a", on: host))
+        XCTAssertEqual(reads, 1)
+        XCTAssertEqual(lock.state("hv-bot-a", on: host), .free)
+    }
+
     /// La bannière dit pourquoi la détection de Desktop est indisponible, au lieu de « indisponible » seul
     @MainActor
     func testProbeFailureShowsItsReason() async {
