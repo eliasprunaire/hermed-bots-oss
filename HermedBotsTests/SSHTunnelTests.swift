@@ -1,4 +1,5 @@
 import Darwin
+import os
 import XCTest
 
 // compilé dans le paquet de tests lui-même, sans l'app comme hôte : aucun test ici n'ouvre de connexion réseau
@@ -264,15 +265,31 @@ final class SSHTunnelConfigTests: XCTestCase {
         }
     }
 
-    /// Le journal local garde le détail brut : masqué en entier, puis découpé, borné et sans caractère de contrôle
-    func testTheJournalLineKeepsTheMaskedDetailBoundedAndFree() {
-        let noisy = (1...10).map { "ligne \($0)" }.joined(separator: "\n") + "\n"
-        XCTAssertEqual(SSHFailure.detail(of: noisy), "ligne 8\nligne 9\nligne 10")
-        // des mots courts : un mot de 24 caractères ou plus est masqué
-        let long = SSHFailure.detail(of: String(repeating: "mot ", count: 1_250))
-        XCTAssertEqual(long.count, 400)
-        XCTAssertTrue(long.hasPrefix("…"))
-        XCTAssertEqual(SSHFailure.detail(of: "boom\u{1B}[31m rouge\u{7}\n"), "boom[31m rouge")
+    /// Le journal local reçoit la classe et le code de sortie, jamais un morceau de la sortie d'erreur : ni masqué, ni coupé
+    func testTheJournalGetsOnlyTheClassAndTheExitCode() async {
+        let secret = "synthetic-927"
+        let json = #"{"name":"API_SERVER_KEY","value":"\#(secret)"}"#
+        let cases: [(stderr: String, status: Int32, line: String)] = [
+            (json, 255, "ssh code 255 : hostUnreachable"),
+            (json + "\nssh: connect to host gateway.invalid port 22: Connection refused\n", 255, "ssh code 255 : hostUnreachable"),
+            (json, 7, "ssh code 7 : hostUnreachable"),
+            (json + "\noperator@gateway.invalid: Permission denied (publickey).", 255, "ssh code 255 : authRefused"),
+            (json + "\nHost key verification failed.", 255, "ssh code 255 : hostKeyChanged"),
+            (json + "\nConnection reset by peer", 255, "ssh code 255 : tunnelClosed"),
+            (json + "\nError connecting to agent: No such file or directory", 255, "ssh code 255 : agentUnavailable"),
+            // le nom et le code d'un exécutable SSH sont affichés par l'interface, mais le journal ne les reprend pas
+            (json + "\ngate-wrapper_failure=17\n", 255, "ssh code 255 : wrapperFailure"),
+        ]
+        for (stderr, status, line) in cases {
+            var failure: SSHFailure?
+            let lines = await journalLines { failure = SSHFailure.classify(stderr: stderr, status: status) }
+            XCTAssertEqual(lines, [line], stderr)
+            for text in lines + [failure?.message ?? "", "\(String(describing: failure))"] {
+                XCTAssertFalse(text.contains(secret), text)
+                XCTAssertFalse(text.contains("API_SERVER_KEY"), text)
+                XCTAssertFalse(text.contains("gateway.invalid"), text)
+            }
+        }
     }
 
     func testAWrapperFailureLineGivesANamedMessage() {
@@ -1234,99 +1251,11 @@ final class RemoteLoginShellTests: XCTestCase {
         XCTAssertFalse(streams.contains(secret), "la valeur a été écrite sur stdout ou stderr")
     }
 
-    func testDiagnosticMaskingKeepsTheCauseAndDropsTheValues() {
-        let masked = SSHFailure.detail(of: """
-        OPENAI_API_KEY=sk-live-0123456789abcdef0123456789
-        helper failed token=short client_secret: abcdef
-        un jeton sans nom 0123456789abcdefghijklmnopqrstuv fin
-        """)
-        for value in ["sk-live-0123456789abcdef0123456789", "abcdef", "short", "0123456789abcdefghijklmnopqrstuv"] {
-            XCTAssertFalse(masked.contains(value), masked)
-        }
-        XCTAssertTrue(masked.contains("OPENAI_API_KEY"), masked)
-        XCTAssertTrue(masked.contains("helper failed"), masked)
-        // un chemin et un mot courant gardent leur forme
-        XCTAssertEqual(SSHFailure.detail(of: "PermissionError: /srv/hermes/profiles/cyber/.env illisible"), "PermissionError: /srv/hermes/profiles/cyber/.env illisible")
-        // trois lignes au plus, 400 caractères au plus, sans caractère de contrôle
-        let long = SSHFailure.detail(of: (1...10).map { "ligne \($0) " + String(repeating: "x", count: 20) }.joined(separator: "\n") + "\u{1b}[31m")
-        XCTAssertLessThanOrEqual(long.split(separator: "\n").count, 3)
-        XCTAssertFalse(long.contains("\u{1b}"))
-        XCTAssertLessThanOrEqual(SSHFailure.detail(of: String(repeating: "mot ", count: 500)).count, 400)
-    }
-
-    /// Une sortie d'erreur JSON, citée ou échappée garde le nom de la variable et perd la valeur, même courte
-    func testDiagnosticMaskingCoversJsonAndQuotedValues() {
-        let cases: [(line: String, values: [String])] = [
-            (#"{"API_SERVER_KEY": "s3cr-7"}"#, ["s3cr-7"]),
-            (#"{"detail":"refus","API_SERVER_KEY":"s3cr-7","code":401}"#, ["s3cr-7"]),
-            (#"API_SERVER_KEY="qx7 zk9""#, ["qx7", "zk9"]),
-            ("API_SERVER_KEY='qx7 zk9'", ["qx7", "zk9"]),
-            ("export API_SERVER_KEY: \"qx7\"", ["qx7"]),
-            ("{'API_SERVER_KEY': 'qx7 zk9'}", ["qx7", "zk9"]),
-            (#"{"error": "{\"API_SERVER_KEY\": \"qx7\"}"}"#, ["qx7"]),
-            (#"{"API_SERVER_KEY": "qx7 zk9"#, ["qx7", "zk9"]),
-            (#"{"Authorization": "Bearer qx7"}"#, ["qx7"]),
-            (#"{"client_secret": 12345}"#, ["12345"]),
-        ]
-        for (line, values) in cases {
-            let masked = SSHFailure.detail(of: line)
-            for value in values { XCTAssertFalse(masked.contains(value), "\(line) -> \(masked)") }
-            XCTAssertTrue(masked.contains("****"), "\(line) -> \(masked)")
-        }
-        // le nom reste, comme la cause qui l'entoure
-        let kept = SSHFailure.detail(of: #"{"API_SERVER_KEY": "s3cr-7"}"# + "\nhelper failed")
-        XCTAssertTrue(kept.contains("API_SERVER_KEY"), kept)
-        XCTAssertTrue(kept.contains("helper failed"), kept)
-    }
-
-    /// Une valeur qui contient un guillemet, dans un JSON de JSON, est masquée en entier : rien ne reste après le guillemet interne
-    func testDiagnosticMaskingHidesTheWholeValueOfNestedJson() throws {
-        let verifierLine = #"{"error":"{\"API_SERVER_KEY\":\"a\\\"exposed-fragment-1234\"}"}"#
-        let masked = SSHFailure.detail(of: verifierLine)
-        XCTAssertFalse(masked.contains("exposed-fragment-1234"), masked)
-        XCTAssertTrue(masked.contains("API_SERVER_KEY"), masked)
-
-        // chaque niveau d'imbrication ré-échappe les guillemets et les barres obliques inverses de la valeur
-        let values = [#"a"exposed-fragment-1234"#, #"ab\"cd\\ef-short"#, #"tail-end\\"#, #"q'uote"after-77"#]
-        for value in values {
-            for name in ["API_SERVER_KEY", "client_secret", "Authorization"] {
-                var line = String(decoding: try JSONSerialization.data(withJSONObject: [name: value]), as: UTF8.self)
-                for level in 0...4 {
-                    let masked = SSHFailure.detail(of: line)
-                    for fragment in ["exposed-fragment-1234", "cd", "ef-short", "tail-end", "after-77", "uote"] where value.contains(fragment) {
-                        XCTAssertFalse(masked.contains(fragment), "niveau \(level), \(name) : \(line) -> \(masked)")
-                    }
-                    XCTAssertTrue(masked.contains(name), "niveau \(level), \(name) : \(line) -> \(masked)")
-                    line = String(decoding: try JSONSerialization.data(withJSONObject: ["error": line]), as: UTF8.self)
-                }
-            }
-        }
-    }
-
-    /// Le nom de la clé sur une ligne et sa valeur sur la suivante : la valeur est masquée, la cause voisine reste
-    func testDiagnosticMaskingHidesAValueOnTheLineAfterItsName() {
-        let cases = [
-            "{\"API_SERVER_KEY\":\n\"synthetic-927\"}",
-            "{\n  \"API_SERVER_KEY\":\n  \"synthetic-927\"\n}",
-            "API_SERVER_KEY=\nsynthetic-927",
-            "{\"error\": \"{\\\"API_SERVER_KEY\\\":\n\\\"synthetic-927\\\"}\"}",
-        ]
-        for text in cases {
-            let masked = SSHFailure.detail(of: text + "\nhelper failed")
-            XCTAssertFalse(masked.contains("synthetic-927"), "\(text) -> \(masked)")
-            XCTAssertTrue(masked.contains("API_SERVER_KEY"), masked)
-        }
-        // un guillemet ouvrant sans fermeture ne masque pas les lignes suivantes
-        let open = SSHFailure.detail(of: "API_SERVER_KEY=\"qx7\nhelper failed")
-        XCTAssertFalse(open.contains("qx7"), open)
-        XCTAssertTrue(open.contains("helper failed"), open)
-    }
-
     // MARK: aucun morceau de la sortie d'erreur dans un texte affiché
 
     private static let secret = "synthetic-927"
 
-    /// Des sorties d'erreur qui cachent la valeur d'une clé : JSON sur plusieurs lignes, saut de ligne réel entre le nom et la valeur, plus de 8 Kio avant la valeur
+    /// Des sorties d'erreur qui cachent la valeur d'une clé : JSON sur plusieurs lignes, saut de ligne réel entre le nom et la valeur, plus de 8 Kio avant la valeur, nom et valeur en deux champs
     private var leakingStderrs: [(label: String, stderr: String)] {
         let secret = Self.secret
         return [
@@ -1335,6 +1264,7 @@ final class RemoteLoginShellTests: XCTestCase {
             ("plus de 8 Kio d'espaces avant la valeur", "{\"API_SERVER_KEY\":" + String(repeating: " ", count: 9_000) + "\"\(secret)\"}"),
             ("plus de 8 Kio de lignes avant la valeur", "{\"API_SERVER_KEY\":\n" + (1...600).map { _ in String(repeating: " ", count: 20) }.joined(separator: "\n") + "\n\"\(secret)\"}\nhelper failed\n"),
             ("nom et valeur sur une ligne", "API_SERVER_KEY=\(secret)\nhelper failed\n"),
+            ("nom et valeur dans deux champs", #"{"name":"API_SERVER_KEY","value":"\#(secret)"}"# + "\nhelper failed\n"),
         ]
     }
 
@@ -1385,12 +1315,30 @@ final class RemoteLoginShellTests: XCTestCase {
         }
     }
 
-    /// Le journal local garde le nom de la clé : le masque porte sur le texte entier, avant la coupe des lignes
-    func testTheJournalLineIsMaskedBeforeItIsCutIntoLines() {
+    /// Le journal local reçoit, pour chaque lecture, le nom de la commande, le code et la classe : aucun morceau de la sortie d'erreur, masqué ou non
+    func testTheJournalGetsNoPartOfStderrFromTheThreeReads() async throws {
         for (label, stderr) in leakingStderrs {
-            let line = SSHFailure.detail(of: stderr)
-            XCTAssertFalse(line.contains(Self.secret), "\(label) : \(line)")
-            XCTAssertTrue(line.contains("API_SERVER_KEY"), "\(label) : \(line)")
+            for status in [1, 2, 255] {
+                let backend = try await openedBackend(answering: "\(status) ", stderr: stderr)
+                let target = tunnel
+                let lines = await journalLines {
+                    _ = try? await backend.readProfileLocks(target)
+                    _ = try? await backend.readAPIKey(target, profile: "cyber")
+                    _ = try? await backend.readProfileList(target)
+                }
+                let keyClass = stderr.contains(HermesAPIKey.keyNotSetMarker) ? "keyNotSet" : "commandFailed"
+                let expected = status == 255
+                    ? Array(repeating: "ssh code 255 : hostUnreachable", count: 3)
+                    : [
+                        "sonde Desktop code \(status) : commandFailed",
+                        "hermes config get code \(status) : \(keyClass)",
+                        "hermes profile list code \(status) : commandFailed",
+                    ]
+                XCTAssertEqual(lines, expected, "\(label), code \(status)")
+                for line in lines {
+                    for fragment in forbiddenFragments { XCTAssertFalse(line.contains(fragment), "\(label), code \(status), « \(fragment) » : \(line)") }
+                }
+            }
         }
     }
 
@@ -1867,4 +1815,16 @@ private func shownTexts(of error: Error) async -> [String] {
     default: break
     }
     return texts
+}
+
+/// Les lignes que le journal local reçoit pendant `body` ; le journal système n'est pas touché
+private func journalLines(_ body: () async throws -> Void) async rethrows -> [String] {
+    let lines = OSAllocatedUnfairLock(initialState: [String]())
+    let previous = SSHFailure.journalSink.withLock { sink in
+        defer { sink = { line in lines.withLock { $0.append(line) } } }
+        return sink
+    }
+    defer { SSHFailure.journalSink.withLock { $0 = previous } }
+    try await body()
+    return lines.withLock { $0 }
 }
