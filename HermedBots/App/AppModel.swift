@@ -584,21 +584,28 @@ final class AppModel {
     /// Une saisie de clé ou un nouvel essai pendant la lecture la périme : sa valeur et sa panne sont jetées, la clé du Trousseau reste
     @discardableResult
     private func fetchRemoteAPIKey(_ profile: String) async throws -> String? {
-        if keyFetching.contains(profile) {
-            return try await withCheckedThrowingContinuation { keyWaiters[profile, default: []].append($0) }
-        }
-        keyFetching.insert(profile)
-        do {
-            let key = try await performKeyFetch(profile)
-            keyFetching.remove(profile)
-            let waiters = keyWaiters.removeValue(forKey: profile) ?? []
-            waiters.forEach { $0.resume(returning: key) }
-            return key
-        } catch {
-            keyFetching.remove(profile)
-            let waiters = keyWaiters.removeValue(forKey: profile) ?? []
-            waiters.forEach { $0.resume(throwing: error) }
-            throw error
+        while true {
+            if keyFetching.contains(profile) {
+                do {
+                    return try await withCheckedThrowingContinuation { keyWaiters[profile, default: []].append($0) }
+                } catch is CancellationError {
+                    guard !Task.isCancelled else { throw CancellationError() }
+                    continue
+                }
+            }
+            keyFetching.insert(profile)
+            do {
+                let key = try await performKeyFetch(profile)
+                keyFetching.remove(profile)
+                let waiters = keyWaiters.removeValue(forKey: profile) ?? []
+                waiters.forEach { $0.resume(returning: key) }
+                return key
+            } catch {
+                keyFetching.remove(profile)
+                let waiters = keyWaiters.removeValue(forKey: profile) ?? []
+                waiters.forEach { $0.resume(throwing: error) }
+                throw error
+            }
         }
     }
 
