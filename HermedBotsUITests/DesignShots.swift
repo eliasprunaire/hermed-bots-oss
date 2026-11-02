@@ -75,11 +75,12 @@ final class DesignShots: XCTestCase {
     }
 
     func testTheMinimumWindowKeepsTheSidebarAndTheComposerUsable() {
-        let app = launch(size: "760x520")
+        // la taille minimale de HermedBotsApp : `.frame(minWidth: 720, minHeight: 480)`
+        let app = launch(size: "720x480")
         XCTAssertTrue(element(AccessibilityID.homeBot("hv-bot-a"), in: app).waitForExistence(timeout: 20), "l'accueil ne montre pas les bots")
         let frame = app.windows.firstMatch.frame
         print("HV-DESIGN fenêtre \(Int(frame.width))x\(Int(frame.height))")
-        XCTAssertEqual(frame.width, 760, accuracy: 2, "la fenêtre n'a pas la largeur demandée")
+        XCTAssertEqual(frame.width, 720, accuracy: 2, "la fenêtre n'a pas la largeur demandée")
         HVShot.capture("design-compact-home", app)
         converse(app)
         XCTAssertTrue(element(AccessibilityID.composerSend.rawValue, in: app).isHittable, "Envoyer sort de la fenêtre")
