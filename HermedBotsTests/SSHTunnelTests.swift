@@ -1272,11 +1272,32 @@ final class RemoteLoginShellTests: XCTestCase {
         }
     }
 
+    /// Le nom de la clé sur une ligne et sa valeur sur la suivante : la valeur est masquée, la cause voisine reste
+    func testDiagnosticMaskingHidesAValueOnTheLineAfterItsName() {
+        let cases = [
+            "{\"API_SERVER_KEY\":\n\"synthetic-927\"}",
+            "{\n  \"API_SERVER_KEY\":\n  \"synthetic-927\"\n}",
+            "API_SERVER_KEY=\nsynthetic-927",
+            "{\"error\": \"{\\\"API_SERVER_KEY\\\":\n\\\"synthetic-927\\\"}\"}",
+        ]
+        for text in cases {
+            let masked = RemoteShell.diagnostic(of: text + "\nhelper failed")
+            XCTAssertFalse(masked.contains("synthetic-927"), "\(text) -> \(masked)")
+            XCTAssertTrue(masked.contains("API_SERVER_KEY"), masked)
+        }
+        // un guillemet ouvrant sans fermeture ne masque pas les lignes suivantes
+        let open = RemoteShell.diagnostic(of: "API_SERVER_KEY=\"qx7\nhelper failed")
+        XCTAssertFalse(open.contains("qx7"), open)
+        XCTAssertTrue(open.contains("helper failed"), open)
+    }
+
     /// La bannière et chaque description de l'échec reprennent la sortie masquée, y compris pour un JSON à valeur courte
     func testApiKeyValueInJsonDiagnosticNeverReachesTheBanner() async throws {
         let stderr = """
         {"API_SERVER_KEY": "s3cr-7"}
         API_SERVER_KEY="qx7 zk9"
+        {"API_SERVER_KEY":
+        "ml-synthetic-927"}
         Config key not set: API_SERVER_KEY
 
         """
@@ -1290,7 +1311,7 @@ final class RemoteLoginShellTests: XCTestCase {
                 "\(failure)", String(reflecting: failure), (failure as NSError).localizedDescription,
             ]
             for surface in surfaces {
-                for value in ["s3cr-7", "qx7", "zk9"] { XCTAssertFalse(surface.contains(value), surface) }
+                for value in ["s3cr-7", "qx7", "zk9", "ml-synthetic-927"] { XCTAssertFalse(surface.contains(value), surface) }
             }
             XCTAssertTrue(surfaces[0].contains("API_SERVER_KEY"), surfaces[0])
         }

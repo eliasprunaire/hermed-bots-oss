@@ -140,18 +140,19 @@ enum RemoteShell {
     /// Hermes ne devrait jamais écrire une valeur ; le masque couvre `NOM=valeur`, `NOM: "valeur"` (JSON, guillemets simples, guillemets échappés), `Bearer valeur` et tout mot de 24 caractères ou plus
     // shortcut: une paire `{"name": "NOM", "value": "x"}` où le nom et la valeur sont deux champs reste visible, à couvrir si Hermes écrit ce format
     static func diagnostic(of stderr: String) -> String {
-        SSHFailure.detail(of: stderr.split(whereSeparator: \.isNewline).map { mask(String($0)) }.joined(separator: "\n"))
+        SSHFailure.detail(of: mask(stderr))
     }
 
-    private static func mask(_ line: String) -> String {
+    private static func mask(_ text: String) -> String {
         let rules = [
             (#"(?i)\bbearer\s+\S+"#, "Bearer ****"),
+            // le texte entier est masqué avant tout découpage : la valeur peut suivre son nom sur la ligne suivante
             // la valeur entre guillemets simples ou doubles va jusqu'à son guillemet fermant, ou jusqu'à la fin de la ligne si une coupure l'a emporté
             // shortcut: une valeur ouverte par un guillemet échappé (JSON dans un JSON) est masquée jusqu'à la fin de la ligne, sans décoder les niveaux d'échappement, à remplacer par un décodeur JSON si la fin de ces lignes devient utile
-            (#"(?i)((?:\\*["'])?[A-Za-z0-9_]*(?:key|token|secret|password|passwd|authorization)(?:\\*["'])?)\s*[=:]\s*(?:\\+["'].*|"(?:[^"\\]|\\.)*"?|'[^']*'?|\S+)"#, "$1=****"),
+            (#"(?i)((?:\\*["'])?[A-Za-z0-9_]*(?:key|token|secret|password|passwd|authorization)(?:\\*["'])?)\s*[=:]\s*(?:\\+["'].*|"(?:[^"\\\n]|\\.)*"?|'[^'\n]*'?|\S+)"#, "$1=****"),
             (#"[A-Za-z0-9_\-]{24,}"#, "****"),
         ]
-        return rules.reduce(line) { $0.replacingOccurrences(of: $1.0, with: $1.1, options: .regularExpression) }
+        return rules.reduce(text) { $0.replacingOccurrences(of: $1.0, with: $1.1, options: .regularExpression) }
     }
 }
 
