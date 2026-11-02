@@ -1511,7 +1511,6 @@ final class RemoteLoginShellTests: XCTestCase {
         }
     }
 
-    /// Une lecture de 1,5 s et la boucle à 1 s : « Nouvelle session » attend la sonde en cours au lieu de la compter comme un échec
     @MainActor
     func testPermitsSucceedsWhenBackgroundRefreshOverlaps() async throws {
         let host = "lab.invalid"
@@ -1526,7 +1525,6 @@ final class RemoteLoginShellTests: XCTestCase {
         XCTAssertEqual(lock.state("hv-bot-a", on: host), .free)
     }
 
-    /// Un instantané de moins de 3 s suffit : aucune sonde de plus
     @MainActor
     func testFreshSnapshotIsReusedWithoutNewRead() async {
         let host = "lab.invalid"

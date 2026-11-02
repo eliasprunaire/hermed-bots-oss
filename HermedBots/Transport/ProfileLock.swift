@@ -25,7 +25,6 @@ final class ProfileLock {
     private var snapshots: [String: Snapshot] = [:]
     /// Pourquoi la dernière lecture de cet hôte a échoué ; absent quand elle a réussi ou que l'erreur n'a rien à dire
     private var causes: [String: String] = [:]
-    /// Début de la lecture dont le résultat est en place ; une lecture plus ancienne ne le remplace pas
     private var applied: [String: ContinuousClock.Instant] = [:]
     private var inflight: [String: Task<Bool, Never>] = [:]
     private var generations: [String: Int] = [:]
