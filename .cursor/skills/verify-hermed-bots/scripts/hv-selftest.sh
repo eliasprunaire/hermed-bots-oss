@@ -334,7 +334,7 @@ python3 "$HERE/hv-contract-check.py" --help 2>/dev/null | grep -q -- "--acceptan
 python3 "$HERE/hv-contract-check.py" --acceptance >/dev/null 2>&1; [ $? -eq 2 ] && ok "contract-check: --acceptance sans --url => 2" || ko "contract-check: usage --acceptance"
 HV_FAKE_MODE=normal "$E" up fake >/dev/null || ko "fake up acceptance"
 python3 "$HERE/hv-contract-check.py" --url "http://127.0.0.1:$HV_PORT" --fixture "$F/hermes-current/contract.json" --out "$T/r-acc.json" --acceptance --timeout 3 >/dev/null; rc=$?
-python3 -c "import json,sys; r=json.load(open('$T/r-acc.json')); a=[x for x in r if x['contract'].startswith('acceptance:')]; sys.exit(not (len(a)==54 and all(x['result']=='PASS' for x in a)))" && [ $rc -eq 0 ] && ok "contract-check --acceptance: 54 PASS, code 0" || ko "contract-check --acceptance (rc=$rc)"
+python3 -c "import json,sys; r=json.load(open('$T/r-acc.json')); a=[x for x in r if x['contract'].startswith('acceptance:')]; t=[x for x in a if x['contract'].endswith(':tool')]; ap=[x for x in a if x['contract'].endswith(':approve')]; sys.exit(not (len(a)==54 and all(x['result']=='PASS' for x in a) and t and all('tool.started' in x['detail'] for x in t) and ap and all('once' in x['detail'] and 'deny' in x['detail'] for x in ap)))" && [ $rc -eq 0 ] && ok "contract-check --acceptance: 54 PASS, tool.started once deny, code 0" || ko "contract-check --acceptance (rc=$rc)"
 # c. /_hv/config et /_hv/reset
 python3 -I - "$HV_PORT" <<'PY' && ok "fake: /_hv/config et /_hv/reset réinitialisent l'état" || ko "fake: config/reset"
 import json, sys, urllib.request, urllib.error

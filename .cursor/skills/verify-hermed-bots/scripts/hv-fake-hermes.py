@@ -10,7 +10,7 @@ Routes de contrôle (test uniquement, hors contrat) :
   POST /_hv/config {mode, drop, reject_key, omit_tokens, version, profiles} règle l'état (400 si corps ou mode invalide) ;
   POST /_hv/reset rétablit l'état initial (injections, journaux, tours, mode). GET /_hv/config lit l'état courant.
 Mode malformed (HV_MALFORMED=null|string|noid|leak|nolock) : contrôles négatifs du validateur de conteneurs et de la liste des profils.
-Exige l'en-tête Authorization: Bearer <HV_TEST_API_KEY> si la variable est définie, sauf sur un contrat `auth: false`.
+Exige l'en-tête Authorization: Bearer de la clé du profil dans HV_TEST_API_KEYS (JSON objet), ou HV_TEST_API_KEY si cette carte est absente, sauf sur un contrat `auth: false` sans profil.
 Différence voulue avec Hermes : le flux d'événements est fermé après `: stream closed`."""
 import argparse, json, os, re, sys, time, threading, uuid
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
@@ -23,6 +23,16 @@ ap.add_argument("--fixtures", default=os.path.join(os.path.dirname(__file__), ".
 a = ap.parse_args()
 C = json.load(open(os.path.join(a.fixtures, "hermes-" + a.version, "contract.json"), encoding="utf-8"))
 DROP = os.environ.get("HV_DROP", "set_model")
+def load_keys():
+    raw = os.environ.get("HV_TEST_API_KEYS")
+    if raw is None or raw == "":
+        return None
+    try:
+        obj = json.loads(raw)
+    except ValueError:
+        return {}
+    return obj if isinstance(obj, dict) else {}
+KEYS = load_keys()
 KEY = os.environ.get("HV_TEST_API_KEY")
 LOG, INJ, LOCK = [], [], threading.Lock()
 CUT_UNTIL = [0.0]
@@ -57,7 +67,7 @@ def apply_config(obj):
     if "version" in obj and obj["version"] is not None:
         STATE["version"] = obj["version"]
     if "profiles" in obj:
-        STATE["profiles"] = obj["profiles"]
+        STATE["profiles"] = obj["profiles"] if obj["profiles"] is not None else None
     return 200
 
 def reset_state():
@@ -75,7 +85,46 @@ def compile_path(path):
     parts = re.split(r"\{(\w+)\}", path)  # le découpage alterne texte et nom de variable
     return re.compile("^" + "".join(re.escape(p) if i % 2 == 0 else "(?P<%s>[^/]+)" % p for i, p in enumerate(parts)) + "$")
 
-ROUTES = [(name, c, compile_path(c["path"])) for name, c in C["contracts"].items() if "path" in c]  # list_profiles passe par SSH, pas par HTTP
+MSG = {
+    "method": "GET",
+    "path": "/p/{profile}/api/sessions/{session}/messages",
+    "status": 200,
+    "response": {
+        "object": "list",
+        "session_id": "{session}",
+        "data": [
+            {"id": 13, "session_id": "{session}", "role": "user", "content": "Bonjour", "tool_call_id": None, "tool_calls": None, "tool_name": None, "timestamp": 1792330255.35, "token_count": None, "finish_reason": None, "reasoning": None, "reasoning_content": None, "display_kind": None},
+            {"id": 14, "session_id": "{session}", "role": "assistant", "content": "Réponse de test", "tool_call_id": None, "tool_calls": None, "tool_name": None, "timestamp": 1792330255.68, "token_count": None, "finish_reason": "stop", "reasoning": None, "reasoning_content": None, "display_kind": None},
+        ],
+    },
+}
+VERSION_P = dict(C["contracts"]["version"], path="/p/{profile}/health")
+VERSION_P.pop("auth", None)
+ROUTES = [(name, c, compile_path(c["path"])) for name, c in C["contracts"].items() if "path" in c]
+ROUTES.append(("version", VERSION_P, compile_path(VERSION_P["path"])))
+ROUTES.append(("session_messages", MSG, compile_path(MSG["path"])))
+
+def served_profiles():
+    if STATE["profiles"] is not None:
+        return STATE["profiles"]
+    return C["profiles"]["served"]
+
+def profile_list_text():
+    out = C["contracts"]["list_profiles"]["output"]
+    if STATE["mode"] == "malformed" and MALFORMED == "leak":
+        out = out.replace("stopped", "running")
+    if STATE["profiles"] is None:
+        return out
+    allowed = set(STATE["profiles"])
+    lines = []
+    for line in out.splitlines(True):
+        t = line.replace("\u25c6", " ").split()
+        if not t or t[0] == "Profile" or not any(ch.isalnum() for ch in line):
+            lines.append(line)
+            continue
+        if t[0] in allowed:
+            lines.append(line)
+    return "".join(lines)
 
 def match(method, path):
     for name, c, rx in ROUTES:
@@ -160,21 +209,27 @@ class H(BaseHTTPRequestHandler):
             reset_state()
             return self._send(200, {"ok": True})
         if path == "/_hv/profile-list":
-            out = C["contracts"]["list_profiles"]["output"]
-            return self._send_text(200, out.replace("stopped", "running") if STATE["mode"] == "malformed" and MALFORMED == "leak" else out)
+            return self._send_text(200, profile_list_text())
         if path == "/_hv/inject":
             INJ.append(json.loads(body or "{}")); return self._send(200, {"ok": True})
         if path == "/_hv/cut":
             CUT_UNTIL[0] = time.time() + float(json.loads(body or "{}").get("seconds", 5)); return self._send(200, {"ok": True})
         if time.time() < CUT_UNTIL[0] or STATE["mode"] == "down": return self._send(503, {"error": "unavailable"})
         name, c, v = match(method, path)
-        if STATE["reject_key"] and not (c and c.get("auth") is False):
-            return self._send(401, err("gateway_auth_failed", "Invalid gateway API key (API_SERVER_KEY)", "gateway_auth_error"))
-        if not (c and c.get("auth") is False) and KEY and self.headers.get("Authorization") != "Bearer " + KEY:
-            return self._send(401, err("gateway_auth_failed", "Invalid gateway API key (API_SERVER_KEY)", "gateway_auth_error"))
+        open_unscoped = bool(c and c.get("auth") is False and "profile" not in v)
+        header = self.headers.get("Authorization")
+        if not open_unscoped:
+            if STATE["reject_key"]:
+                return self._send(401, err("gateway_auth_failed", "Invalid gateway API key (API_SERVER_KEY)", "gateway_auth_error"))
+            if KEYS is not None:
+                want = KEYS.get(v.get("profile")) if v.get("profile") else None
+                if not want or header != "Bearer " + want:
+                    return self._send(401, err("gateway_auth_failed", "Invalid gateway API key (API_SERVER_KEY)", "gateway_auth_error"))
+            elif KEY and header != "Bearer " + KEY:
+                return self._send(401, err("gateway_auth_failed", "Invalid gateway API key (API_SERVER_KEY)", "gateway_auth_error"))
         if STATE["mode"] == "slow": time.sleep(8)
         if not c or (STATE["mode"] == "drop-route" and name == STATE["drop"]): return self._send(404, {"error": "404: Not Found"})
-        served = STATE["profiles"] if STATE["profiles"] else C["profiles"]["served"]
+        served = served_profiles()
         if "profile" in v and v["profile"] not in served: return self._send(404, {"error": "Unknown or unconfigured profile"})
         if "run" in v and v["run"] not in RUNS: return self._send(404, err("run_not_found", "Run not found: " + v["run"]))
         if "session" in v and v["session"] not in SESSIONS: return self._send(404, err("session_not_found", "Session not found: " + v["session"]))
@@ -193,6 +248,16 @@ class H(BaseHTTPRequestHandler):
         resp = fill(c["response"], v)
         if name == "version":
             resp = dict(resp, version=STATE["version"])
+        if name == "approve":
+            try:
+                posted = json.loads(body or "{}")
+            except ValueError:
+                posted = {}
+            if isinstance(resp, dict) and isinstance(posted, dict):
+                if posted.get("choice") is not None:
+                    resp["choice"] = posted["choice"]
+                if posted.get("request_id") is not None:
+                    resp["request_id"] = posted["request_id"]
         self._send(c.get("status", 200), mutate(resp) if STATE["mode"] == "fields" else corrupt(resp) if STATE["mode"] == "malformed" else resp)
     def do_GET(self): self._handle("GET")
     def do_POST(self): self._handle("POST")

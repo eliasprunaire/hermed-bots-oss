@@ -193,14 +193,42 @@ for e in C.get("edges", []):
 
 if a.acceptance:
     prd = [p for p in C["profiles"]["served"] if not str(p).startswith("hv-")]
-    actions = ("profile_served", "new_session", "set_model", "send_message", "start_run", "approve")
+    def tool_contract():
+        send = C["contracts"]["start_run"]
+        st, text = req("POST", fill(send["path"]), {"input": C["contracts"]["cancel_run"]["setup"]["input"]})
+        rid = jload(text).get("run_id")
+        if st != send["status"] or not rid:
+            return False, "status=%s (outil)" % st
+        st, events, _ = stream(fill(C["contracts"]["run_events"]["path"], run=rid), "tool.started")
+        names = [e.get("event") for e in events]
+        ok = st == 200 and any(e.get("event") == "tool.started" for e in events)
+        return ok, "status=%s events=%s tool.started" % (st, names)
+    def approve_contract():
+        parts = []
+        for choice in ("once", "deny"):
+            c = json.loads(json.dumps(C["contracts"]["approve"]))
+            c["body"]["choice"] = choice
+            c.setdefault("expect", {})["choice"] = choice
+            ok, detail = contract("approve", c)
+            parts.append("%s %s" % (choice, detail))
+            if not ok:
+                return False, " ".join(parts)
+        return True, "once deny " + "; ".join(parts)
+    actions = (
+        ("profile_served", lambda: contract("profile_served", C["contracts"]["profile_served"])),
+        ("new_session", lambda: contract("new_session", C["contracts"]["new_session"])),
+        ("set_model", lambda: contract("set_model", C["contracts"]["set_model"])),
+        ("send_message", lambda: contract("send_message", C["contracts"]["send_message"])),
+        ("tool", tool_contract),
+        ("approve", approve_contract),
+    )
     for profile in prd:
         CTX["profile"] = profile
         CTX["session"] = "api_unknown"
         CTX["run"] = "run_unknown"
         LOCKED.clear()
-        for name in actions:
-            probe("acceptance:%s:%s" % (profile, name), lambda n=name, c=C["contracts"][name]: contract(n, c))
+        for name, fn in actions:
+            probe("acceptance:%s:%s" % (profile, name), fn)
 
 json.dump(results, open(a.out, "w"), ensure_ascii=False, indent=2)
 for r in results: print("%-22s %s  %s" % (r["contract"], r["result"], r["detail"]))

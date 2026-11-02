@@ -38,7 +38,12 @@ for d in [home] + sorted((home / "profiles").iterdir()):
     cfg["model"] = model
     (d / "config.yaml").write_text(hermes_yaml.safe_dump(cfg))
     env = d / ".env"
-    lines = [l for l in (env.read_text().splitlines() if env.exists() else []) if not l.startswith("API_SERVER_KEY=")]
+    lines = env.read_text().splitlines() if env.exists() else []
+    existing = [l for l in lines if l.startswith("API_SERVER_KEY=") and l.split("=", 1)[1].strip()]
+    if existing:
+        env.chmod(0o600)
+        continue
+    lines = [l for l in lines if not l.startswith("API_SERVER_KEY=")]
     env.write_text("\n".join(lines + [f"API_SERVER_KEY={key}"]) + "\n")
     env.chmod(0o600)
 PY

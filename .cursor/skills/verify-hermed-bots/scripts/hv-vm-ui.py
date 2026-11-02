@@ -36,6 +36,14 @@ def vm_sh() -> Path | None:
     return (root / "vm.sh") if root else None
 
 
+def vm_argv(*args: str) -> list[str] | None:
+    vm = vm_sh()
+    if vm is None or not vm.is_file():
+        return None
+    zsh = shutil.which("zsh")
+    return ([zsh, str(vm)] if zsh else [str(vm)]) + list(args)
+
+
 def guard_target(host: str) -> int:
     guard = HERE / "hv-guard.sh"
     proc = subprocess.run(["bash", str(guard), "target", host], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -98,22 +106,10 @@ def guest(evidence: str, xctestrun: str) -> int:
 
 
 def start_reverse_tunnel(port: str) -> subprocess.Popen | None:
-    vm = vm_sh()
-    if vm is None or not vm.is_file():
-        return None
     spec = "127.0.0.1:%s:127.0.0.1:%s" % (port, port)
-    cmd = [
-        "zsh",
-        str(vm),
-        "ssh",
-        "--",
-        "-N",
-        "-T",
-        "-o",
-        "ExitOnForwardFailure=yes",
-        "-R",
-        spec,
-    ]
+    cmd = vm_argv("exec", "-N", "-T", "-o", "ExitOnForwardFailure=yes", "-R", spec)
+    if cmd is None:
+        return None
     try:
         return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError:
@@ -129,8 +125,7 @@ def host() -> int:
     if (runner / "PAUSE").exists():
         log("PAUSE présent : rien lancé")
         return 3
-    vm = vm_sh()
-    if vm is None or not vm.is_file():
+    if vm_argv("exec") is None:
         log("HV-UI SAUTÉE")
         log("HV-UI chemin=attente rc=6 durée=%.0f preuves=aucune" % (time.time() - t0))
         return 6
@@ -165,9 +160,7 @@ def host() -> int:
     work = Path(os.environ.get("HV_WORK") or (Path.home() / "hermed-bots-work"))
     dd = work / "dd"
     if not xctestrun:
-        build = [
-            "zsh",
-            str(vm),
+        build = vm_argv(
             "exec",
             "env",
             "HV_UI_BACKEND=orb",
@@ -179,7 +172,7 @@ def host() -> int:
             "platform=macOS",
             "-derivedDataPath",
             str(dd),
-        ]
+        )
         built = subprocess.run(build, env=env)
         if built.returncode != 0:
             if tunnel is not None:
@@ -194,9 +187,7 @@ def host() -> int:
             log("xcodebuild ou HV_XCTESTRUN absent")
             return 40
         env["HV_XCTESTRUN"] = str(found[0])
-    cmd = [
-        "zsh",
-        str(vm),
+    cmd = vm_argv(
         "exec",
         "env",
         "HV_UI_BACKEND=orb",
@@ -204,7 +195,7 @@ def host() -> int:
         ".cursor/skills/verify-hermed-bots/scripts/hv-run.sh",
         "ui",
         "fake",
-    ]
+    )
     try:
         proc = subprocess.run(cmd, env=env)
         rc = proc.returncode

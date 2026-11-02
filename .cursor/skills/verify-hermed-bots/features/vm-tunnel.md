@@ -37,7 +37,7 @@ L'appel `zsh ${HV_RUNNER_DIR}/vm.sh ui fake` conserve aussi la suite de fixtures
 3. Si `vm.sh`, `${HV_UI_GOLDEN}` ou la session graphique de test manquent, si la VM n'obtient pas d'adresse, si SSH échoue ou dépasse `${HV_UI_TIMEOUT}`, ou si le filtrage sortant est inactif : ligne `HV-UI SAUTÉE`, code 6. Ce n'est ni un FAIL ni un BLOCKED. Aucun repli sur l'hôte.
 4. Archiver l'arbre de travail (`git ls-files`, modifications non commitées comprises), puis `xcodebuild build-for-testing -scheme HermedBots -destination 'platform=macOS'` dans la VM. Échec → code 40.
 5. Lire les deux clés distinctes dans le fichier privé hors dépôt `$HV_WORK/secrets/hv-ui-keys.json` (`hv-bot-a` et `hv-bot-b`). Jamais en argument de commande, jamais dans un log, une capture ou le chat. La VM les garde seulement pendant la connexion.
-6. Ouvrir la redirection SSH inverse : le port publié du conteneur sur l'hôte (`127.0.0.1:${HV_PORT}`) devient `127.0.0.1:${HV_PORT}` dans la VM. Forme : `ssh -N -T -o ExitOnForwardFailure=yes -R 127.0.0.1:${HV_PORT}:127.0.0.1:${HV_PORT}`, transporté par `zsh ${HV_RUNNER_DIR}/vm.sh ssh`.
+6. Ouvrir la redirection SSH inverse : le port publié du conteneur sur l'hôte (`127.0.0.1:${HV_PORT}`) devient `127.0.0.1:${HV_PORT}` dans la VM. Forme : `ssh -N -T -o ExitOnForwardFailure=yes -R 127.0.0.1:${HV_PORT}:127.0.0.1:${HV_PORT}`, transporté par `${HV_RUNNER_DIR}/vm.sh exec` (préfixe `zsh` si `zsh` est sur le PATH).
 7. Lancer exactement :
 
 ```bash
