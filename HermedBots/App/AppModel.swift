@@ -107,6 +107,9 @@ final class AppModel {
     private(set) var launchClient: SSHClientSettings?
     /// Une relecture SSH par profil et par 401/403, puis le message d'échec ; « Réessayer » la rouvre
     private let apiKeyFetches = APIKeyFetches()
+    /// Une lecture en cours : un second refus du même profil attend la même lecture, il n'affiche pas un 401 pendant ce temps
+    @ObservationIgnored private var keyFetching: Set<String> = []
+    @ObservationIgnored private var keyWaiters: [String: [CheckedContinuation<String?, Error>]] = [:]
     /// Le profil dont le refus affiche `apiError` : « Réessayer » relit sa clé, pas celle du profil à l'écran
     private var refusal: (profile: String, message: String)?
     /// Un test injecte la lecture de `API_SERVER_KEY` et la session HTTP ; l'app lit par SSH et par la session par défaut
@@ -198,13 +201,21 @@ final class AppModel {
 
     private func hermesClient() -> HermesClient? {
         guard let apiURL else { return nil }
-        let secrets = environment.secrets
-        return HermesClient(baseURL: apiURL, timeout: 15, configuration: urlConfiguration, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) })
+        return HermesClient(baseURL: apiURL, timeout: 15, configuration: urlConfiguration, apiKeyForProfile: Self.boundAPIKey(environment.secrets))
     }
 
     private func resumeAPI(_ apiURL: URL) -> ResumeAPI {
-        let secrets = environment.secrets
-        return ResumeAPI(baseURL: apiURL, apiKey: nil, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) })
+        ResumeAPI(baseURL: apiURL, apiKey: nil, apiKeyForProfile: Self.boundAPIKey(environment.secrets))
+    }
+
+    /// Rien ne part sans la clé de ce profil : pas de Bearer d'un autre profil, pas de requête anonyme
+    private static func boundAPIKey(_ secrets: SecretStore) -> @Sendable (String) throws -> String? {
+        { profile in
+            guard let key = try secrets.resolvedAPIKey(profile: profile) else {
+                throw HermesError.apiKeyMissing(profile)
+            }
+            return key
+        }
     }
 
     /// `list_profiles` : `hermes profile list` par un second canal ssh en lecture seule (décision S6)
@@ -419,6 +430,24 @@ final class AppModel {
         defer {
             if versionRequest == request { isCheckingAPI = false }
         }
+        if (try? environment.secrets.resolvedAPIKey(profile: profile)) == nil {
+            do {
+                guard try await fetchRemoteAPIKey(profile) != nil else {
+                    guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
+                    version = .unknown
+                    let message = HermesAPIKey.unauthorizedMessage(profile: profile, holdsKey: false)
+                    refusal = (profile, message)
+                    apiError = message
+                    return
+                }
+            } catch {
+                guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
+                version = .unknown
+                apiError = Self.apiMessage(error)
+                return
+            }
+            guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
+        }
         do {
             let value = try await readVersionRecovering(baseURL, profile: profile)
             guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
@@ -488,8 +517,7 @@ final class AppModel {
     }
 
     private func versionClient(_ baseURL: URL) -> HermesClient {
-        let secrets = environment.secrets
-        return HermesClient(baseURL: baseURL, timeout: 5, configuration: urlConfiguration, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) })
+        HermesClient(baseURL: baseURL, timeout: 5, configuration: urlConfiguration, apiKeyForProfile: Self.boundAPIKey(environment.secrets))
     }
 
     private func readVersionRecovering(_ baseURL: URL, profile: String) async throws -> String? {
@@ -543,6 +571,25 @@ final class AppModel {
     /// Une saisie de clé ou un nouvel essai pendant la lecture la périme : sa valeur et sa panne sont jetées, la clé du Trousseau reste
     @discardableResult
     private func fetchRemoteAPIKey(_ profile: String) async throws -> String? {
+        if keyFetching.contains(profile) {
+            return try await withCheckedThrowingContinuation { keyWaiters[profile, default: []].append($0) }
+        }
+        keyFetching.insert(profile)
+        do {
+            let key = try await performKeyFetch(profile)
+            keyFetching.remove(profile)
+            let waiters = keyWaiters.removeValue(forKey: profile) ?? []
+            waiters.forEach { $0.resume(returning: key) }
+            return key
+        } catch {
+            keyFetching.remove(profile)
+            let waiters = keyWaiters.removeValue(forKey: profile) ?? []
+            waiters.forEach { $0.resume(throwing: error) }
+            throw error
+        }
+    }
+
+    private func performKeyFetch(_ profile: String) async throws -> String? {
         let source: @MainActor (String) async throws -> String?
         if let apiKeyReader {
             source = apiKeyReader
@@ -567,7 +614,7 @@ final class AppModel {
         guard apiKeyFetches.generation == generation else { return try? environment.secrets.resolvedAPIKey(profile: profile) }
         if key != nil {
             environment.secrets = secrets
-            // un dépli parti avant la clé a gardé son 401 : on relit les fils de ce profil s'il est déplié
+            // un dépli parti avant la clé attendait : on relit les fils de ce profil s'il est déplié
             bots.reload(profile)
         }
         return key
