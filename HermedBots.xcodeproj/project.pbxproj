@@ -27,6 +27,7 @@
 		F12100000000000000000002 /* LoopGuard in Frameworks */ = {isa = PBXBuildFile; productRef = F12100000000000000000004 /* LoopGuard */; };
 		F14400000000000000000001 /* ProfileLock.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14400000000000000000002 /* ProfileLock.swift */; };
 		F15500000000000000000001 /* KillSwitch.swift in Sources */ = {isa = PBXBuildFile; fileRef = F15500000000000000000002 /* KillSwitch.swift */; };
+		F16500000000000000000001 /* Design.swift in Sources */ = {isa = PBXBuildFile; fileRef = F16500000000000000000002 /* Design.swift */; };
 		F14600000000000000000001 /* ResumeStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14600000000000000000002 /* ResumeStore.swift */; };
 		F14700000000000000000001 /* ResumeAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14700000000000000000002 /* ResumeAPI.swift */; };
 		F14800000000000000000001 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F14800000000000000000002 /* AppModel.swift */; };
@@ -67,6 +68,7 @@
 		E2E2F1D4A5B6C70829384A02 /* ApprovalParams.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalParams.swift; sourceTree = "<group>"; };
 		F14400000000000000000002 /* ProfileLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileLock.swift; sourceTree = "<group>"; };
 		F15500000000000000000002 /* KillSwitch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermedBots/KillSwitch/KillSwitch.swift; sourceTree = SOURCE_ROOT; };
+		F16500000000000000000002 /* Design.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermedBots/Shared/Design.swift; sourceTree = SOURCE_ROOT; };
 		F14600000000000000000002 /* ResumeStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HermedBots/Transport/ResumeStore.swift; sourceTree = SOURCE_ROOT; };
 		F14700000000000000000002 /* ResumeAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResumeAPI.swift; sourceTree = "<group>"; };
 		F14800000000000000000002 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
@@ -410,6 +412,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F15500000000000000000001 /* KillSwitch.swift in Sources */,
+				F16500000000000000000001 /* Design.swift in Sources */,
 				F14600000000000000000001 /* ResumeStore.swift in Sources */,
 				F14700000000000000000001 /* ResumeAPI.swift in Sources */,
 				F14800000000000000000001 /* AppModel.swift in Sources */,

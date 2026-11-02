@@ -63,20 +63,25 @@ struct BotAvatar: View {
     }
 }
 
-/// L'anneau d'activité : un dégradé angulaire qui tourne, fixe quand le mouvement est coupé
-private struct WorkingRing: View {
+/// L'anneau d'activité : un dégradé angulaire qui tourne, fixe quand le mouvement est coupé, même en plein tour
+struct WorkingRing: View {
+    /// Secondes pour un tour complet
+    static let period = 1.4
+
+    /// L'angle en degrés à un instant donné ; 0 quand le mouvement est coupé
+    static func angle(at time: Double, moving: Bool) -> Double {
+        moving ? time.truncatingRemainder(dividingBy: period) / period * 360 : 0
+    }
+
     let colors: [Color]
     @Environment(\.motion) private var motion
-    @State private var turned = false
 
     var body: some View {
-        Circle()
-            .strokeBorder(AngularGradient(colors: colors + [colors[0].opacity(0)], center: .center), lineWidth: 2)
-            .rotationEffect(.degrees(turned ? 360 : 0))
-            .onAppear {
-                guard motion else { return }
-                withAnimation(.linear(duration: 1.4).repeatForever(autoreverses: false)) { turned = true }
-            }
+        TimelineView(.animation(minimumInterval: 1 / 30, paused: !motion)) { context in
+            Circle()
+                .strokeBorder(AngularGradient(colors: colors + [colors[0].opacity(0)], center: .center), lineWidth: 2)
+                .rotationEffect(.degrees(Self.angle(at: context.date.timeIntervalSinceReferenceDate, moving: motion)))
+        }
     }
 }
 
