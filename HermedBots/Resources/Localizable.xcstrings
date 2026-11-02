@@ -238,9 +238,9 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The host key changed. The tunnel stays closed." } }
       }
     },
-    "La commande « hermes profile list » a échoué (code %@) : %@" : {
+    "La commande « hermes profile list » a échoué (code %@)." : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "The “hermes profile list” command failed (code %@): %@" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The “hermes profile list” command failed (code %@)." } }
       }
     },
     "La liste des bots a changé" : {

@@ -17,7 +17,7 @@ struct BotListView: View {
                 BotChangeNotice(change: change, apply: model.validateChange)
             }
             ForEach(model.list.shown ?? []) { bot in
-                BotRow(bot: bot, isExpanded: model.expanded.contains(bot.id), lockReason: profileLock.state(bot.id).reason) {
+                BotRow(bot: bot, isExpanded: model.expanded.contains(bot.id), lockReason: profileLock.reason(bot.id)) {
                     if profileLock.state(bot.id) == .free { model.toggle(bot.id) }
                     select(bot.id)
                 }
@@ -87,6 +87,9 @@ struct BotRow: View {
                 Text(lockReason)
                     .font(.caption)
                     .foregroundStyle(.orange)
+                    // la cause d'une panne de la sonde peut tenir sur plusieurs lignes : la barre latérale en garde deux
+                    .lineLimit(2)
+                    .help(lockReason)
                     .accessibilityIdentifier(AccessibilityID.botLock(bot.id))
             }
             Spacer(minLength: 0)

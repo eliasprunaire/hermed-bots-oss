@@ -258,6 +258,73 @@ final class CapabilitiesTests: XCTestCase {
         }
     }
 
+    func testPatchVersionOfAKnownMinorIsNotDegradedWhenContractsPass() async throws {
+        try serve(.patch)
+        let map = try await capabilities()
+        XCTAssertEqual(map.version, "0.22.5")
+        // la liste exacte reste celle des versions testées ; la mineure suffit à ne pas dégrader
+        XCTAssertFalse(map.isVersionKnown)
+        XCTAssertTrue(map.isVersionSupported)
+        XCTAssertFalse(map.isDegraded)
+        assertOnlyDisabled([], in: map)
+
+        // un contrat qui échoue dégrade, quelle que soit la version
+        try serve(.patch, dropped: [.setModel])
+        let dropped = try await capabilities()
+        XCTAssertTrue(dropped.isVersionSupported)
+        XCTAssertTrue(dropped.isDegraded)
+
+        // une autre mineure ou une autre majeure reste dégradée, contrats disponibles
+        for other in ["0.23.0", "0.21.9", "1.22.2", "0.22", "0.22.x", "0.22.5-rc1", "0.220.1"] {
+            try serve(.patch, overrides: [.version: .http(200, Data(#"{"status": "ok", "version": "\#(other)"}"#.utf8))])
+            let map = try await capabilities()
+            XCTAssertFalse(map.isVersionSupported, other)
+            XCTAssertTrue(map.isDegraded, other)
+            assertOnlyDisabled([], in: map)
+        }
+    }
+
+    func testUntestedVersionIsNamedInTheBanner() async throws {
+        try serve(.patch)
+        let patch = try await capabilities()
+        XCTAssertEqual(patch.versionNotice, "Hermes 0.22.5 non testée")
+
+        try serve(overrides: [.version: .http(200, Data(#"{"status": "ok", "version": "0.23.0"}"#.utf8))])
+        let other = try await capabilities()
+        XCTAssertEqual(other.versionNotice, "Hermes 0.23.0 non testée")
+
+        // sans version lue, Hermes reste « inconnue » ; une version testée ne se plaint de rien
+        try serve(overrides: [.version: .http(200, Data(#"{"status": "ok"}"#.utf8))])
+        let none = try await capabilities()
+        XCTAssertEqual(none.versionNotice, "Version de Hermes inconnue")
+        try serve()
+        let current = try await capabilities()
+        XCTAssertNil(current.versionNotice)
+        try serve(.previous)
+        let previous = try await capabilities()
+        XCTAssertNil(previous.versionNotice)
+    }
+
+    /// Le correctif non testé d'une mineure testée n'est pas dégradé, mais son avis de version doit rester visible
+    func testUntestedPatchVersionShowsItsBannerWithoutBeingDegraded() async throws {
+        try serve(.patch)
+        let patch = try await capabilities()
+        XCTAssertFalse(patch.isDegraded)
+        XCTAssertNotNil(patch.versionNotice)
+        XCTAssertTrue(patch.showsBanner)
+
+        // une version testée sans fonction perdue ne montre rien ; une fonction perdue ou une autre mineure montre le bandeau
+        try serve()
+        let current = try await capabilities()
+        XCTAssertFalse(current.showsBanner)
+        try serve(dropped: [.setModel])
+        let dropped = try await capabilities()
+        XCTAssertTrue(dropped.showsBanner)
+        try serve(overrides: [.version: .http(200, Data(#"{"status": "ok", "version": "0.23.0"}"#.utf8))])
+        let other = try await capabilities()
+        XCTAssertTrue(other.showsBanner)
+    }
+
     func testKnownVersionsAreTheFixtureVersions() throws {
         let versions = try FixtureVersion.allCases.map { try XCTUnwrap(Fixture.load($0).root["version"] as? String) }
         XCTAssertEqual(CapabilityMap.knownVersions, Set(versions))

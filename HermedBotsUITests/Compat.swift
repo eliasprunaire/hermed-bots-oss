@@ -39,6 +39,14 @@ final class Compat: HD12Harness {
         HVShot.capture("hd12-previous", app)
     }
 
+    func testUntestedPatchVersionIsNamedWithoutDegradedMode() {
+        configure(version: "0.22.5")
+        launch()
+        XCTAssertTrue(element("hd.banner.version-notice").waitForExistence(timeout: 15))
+        XCTAssertTrue(text("hd.banner.version-notice").contains("Hermes 0.22.5 non testée"))
+        XCTAssertFalse(element("hd.banner.degraded").exists)
+    }
+
     func testApproveRemoved() {
         configure(mode: "drop-route", drop: "approve")
         let app = launch()

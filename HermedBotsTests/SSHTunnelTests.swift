@@ -1,4 +1,5 @@
 import Darwin
+import os
 import XCTest
 
 // compilé dans le paquet de tests lui-même, sans l'app comme hôte : aucun test ici n'ouvre de connexion réseau
@@ -219,8 +220,8 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(SSHFailure.classify(stderr: "Certificate invalid: expired", status: 255), .certificateExpired(""))
         XCTAssertEqual(SSHFailure.classify(stderr: "Host key verification failed.", status: 255), .hostKeyChanged(""))
         XCTAssertEqual(SSHFailure.classify(stderr: "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@", status: 255), .hostKeyChanged(""))
-        XCTAssertEqual(SSHFailure.classify(stderr: "ssh: connect to host gateway.invalid port 22: Connection refused\n", status: 255), .unreachable("ssh: connect to host gateway.invalid port 22: Connection refused"))
-        XCTAssertEqual(SSHFailure.classify(stderr: "", status: 255), .unreachable(""))
+        XCTAssertEqual(SSHFailure.classify(stderr: "ssh: connect to host gateway.invalid port 22: Connection refused\n", status: 255), .unreachable("Échec SSH (code 255)"))
+        XCTAssertEqual(SSHFailure.classify(stderr: "", status: 255), .unreachable("Échec SSH (code 255)"))
         XCTAssertEqual(SSHFailure.classify(stderr: "Connection reset by peer", status: 255), .tunnelClosed)
         XCTAssertEqual(SSHFailure.classify(stderr: "", status: 1), .tunnelClosed)
         XCTAssertEqual(SSHFailure.classify(stderr: "gate-wrapper_failure=17\n", status: 255), .wrapperFailure(name: "gate-wrapper", code: "17"))
@@ -231,22 +232,23 @@ final class SSHTunnelConfigTests: XCTestCase {
         }
     }
 
-    func testStderrIsKeptInTheShownError() {
+    /// L'interface montre une cause classée et le code de sortie, jamais une ligne de la sortie d'erreur de ssh
+    func testRawStderrNeverReachesTheShownError() {
         let refused = "ssh: connect to host gateway.invalid port 22: Connection refused\n"
         let shown = SSHFailure.classify(stderr: refused, status: 255).message
-        XCTAssertEqual(shown, SSHFailure.unreachable("").message + "\nssh: connect to host gateway.invalid port 22: Connection refused")
-        XCTAssertTrue(shown.hasPrefix("Hôte injoignable. Vérifie le réseau, puis réessaie."))
-        // sans sortie d'erreur, le message reste celui d'avant : rien n'est inventé
-        XCTAssertEqual(SSHFailure.classify(stderr: " \n\n", status: 255).message, SSHFailure.unreachable("").message)
+        XCTAssertEqual(shown, "Hôte injoignable. Vérifie le réseau, puis réessaie.\nÉchec SSH (code 255)")
+        // sans sortie d'erreur, le message est le même : il ne dépend pas d'elle
+        XCTAssertEqual(SSHFailure.classify(stderr: " \n\n", status: 255).message, shown)
+        XCTAssertEqual(SSHFailure.classify(stderr: "", status: 255).message, shown)
         XCTAssertEqual(SSHFailure.unreachable("").message, "Hôte injoignable. Vérifie le réseau, puis réessaie.")
-        // le détail est borné : les trois dernières lignes, 400 caractères, sans caractère de contrôle
-        let noisy = (1...10).map { "ligne \($0)" }.joined(separator: "\n") + "\n"
-        XCTAssertEqual(SSHFailure.classify(stderr: noisy, status: 255), .unreachable("ligne 8\nligne 9\nligne 10"))
-        let long = String(repeating: "x", count: 5_000)
-        guard case .unreachable(let detail) = SSHFailure.classify(stderr: long, status: 255) else { return XCTFail("attendu unreachable") }
-        XCTAssertEqual(detail.count, 400)
-        XCTAssertTrue(detail.hasPrefix("…"))
-        XCTAssertEqual(SSHFailure.classify(stderr: "boom\u{1B}[31m rouge\u{7}\n", status: 255), .unreachable("boom[31m rouge"))
+        XCTAssertEqual(SSHFailure.classify(stderr: "boom", status: 7).message, "Hôte injoignable. Vérifie le réseau, puis réessaie.\nÉchec SSH (code 7)")
+        // des mots courts ou longs, des caractères de contrôle, dix lignes : rien de tout cela ne paraît
+        let noisy = (1...10).map { "ligne \($0)" }.joined(separator: "\n") + "\n" + String(repeating: "mot ", count: 1_250) + "boom\u{1B}[31m rouge\u{7}"
+        let failure = SSHFailure.classify(stderr: noisy, status: 255)
+        XCTAssertEqual(failure, .unreachable("Échec SSH (code 255)"))
+        for text in [failure.message, "\(failure)", String(reflecting: failure), (failure as NSError).localizedDescription] {
+            for fragment in ["ligne", "mot", "boom", "rouge", "\u{1B}"] { XCTAssertFalse(text.contains(fragment), text) }
+        }
         // une cause connue garde son texte fixe : la sortie brute de ssh n'y paraît pas
         for known in [
             "operator@gateway.invalid: Permission denied (publickey).",
@@ -260,6 +262,33 @@ final class SSHTunnelConfigTests: XCTestCase {
             XCTAssertFalse(failure.message.contains("\n"), known)
             XCTAssertFalse(failure.message.contains("gateway.invalid"), known)
             XCTAssertFalse(failure.message.contains("Permission denied"), known)
+        }
+    }
+
+    /// Le journal local reçoit la classe et le code de sortie, jamais un morceau de la sortie d'erreur : ni masqué, ni coupé
+    func testTheJournalGetsOnlyTheClassAndTheExitCode() async {
+        let secret = "synthetic-927"
+        let json = #"{"name":"API_SERVER_KEY","value":"\#(secret)"}"#
+        let cases: [(stderr: String, status: Int32, line: String)] = [
+            (json, 255, "ssh code 255 : hostUnreachable"),
+            (json + "\nssh: connect to host gateway.invalid port 22: Connection refused\n", 255, "ssh code 255 : hostUnreachable"),
+            (json, 7, "ssh code 7 : hostUnreachable"),
+            (json + "\noperator@gateway.invalid: Permission denied (publickey).", 255, "ssh code 255 : authRefused"),
+            (json + "\nHost key verification failed.", 255, "ssh code 255 : hostKeyChanged"),
+            (json + "\nConnection reset by peer", 255, "ssh code 255 : tunnelClosed"),
+            (json + "\nError connecting to agent: No such file or directory", 255, "ssh code 255 : agentUnavailable"),
+            // le nom et le code d'un exécutable SSH sont affichés par l'interface, mais le journal ne les reprend pas
+            (json + "\ngate-wrapper_failure=17\n", 255, "ssh code 255 : wrapperFailure"),
+        ]
+        for (stderr, status, line) in cases {
+            var failure: SSHFailure?
+            let lines = await journalLines { failure = SSHFailure.classify(stderr: stderr, status: status) }
+            XCTAssertEqual(lines, [line], stderr)
+            for text in lines + [failure?.message ?? "", "\(String(describing: failure))"] {
+                XCTAssertFalse(text.contains(secret), text)
+                XCTAssertFalse(text.contains("API_SERVER_KEY"), text)
+                XCTAssertFalse(text.contains("gateway.invalid"), text)
+            }
         }
     }
 
@@ -366,7 +395,10 @@ final class SSHTunnelConfigTests: XCTestCase {
         let wrapper = try await Spawn.run("/bin/sh", ["-c", noise + "; echo gate-wrapper_failure=17 >&2"], environment: ["PATH": "/usr/bin:/bin"], timeout: .seconds(10))
         XCTAssertEqual(SSHFailure.classify(stderr: wrapper.stderr, status: 255), .wrapperFailure(name: "gate-wrapper", code: "17"))
         let refused = try await Spawn.run("/bin/sh", ["-c", noise + "; echo 'ssh: connect to host gateway.invalid port 22: Connection refused' >&2"], environment: ["PATH": "/usr/bin:/bin"], timeout: .seconds(10))
-        XCTAssertTrue(SSHFailure.classify(stderr: refused.stderr, status: 255).message.hasSuffix("port 22: Connection refused"))
+        // la cause se lit sur la fin de la sortie d'erreur, mais le message ne la reprend pas
+        let failure = SSHFailure.classify(stderr: refused.stderr, status: 255)
+        XCTAssertEqual(failure, .unreachable("Échec SSH (code 255)"))
+        XCTAssertFalse(failure.message.contains("Connection refused"), failure.message)
     }
 }
 
@@ -802,17 +834,22 @@ final class WrapperLoginPathTests: XCTestCase {
         return path
     }
 
-    /// Un exécutable qui écrit son PATH sur la sortie d'erreur puis échoue : `open()` rend ce PATH dans le détail de `unreachable`
-    private func pathSeenByWrapper(_ backend: SystemSSHBackend) async throws -> String {
+    /// Un exécutable qui note son PATH dans un fichier puis échoue : l'interface ne montre plus la sortie d'erreur, le fichier garde la preuve
+    private func recordingWrapper() throws -> (path: String, record: String) {
+        let record = FileManager.default.temporaryDirectory.appendingPathComponent("hb-seen-path-\(UUID().uuidString.prefix(8))").path
+        addTeardownBlock { try? FileManager.default.removeItem(atPath: record) }
+        return (try script("printf '%s\\n' \"$PATH\" > '\(record)'; exit 255"), record)
+    }
+
+    /// `open()` échoue avec le wrapper : le PATH qu'il a reçu est dans son fichier
+    private func pathSeenByWrapper(_ backend: SystemSSHBackend, record: String) async throws -> String {
         defer { addTeardownBlock { await backend.close() } }
         do {
             _ = try await backend.open(config)
             XCTFail("open() a réussi avec un exécutable qui échoue")
-        } catch let failure as SSHFailure {
-            guard case .unreachable(let detail) = failure else { XCTFail("\(failure)"); return "" }
-            return detail
-        }
-        return ""
+        } catch is SSHFailure {}
+        let seen = (try? String(contentsOfFile: record, encoding: .utf8)) ?? ""
+        return seen.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func backend(wrapper: String, loginShell: String?, timeout: Duration = .seconds(5)) -> SystemSSHBackend {
@@ -824,26 +861,26 @@ final class WrapperLoginPathTests: XCTestCase {
     }
 
     func testWrapperGetsALoginPath() async throws {
-        let wrapper = try script(#"printf '%s\n' "$PATH" >&2; exit 255"#)
+        let wrapper = try recordingWrapper()
         // le shell écrit du bruit avant le PATH (un rc qui affiche) et refuse d'être lancé sans `-l`
         let shell = try script(#"[ "$1" = "-l" ] || exit 9; echo 'message du rc'; printf '%s\n' '/opt/example-login/bin:/usr/bin:/bin'"#, name: "login-shell")
-        let seen = try await pathSeenByWrapper(backend(wrapper: wrapper, loginShell: shell))
+        let seen = try await pathSeenByWrapper(backend(wrapper: wrapper.path, loginShell: shell), record: wrapper.record)
         XCTAssertEqual(seen, "/opt/example-login/bin:/usr/bin:/bin")
     }
 
     func testWrapperPathFallsBackWhenLoginShellFails() async throws {
-        let wrapper = try script(#"printf '%s\n' "$PATH" >&2; exit 255"#)
+        let wrapper = try recordingWrapper()
         let expected = launchdPath + ":/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:\(home)/.local/bin:\(home)/bin"
         let failing = try script("exit 1", name: "failing-shell")
         let silent = try script("printf ''", name: "silent-shell")
         let hanging = try script("sleep 30", name: "hanging-shell")
         for (name, shell) in [("échec", failing), ("sortie vide", silent), ("absent", "/tmp/example-shell.invalid")] {
-            let seen = try await pathSeenByWrapper(backend(wrapper: wrapper, loginShell: shell))
+            let seen = try await pathSeenByWrapper(backend(wrapper: wrapper.path, loginShell: shell), record: wrapper.record)
             XCTAssertEqual(seen, expected, name)
         }
         // un shell qui ne rend pas la main est tué au délai
         let started = ContinuousClock.now
-        let seen = try await pathSeenByWrapper(backend(wrapper: wrapper, loginShell: hanging, timeout: .milliseconds(300)))
+        let seen = try await pathSeenByWrapper(backend(wrapper: wrapper.path, loginShell: hanging, timeout: .milliseconds(300)), record: wrapper.record)
         XCTAssertEqual(seen, expected, "délai")
         XCTAssertLessThan(ContinuousClock.now - started, .seconds(10))
     }
@@ -852,10 +889,10 @@ final class WrapperLoginPathTests: XCTestCase {
         let counter = FileManager.default.temporaryDirectory.appendingPathComponent("hb-login-count-\(UUID().uuidString.prefix(8))")
         addTeardownBlock { try? FileManager.default.removeItem(at: counter) }
         let shell = try script("echo run >> '\(counter.path)'; printf '%s\\n' '/opt/example-login/bin'", name: "counting-shell")
-        let wrapper = try script(#"printf '%s\n' "$PATH" >&2; exit 255"#)
-        let backend = backend(wrapper: wrapper, loginShell: shell)
-        _ = try await pathSeenByWrapper(backend)
-        let second = try await pathSeenByWrapper(backend)
+        let wrapper = try recordingWrapper()
+        let backend = backend(wrapper: wrapper.path, loginShell: shell)
+        _ = try await pathSeenByWrapper(backend, record: wrapper.record)
+        let second = try await pathSeenByWrapper(backend, record: wrapper.record)
         XCTAssertEqual(second, "/opt/example-login/bin")
         let runs = try String(contentsOf: counter, encoding: .utf8).split(separator: "\n")
         XCTAssertEqual(runs.count, 1)
@@ -975,7 +1012,8 @@ final class RemoteLoginShellTests: XCTestCase {
     }
 
     /// Un exécutable qui tient le port du tunnel ouvert, puis répond aux lectures auxiliaires avec le code et la sortie d'erreur de `status`
-    private func answeringWrapper(status: String, stdout: String = "") throws -> String {
+    /// `stderr` remplace la sortie d'erreur d'une ligne que `status` donne après le code
+    private func answeringWrapper(status: String, stdout: String = "", stderr: String? = nil, delay: Int = 0) throws -> String {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("hb-answer-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
@@ -990,22 +1028,24 @@ final class RemoteLoginShellTests: XCTestCase {
           port=$(printf '%s' "$forward" | awk -F: '{print $2}')
           exec /usr/bin/python3 -c 'import socket,sys,time; p=int(sys.argv[1]); s=socket.socket(); s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1); s.bind(("127.0.0.1",p)); s.listen(1); s.settimeout(30); c,_=s.accept(); time.sleep(8)' "$port"
         fi
+        sleep \(delay)
         cat "\(dir.path)/stdout"
         code=$(cut -d' ' -f1 "\(dir.path)/answer")
-        cut -d' ' -f2- "\(dir.path)/answer" >&2
+        if [ -f "\(dir.path)/stderr" ]; then cat "\(dir.path)/stderr" >&2; else cut -d' ' -f2- "\(dir.path)/answer" >&2; fi
         exit "$code"
         """.write(toFile: wrapper, atomically: true, encoding: .utf8)
+        if let stderr { try stderr.write(toFile: dir.appendingPathComponent("stderr").path, atomically: true, encoding: .utf8) }
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: wrapper)
         try status.write(toFile: dir.appendingPathComponent("answer").path, atomically: true, encoding: .utf8)
         try stdout.write(toFile: dir.appendingPathComponent("stdout").path, atomically: true, encoding: .utf8)
         return wrapper
     }
 
-    private func openedBackend(answering status: String, stdout: String = "") async throws -> SystemSSHBackend {
+    private func openedBackend(answering status: String, stdout: String = "", stderr: String? = nil, delay: Int = 0) async throws -> SystemSSHBackend {
         let backend = SystemSSHBackend(
             environment: ["PATH": "/usr/bin:/bin", "HOME": "/tmp/example-home", "USER": "user", "LOGNAME": "user"],
             resolver: HostAgreeingResolver(),
-            client: SSHClientSettings(authMode: .wrapper, wrapperPath: try answeringWrapper(status: status, stdout: stdout)),
+            client: SSHClientSettings(authMode: .wrapper, wrapperPath: try answeringWrapper(status: status, stdout: stdout, stderr: stderr, delay: delay)),
             loginPath: LoginPath(shell: "/bin/sh", timeout: .seconds(5))
         )
         addTeardownBlock { await backend.close() }
@@ -1041,10 +1081,15 @@ final class RemoteLoginShellTests: XCTestCase {
             _ = try await backend.readProfileList(tunnel)
             XCTFail("readProfileList a réussi avec le code 3")
         } catch let failure as RemoteCommandFailure {
-            XCTAssertEqual(failure, RemoteCommandFailure(status: 3, detail: "Traceback: profil illisible"))
+            XCTAssertEqual(failure, RemoteCommandFailure(status: 3))
         }
-        let key = try await backend.readAPIKey(tunnel, profile: "cyber")
-        XCTAssertNil(key)
+        do {
+            _ = try await backend.readAPIKey(tunnel, profile: "cyber")
+            XCTFail("readAPIKey a avalé le code 3")
+        } catch let failure as APIKeyReadFailure {
+            XCTAssertEqual(failure, .commandFailed(status: 3))
+            XCTAssertFalse(failure.message(profile: "cyber", holdsKey: false).contains("Traceback"))
+        }
     }
 
     func testTheBackendReturnsOnlyWhatFollowsTheLoginProfileOutput() async throws {
@@ -1053,6 +1098,489 @@ final class RemoteLoginShellTests: XCTestCase {
         XCTAssertEqual(key, "profile-key-VALUE")
         let list = try await backend.readProfileList(tunnel)
         XCTAssertEqual(list, "profile-key-VALUE\nrest\n")
+    }
+
+    /// Hermes 0.22.2 (relevé sur l'instance de test) : la valeur seule sur stdout, les diagnostics des sources de secrets sur stderr
+    private let fakeHermesWithInjectedSecrets = #"""
+    if [ -s "$HOME/.injected" ]; then
+      echo "  Command helper: applied 1 secret" >&2
+      cat "$HOME/.injected"
+    else
+      echo "[secrets:command] helper failed; resolving no value: code=1 signal=none" >&2
+      echo "  Command helper: helper command failed (see structured fields above); no secrets applied" >&2
+      echo "Config key not set: API_SERVER_KEY" >&2
+      exit 1
+    fi
+    """#
+
+    /// La config du profil n'a pas la clé ; la source de secrets l'injecte au démarrage de la commande, comme pour la gateway
+    func testApiKeyIsReadFromInjectedSecretsWhenConfigHasNone() async throws {
+        let secret = "injected-profile-key-VALUE"
+        let home = try homeWithTool("hermes", body: fakeHermesWithInjectedSecrets)
+        try secret.write(toFile: home + "/.injected", atomically: true, encoding: .utf8)
+        let key = try config().apiKeyArguments(profile: "cyber").last!
+        for outer in outerShells {
+            let read = try await replay(key, outer: outer, home: home)
+            XCTAssertEqual(read.status, 0, outer)
+            // la ligne de diagnostic de la source est sur stderr : elle ne devient pas la clé
+            XCTAssertTrue(read.stderr.contains("applied 1 secret"), outer)
+            XCTAssertEqual(HermesAPIKey.parse(RemoteShell.reply(read.stdout)), secret, outer)
+        }
+        // sans injection, la même commande échoue : stderr nomme la cause et la clé reste absente
+        try FileManager.default.removeItem(atPath: home + "/.injected")
+        let missing = try await replay(key, outer: "/bin/sh", home: home)
+        XCTAssertEqual(missing.status, 1)
+        XCTAssertTrue(missing.stderr.contains("Config key not set"))
+    }
+
+    /// La cause est classée : Hermes ne trouve pas la clé ; les diagnostics des sources de secrets restent dans le journal local
+    func testAKeyNotSetReplyIsNamedWithoutTheSourceDiagnostics() async throws {
+        let stderr = """
+        [secrets:command] helper failed; resolving no value: code=1 signal=none
+          Command helper: helper command failed (see structured fields above); no secrets applied
+        Config key not set: API_SERVER_KEY
+
+        """
+        let backend = try await openedBackend(answering: "1 ", stderr: stderr)
+        do {
+            _ = try await backend.readAPIKey(tunnel, profile: "cyber")
+            XCTFail("readAPIKey a rendu nil au lieu de nommer la cause")
+        } catch let failure as APIKeyReadFailure {
+            XCTAssertEqual(failure, .keyNotSet)
+            let message = failure.message(profile: "cyber", holdsKey: false)
+            XCTAssertEqual(message, "La clé API du profil cyber n'a pas pu être lue sur l'hôte.\nHermes ne la trouve ni dans le .env du profil ni dans une source de secrets.")
+            for raw in ["helper failed", "no secrets applied", "Command helper", "Config key not set"] { XCTAssertFalse(message.contains(raw), message) }
+        }
+        // sans diagnostic de source, la cause reste nommée
+        let bare = try await openedBackend(answering: "1 ", stderr: "Config key not set: API_SERVER_KEY\n")
+        do {
+            _ = try await bare.readAPIKey(tunnel, profile: "cyber")
+            XCTFail("readAPIKey a rendu nil")
+        } catch let failure as APIKeyReadFailure {
+            XCTAssertEqual(failure, .keyNotSet)
+        }
+        // un code 0 sans sortie reste « introuvable » : aucune cause à nommer
+        let empty = try await openedBackend(answering: "0 ", stdout: "HERMED_BOTS_REPLY\n")
+        let none = try await empty.readAPIKey(tunnel, profile: "cyber")
+        XCTAssertNil(none)
+    }
+
+    /// La ligne qui nomme la clé absente peut suivre plus de 8 Kio de sortie : la capture garde le début, le marqueur n'est pas coupé
+    func testTheKeyNotSetMarkerSurvivesMoreThan8KiBOfLaterOutput() async throws {
+        let filler = (1...600).map { "source diagnostic line \($0) with some padding" }.joined(separator: "\n")
+        XCTAssertGreaterThan(filler.utf8.count, 8_192)
+        let backend = try await openedBackend(answering: "1 ", stderr: "Config key not set: API_SERVER_KEY\n" + filler + "\n")
+        do {
+            _ = try await backend.readAPIKey(tunnel, profile: "cyber")
+            XCTFail("readAPIKey a réussi")
+        } catch let failure as APIKeyReadFailure {
+            XCTAssertEqual(failure, .keyNotSet)
+        }
+    }
+
+    func testAKeyReadFailureNamesTheHeldKeyThatHermesRefuses() {
+        let failure = APIKeyReadFailure.keyNotSet
+        let held = failure.message(profile: "cyber", holdsKey: true)
+        XCTAssertTrue(held.contains("clé API est refusée pour le profil cyber"), held)
+        XCTAssertTrue(held.contains("source de secrets"), held)
+        XCTAssertFalse(failure.message(profile: "cyber", holdsKey: false).contains("refusée"))
+    }
+
+    /// Ce que le processus écrit sur stdout et stderr (`print`, `NSLog`) pendant `body`
+    private func capturedStandardStreams(_ body: () async throws -> Void) async rethrows -> String {
+        fflush(stdout)
+        fflush(stderr)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("hb-capture-\(UUID().uuidString.prefix(8))")
+        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
+        let capture = open(file.path, O_CREAT | O_RDWR, 0o600)
+        let savedOut = dup(STDOUT_FILENO)
+        let savedErr = dup(STDERR_FILENO)
+        dup2(capture, STDOUT_FILENO)
+        dup2(capture, STDERR_FILENO)
+        func restore() {
+            fflush(stdout)
+            fflush(stderr)
+            dup2(savedOut, STDOUT_FILENO)
+            dup2(savedErr, STDERR_FILENO)
+            close(savedOut)
+            close(savedErr)
+            close(capture)
+        }
+        do { try await body() } catch { restore(); throw error }
+        restore()
+        return (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+    }
+
+    /// La valeur de la clé ne sort jamais de la lecture que vers l'appelant : ni message, ni description, ni sortie du processus
+    func testApiKeyValueNeverReachesLogs() async throws {
+        let secret = "leaky-key-VALUE-0123456789abcdefghij"
+        let stderr = """
+        API_SERVER_KEY=\(secret)
+        authorization: Bearer \(secret)
+        source failed for token \(secret)
+        Config key not set: API_SERVER_KEY
+
+        """
+        let backend = try await openedBackend(answering: "1 ", stderr: stderr)
+        let ok = try await openedBackend(answering: "0 ", stdout: "HERMED_BOTS_REPLY\n\(secret)\n")
+        var surfaces: [String] = []
+        var read: String?
+        let streams = await capturedStandardStreams {
+            do {
+                _ = try await backend.readAPIKey(tunnel, profile: "cyber")
+                XCTFail("readAPIKey a réussi")
+            } catch {
+                guard let failure = error as? APIKeyReadFailure else { return XCTFail("\(error)") }
+                surfaces = [
+                    failure.message(profile: "cyber", holdsKey: false), failure.message(profile: "cyber", holdsKey: true),
+                    "\(failure)", String(describing: failure), String(reflecting: failure), (failure as NSError).localizedDescription,
+                ]
+                var dumped = ""
+                dump(failure, to: &dumped)
+                surfaces.append(dumped)
+            }
+            // la lecture qui réussit rend la valeur à l'appelant seulement
+            read = try? await ok.readAPIKey(tunnel, profile: "cyber")
+        }
+        XCTAssertEqual(read, secret)
+        XCTAssertEqual(surfaces.count, 7)
+        for surface in surfaces { XCTAssertFalse(surface.contains(secret), surface) }
+        // la cause est classée : le texte nomme le profil, pas une ligne de la sortie d'erreur
+        XCTAssertTrue(surfaces.first?.contains("profil cyber") == true, surfaces.first ?? "")
+        for surface in surfaces { XCTAssertFalse(surface.contains("source failed"), surface) }
+        XCTAssertFalse(streams.contains(secret), "la valeur a été écrite sur stdout ou stderr")
+    }
+
+    // MARK: aucun morceau de la sortie d'erreur dans un texte affiché
+
+    private static let secret = "synthetic-927"
+
+    /// Des sorties d'erreur qui cachent la valeur d'une clé : JSON sur plusieurs lignes, saut de ligne réel entre le nom et la valeur, plus de 8 Kio avant la valeur, nom et valeur en deux champs
+    private var leakingStderrs: [(label: String, stderr: String)] {
+        let secret = Self.secret
+        return [
+            ("JSON multiligne", "{\n  \"error\": \"Config key not set\",\n  \"API_SERVER_KEY\": \"\(secret)\",\n  \"detail\": \"helper failed\"\n}\n"),
+            ("saut de ligne réel entre le nom et la valeur", "{\"API_SERVER_KEY\":\n\"\(secret)\"}\nhelper failed\n"),
+            ("plus de 8 Kio d'espaces avant la valeur", "{\"API_SERVER_KEY\":" + String(repeating: " ", count: 9_000) + "\"\(secret)\"}"),
+            ("plus de 8 Kio de lignes avant la valeur", "{\"API_SERVER_KEY\":\n" + (1...600).map { _ in String(repeating: " ", count: 20) }.joined(separator: "\n") + "\n\"\(secret)\"}\nhelper failed\n"),
+            ("nom et valeur sur une ligne", "API_SERVER_KEY=\(secret)\nhelper failed\n"),
+            ("nom et valeur dans deux champs", #"{"name":"API_SERVER_KEY","value":"\#(secret)"}"# + "\nhelper failed\n"),
+        ]
+    }
+
+    /// Ce qu'aucun texte affiché ne reprend : la valeur, et les mots de la sortie d'erreur
+    private var forbiddenFragments: [String] { [Self.secret, "helper failed", "Config key not set", "API_SERVER_KEY"] }
+
+    /// Chaque lecture ssh d'un hôte qui répond 1, 2 ou 255 avec une de ces sorties d'erreur : la valeur n'est dans aucun texte affiché
+    /// Le chemin est complet : `Spawn.run`, sa capture de la sortie d'erreur, puis les trois lectures, le message, la description, la réflexion, la bannière du verrou et la phase de la liste des bots
+    func testNoShownTextCarriesAnyPartOfStderr() async throws {
+        for (label, stderr) in leakingStderrs {
+            for status in [1, 2, 255] {
+                let backend = try await openedBackend(answering: "\(status) ", stderr: stderr)
+                var errors: [Error] = []
+                do { _ = try await backend.readProfileLocks(tunnel) } catch { errors.append(error) }
+                do { _ = try await backend.readAPIKey(tunnel, profile: "cyber") } catch { errors.append(error) }
+                do { _ = try await backend.readProfileList(tunnel) } catch { errors.append(error) }
+                XCTAssertEqual(errors.count, 3, "\(label), code \(status)")
+                for error in errors {
+                    let texts = await shownTexts(of: error)
+                    XCTAssertGreaterThanOrEqual(texts.count, 7, "\(label), code \(status) : \(error)")
+                    for text in texts {
+                        for fragment in forbiddenFragments { XCTAssertFalse(text.contains(fragment), "\(label), code \(status), « \(fragment) » : \(text)") }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Une lecture qui échoue garde sa classe et son code, sans détail
+    func testEachReadKeepsItsClassWithoutTheDetail() async throws {
+        let stderr = leakingStderrs[1].stderr
+        let other = try await openedBackend(answering: "2 ", stderr: stderr)
+        do { _ = try await other.readProfileLocks(tunnel); XCTFail("sonde") } catch { XCTAssertEqual(error as? ProfileProbeFailure, .failed(status: 2)) }
+        do { _ = try await other.readAPIKey(tunnel, profile: "cyber"); XCTFail("clé") } catch { XCTAssertEqual(error as? APIKeyReadFailure, .commandFailed(status: 2)) }
+        do { _ = try await other.readProfileList(tunnel); XCTFail("liste") } catch { XCTAssertEqual(error as? RemoteCommandFailure, RemoteCommandFailure(status: 2)) }
+        // un code 255 reste une panne de ssh : « hôte injoignable » et le code, rien de plus
+        let refused = try await openedBackend(answering: "255 ", stderr: stderr)
+        let target = tunnel
+        for read in [
+            { _ = try await refused.readProfileLocks(target) },
+            { _ = try await refused.readAPIKey(target, profile: "cyber") },
+            { _ = try await refused.readProfileList(target) },
+        ] as [() async throws -> Void] {
+            do { try await read(); XCTFail("255") } catch {
+                XCTAssertEqual(error as? SSHFailure, .unreachable("Échec SSH (code 255)"))
+                XCTAssertEqual((error as? SSHFailure)?.message, "Hôte injoignable. Vérifie le réseau, puis réessaie.\nÉchec SSH (code 255)")
+            }
+        }
+    }
+
+    /// Le journal local reçoit, pour chaque lecture, le nom de la commande, le code et la classe : aucun morceau de la sortie d'erreur, masqué ou non
+    func testTheJournalGetsNoPartOfStderrFromTheThreeReads() async throws {
+        for (label, stderr) in leakingStderrs {
+            for status in [1, 2, 255] {
+                let backend = try await openedBackend(answering: "\(status) ", stderr: stderr)
+                let target = tunnel
+                let lines = await journalLines {
+                    _ = try? await backend.readProfileLocks(target)
+                    _ = try? await backend.readAPIKey(target, profile: "cyber")
+                    _ = try? await backend.readProfileList(target)
+                }
+                let keyClass = stderr.contains(HermesAPIKey.keyNotSetMarker) ? "keyNotSet" : "commandFailed"
+                let expected = status == 255
+                    ? Array(repeating: "ssh code 255 : hostUnreachable", count: 3)
+                    : [
+                        "sonde Desktop code \(status) : commandFailed",
+                        "hermes config get code \(status) : \(keyClass)",
+                        "hermes profile list code \(status) : commandFailed",
+                    ]
+                XCTAssertEqual(lines, expected, "\(label), code \(status)")
+                for line in lines {
+                    for fragment in forbiddenFragments { XCTAssertFalse(line.contains(fragment), "\(label), code \(status), « \(fragment) » : \(line)") }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    func testAKeyReadFailureWithAReasonIsRememberedByTheKeyReadGuard() async throws {
+        var store = InMemorySecretStore(apiKey: nil)
+        let fetches = APIKeyFetches()
+        var reads = 0
+        func read(_ name: String) async throws -> String? {
+            reads += 1
+            throw APIKeyReadFailure.keyNotSet
+        }
+        for attempt in 1...2 {
+            do {
+                _ = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+                XCTFail("la cause a été avalée à l'essai \(attempt)")
+            } catch let failure as APIKeyReadFailure {
+                XCTAssertEqual(failure, .keyNotSet)
+            }
+        }
+        XCTAssertEqual(reads, 1)
+        // un autre profil lit pour lui-même ; un nouvel essai explicite relit
+        _ = try? await fetches.fetch(profile: "sport", into: &store, read: read)
+        XCTAssertEqual(reads, 2)
+        fetches.reset()
+        _ = try? await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertEqual(reads, 3)
+    }
+
+    // MARK: sonde Desktop
+
+    /// Réponses de la sonde pour reconnaître l'interpréteur qui l'a lancée
+    private let viaHermes = #"{"held": ["via-hermes"]}"#
+    private let viaSystem = #"{"held": ["via-system"]}"#
+
+    private func writeScript(_ path: String, _ body: String) throws {
+        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try body.write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
+    }
+
+    private enum HermesLayout {
+        /// `hermes` est un script dont la ligne #! nomme `venv/bin/python` (nil) ou une autre ligne
+        case shebang(String?)
+        /// Comme Hermes 0.22.2 : `.local/bin/hermes` mène par deux liens relatifs à `racine/libexec/hermes`, l'interpréteur est `racine/.venv/bin/python`
+        case launcher
+    }
+
+    /// Un HOME où `python3` du PATH de connexion répond `viaSystem`, et où l'interpréteur de Hermes répond `viaHermes` en notant ses arguments
+    private func homeWithProbeInterpreters(layout: HermesLayout = .shebang(nil), venvBody: String? = nil, banner: String? = nil) throws -> String {
+        let home = try homeWithTool("python3", body: "echo '\(viaSystem)'", banner: banner)
+        let body = "#!/bin/sh\n" + (venvBody ?? "printf '%s\\n' \"$@\" > \"$HOME/venv-args\"\necho '\(viaHermes)'") + "\n"
+        switch layout {
+        case .shebang(let line):
+            let venv = home + "/venv/bin/python"
+            try writeScript(venv, body)
+            try writeScript(home + "/.local/bin/hermes", "\(line ?? "#!" + venv)\nprint('hermes')\n")
+        case .launcher:
+            let root = home + "/hermes-root"
+            try writeScript(root + "/.venv/bin/python", body)
+            try writeScript(root + "/libexec/hermes", "#!/usr/bin/env bash\nexit 0\n")
+            try FileManager.default.createDirectory(atPath: root + "/bin", withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(atPath: root + "/bin/hermes", withDestinationPath: "../libexec/hermes")
+            try FileManager.default.createSymbolicLink(atPath: home + "/.local/bin/hermes", withDestinationPath: "../../hermes-root/bin/hermes")
+        }
+        return home
+    }
+
+    func testProbeRunsWithHermesInterpreter() async throws {
+        for layout in [HermesLayout.shebang(nil), .launcher] {
+            let home = try homeWithProbeInterpreters(layout: layout)
+            for outer in outerShells {
+                let output = try await replay(ProfileLock.command, outer: outer, home: home)
+                XCTAssertEqual(output.status, 0, "\(layout) \(outer) \(output.stderr)")
+                XCTAssertEqual(RemoteShell.reply(output.stdout), viaHermes + "\n", "\(layout) \(outer)")
+            }
+            // l'interpréteur reçoit la sonde elle-même, en `-c`
+            let args = try String(contentsOfFile: home + "/venv-args", encoding: .utf8)
+            XCTAssertEqual(args, "-c\n" + ProfileLock.probe + "\n", "\(layout)")
+        }
+        // et la commande envoyée à ssh n'est que le lanceur : le PATH de connexion s'applique
+        XCTAssertTrue(ProfileLock.command.hasPrefix("sh -lc "), ProfileLock.command)
+    }
+
+    func testProbeFallsBackToSystemPython() async throws {
+        let cases: [(String, String?, String?)] = [
+            ("ligne #! en env", "#!/usr/bin/env python3", nil),
+            ("interpréteur absent", "#!/nonexistent/venv/bin/python", nil),
+            ("interpréteur sans psutil", nil, "echo 'module psutil absent' >&2\nexit 3"),
+        ]
+        for (label, line, venvBody) in cases {
+            let home = try homeWithProbeInterpreters(layout: .shebang(line), venvBody: venvBody)
+            for outer in outerShells {
+                let output = try await replay(ProfileLock.command, outer: outer, home: home)
+                XCTAssertEqual(output.status, 0, "\(label) \(outer) \(output.stderr)")
+                XCTAssertEqual(RemoteShell.reply(output.stdout), viaSystem + "\n", "\(label) \(outer)")
+            }
+        }
+        // un lanceur dont l'interpréteur n'a pas psutil : repli sur python3
+        let launcherWithoutModule = try homeWithProbeInterpreters(layout: .launcher, venvBody: "echo 'module psutil absent' >&2\nexit 3")
+        let fallback = try await replay(ProfileLock.command, outer: "/bin/sh", home: launcherWithoutModule)
+        XCTAssertEqual(RemoteShell.reply(fallback.stdout), viaSystem + "\n")
+        // aucun hermes dans le PATH
+        let bare = try homeWithTool("python3", body: "echo '\(viaSystem)'")
+        let output = try await replay(ProfileLock.command, outer: "/bin/sh", home: bare)
+        XCTAssertEqual(RemoteShell.reply(output.stdout), viaSystem + "\n")
+        // une erreur de l'interpréteur de Hermes autre que le module manquant n'est pas masquée par le repli
+        let broken = try homeWithProbeInterpreters(venvBody: "echo 'ValueError: profil illisible' >&2\nexit 1")
+        let failed = try await replay(ProfileLock.command, outer: "/bin/sh", home: broken)
+        XCTAssertEqual(failed.status, 1)
+        XCTAssertTrue(failed.stderr.contains("profil illisible"), failed.stderr)
+    }
+
+    func testTheProbeSourceExitsWithTheDedicatedStatusWhenPsutilIsMissing() async throws {
+        // `sys.modules["psutil"] = None` fait échouer l'import comme un module absent
+        let blocked = try await Spawn.run(
+            "/usr/bin/python3",
+            ["-c", "import sys; sys.modules['psutil'] = None; exec(sys.argv[1])", ProfileLock.probe],
+            environment: ["PATH": "/usr/bin:/bin", "LC_ALL": "C"], timeout: .seconds(10)
+        )
+        XCTAssertEqual(blocked.status, ProfileLock.moduleMissingStatus)
+        XCTAssertTrue(blocked.stderr.contains("psutil"), blocked.stderr)
+        XCTAssertEqual(blocked.stdout, "")
+    }
+
+    func testTheProbeAnswersThroughAChattyLoginProfile() async throws {
+        let home = try homeWithProbeInterpreters(banner: "Welcome to the host")
+        let output = try await replay(ProfileLock.command, outer: "/bin/sh", home: home)
+        XCTAssertEqual(output.status, 0, output.stderr)
+        XCTAssertEqual(RemoteShell.reply(output.stdout), viaHermes + "\n")
+        XCTAssertTrue(output.stdout.contains("Welcome to the host"))
+    }
+
+    func testTheBackendNamesEachProbeFailure() async throws {
+        let cases: [(status: String, stderr: String?, expected: ProfileProbeFailure)] = [
+            ("3 ", "module psutil absent\n", .moduleMissing("psutil")),
+            ("127 ", "sh: python3: not found\n", .toolNotFound),
+            ("1 ", "Traceback (most recent call last):\n  File \"<string>\", line 4\nValueError: boom\n", .failed(status: 1)),
+        ]
+        for (status, stderr, expected) in cases {
+            let backend = try await openedBackend(answering: status, stderr: stderr)
+            do {
+                _ = try await backend.readProfileLocks(tunnel)
+                XCTFail("readProfileLocks a réussi avec \(status)")
+            } catch let failure as ProfileProbeFailure {
+                XCTAssertEqual(failure, expected)
+            }
+        }
+        // ssh lui-même refuse : la cause de ssh, pas celle de la sonde
+        let refused = try await openedBackend(answering: "255 ", stderr: "user@example.invalid: Permission denied (publickey).\n")
+        do {
+            _ = try await refused.readProfileLocks(tunnel)
+            XCTFail("readProfileLocks a réussi avec 255")
+        } catch let failure as SSHFailure {
+            XCTAssertEqual(failure, .wrongKey(""))
+        }
+        // la réponse n'est que ce qui suit le marqueur de connexion
+        let ok = try await openedBackend(answering: "0 ", stdout: "Welcome\nHERMED_BOTS_REPLY\n{\"held\": []}\n")
+        let data = try await ok.readProfileLocks(tunnel)
+        XCTAssertEqual(String(decoding: data, as: UTF8.self), "{\"held\": []}\n")
+    }
+
+    func testAProbeThatTimesOutIsNamed() async throws {
+        let slow = try await openedBackend(answering: "0 ", stdout: "HERMED_BOTS_REPLY\n{\"held\": []}\n", delay: 3)
+        do {
+            _ = try await slow.readProfileLocks(tunnel, timeout: .milliseconds(500))
+            XCTFail("la sonde lente a répondu")
+        } catch let failure as ProfileProbeFailure {
+            XCTAssertEqual(failure, .timedOut)
+        }
+    }
+
+    /// La bannière dit pourquoi la détection de Desktop est indisponible, au lieu de « indisponible » seul
+    @MainActor
+    func testProbeFailureShowsItsReason() async {
+        var failure: Error = ProfileProbeFailure.moduleMissing("psutil")
+        var answering = false
+        let lock = ProfileLock(connection: { "host-a" }, read: {
+            if answering { return Data(#"{"held": ["hv-bot-b"]}"#.utf8) }
+            throw failure
+        })
+        // avant toute lecture : l'état est inconnu, sans cause à dire
+        XCTAssertEqual(lock.state("hv-bot-a"), .unknown)
+        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.unknown.reason)
+
+        for (error, expected) in [
+            (ProfileProbeFailure.moduleMissing("psutil") as Error, "psutil"),
+            (ProfileProbeFailure.toolNotFound, "introuvable"),
+            (ProfileProbeFailure.failed(status: 1), "la sonde a échoué (code 1)"),
+            (ProfileProbeFailure.timedOut, "n'a pas répondu"),
+            (SSHFailure.unreachable("délai dépassé"), "délai dépassé"),
+        ] {
+            failure = error
+            let read = await lock.refresh()
+            XCTAssertFalse(read)
+            XCTAssertEqual(lock.state("hv-bot-a"), .unknown)
+            let reason = lock.reason("hv-bot-a") ?? ""
+            XCTAssertTrue(reason.hasPrefix(ProfileLock.State.unknown.reason ?? "?"), reason)
+            XCTAssertTrue(reason.contains(expected), "\(expected) absent de : \(reason)")
+        }
+        // une panne sans cause nommée garde le message d'origine
+        failure = CocoaError(.fileReadUnknown)
+        _ = await lock.refresh()
+        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.unknown.reason)
+        // un tunnel fermé a sa propre bannière : il n'est pas une cause de la sonde
+        failure = SSHFailure.tunnelClosed
+        _ = await lock.refresh()
+        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.unknown.reason)
+
+        // la sonde répond : la cause disparaît avec l'état inconnu
+        answering = true
+        let read = await lock.refresh()
+        XCTAssertTrue(read)
+        XCTAssertNil(lock.reason("hv-bot-a"))
+        XCTAssertEqual(lock.reason("hv-bot-b"), ProfileLock.State.held.reason)
+        // une panne suivante nomme sa propre cause, pas celle d'avant
+        answering = false
+        failure = ProfileProbeFailure.timedOut
+        _ = await lock.refresh()
+        let latest = lock.reason("hv-bot-a") ?? ""
+        XCTAssertTrue(latest.contains("n'a pas répondu"), latest)
+        XCTAssertFalse(latest.contains("CocoaError"), latest)
+    }
+
+    /// La cause d'un hôte ne s'affiche pas pour un autre
+    @MainActor
+    func testTheProbeFailureReasonBelongsToItsHost() async {
+        var host = "host-a"
+        var broken = true
+        let lock = ProfileLock(connection: { host }, read: {
+            if broken { throw ProfileProbeFailure.moduleMissing("psutil") }
+            return Data(#"{"held": []}"#.utf8)
+        })
+        _ = await lock.refresh()
+        XCTAssertTrue(lock.reason("hv-bot-a")?.contains("psutil") == true)
+        host = "host-b"
+        broken = false
+        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.unknown.reason)
+        _ = await lock.refresh()
+        XCTAssertNil(lock.reason("hv-bot-a"))
+        host = "host-a"
+        XCTAssertTrue(lock.reason("hv-bot-a")?.contains("psutil") == true, "l'hôte A garde sa propre cause")
     }
 
     @MainActor
@@ -1165,9 +1693,9 @@ final class RemoteLoginShellTests: XCTestCase {
         let bots = BotsModel(readProfiles: { throw SSHFailure.remoteToolNotFound }, client: { nil }, connection: { "lab.invalid" })
         await bots.refresh()
         XCTAssertEqual(bots.phase, .toolNotFound(SSHFailure.remoteToolNotFound.message))
-        let other = BotsModel(readProfiles: { throw RemoteCommandFailure(status: 1, detail: "x") }, client: { nil }, connection: { "lab.invalid" })
+        let other = BotsModel(readProfiles: { throw RemoteCommandFailure(status: 1) }, client: { nil }, connection: { "lab.invalid" })
         await other.refresh()
-        XCTAssertEqual(other.phase, .failed("La commande « hermes profile list » a échoué (code 1) : x"))
+        XCTAssertEqual(other.phase, .failed("La commande « hermes profile list » a échoué (code 1)."))
     }
 }
 
@@ -1256,4 +1784,47 @@ private actor LateBackend: SSHBackend {
     func close() {
         live = 0
     }
+}
+
+/// Le texte de la bannière « détection de Desktop indisponible » quand la sonde échoue avec `error`
+@MainActor
+private func bannerReason(after error: Error) async -> String? {
+    let lock = ProfileLock(connection: { "lab.invalid" }, read: { throw error })
+    await lock.refresh()
+    return lock.reason("hv-bot-a")
+}
+
+/// Chaque texte que l'interface ou une description d'erreur peut montrer pour `error`
+@MainActor
+private func shownTexts(of error: Error) async -> [String] {
+    var texts = ["\(error)", String(describing: error), String(reflecting: error), (error as NSError).localizedDescription]
+    var dumped = ""
+    dump(error, to: &dumped)
+    texts.append(dumped)
+    switch error {
+    case let failure as SSHFailure: texts.append(failure.message)
+    case let failure as APIKeyReadFailure: texts += [failure.message(profile: "cyber", holdsKey: false), failure.message(profile: "cyber", holdsKey: true)]
+    case let failure as ProfileProbeFailure: texts.append(failure.message)
+    default: break
+    }
+    if let banner = await bannerReason(after: error) { texts.append(banner) }
+    let bots = BotsModel(readProfiles: { throw error }, client: { nil }, connection: { "lab.invalid" })
+    await bots.refresh()
+    switch bots.phase {
+    case .failed(let text), .toolNotFound(let text): texts.append(text)
+    default: break
+    }
+    return texts
+}
+
+/// Les lignes que le journal local reçoit pendant `body` ; le journal système n'est pas touché
+private func journalLines(_ body: () async throws -> Void) async rethrows -> [String] {
+    let lines = OSAllocatedUnfairLock(initialState: [String]())
+    let previous = SSHFailure.journalSink.withLock { sink in
+        defer { sink = { line in lines.withLock { $0.append(line) } } }
+        return sink
+    }
+    defer { SSHFailure.journalSink.withLock { $0 = previous } }
+    try await body()
+    return lines.withLock { $0 }
 }

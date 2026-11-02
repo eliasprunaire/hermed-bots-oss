@@ -5,11 +5,14 @@ struct DegradedBanner: View {
     let map: CapabilityMap?
 
     var body: some View {
-        if let map, map.isDegraded {
+        if let map, map.showsBanner {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Mode dégradé").fontWeight(.semibold).accessibilityID(.bannerDegraded)
-                if !map.isVersionKnown {
-                    Text("Version de Hermes inconnue. Les fonctions disponibles restent utilisables.")
+                if map.isDegraded {
+                    Text("Mode dégradé").fontWeight(.semibold).accessibilityID(.bannerDegraded)
+                }
+                if let notice = map.versionNotice {
+                    Text(verbatim: notice + (map.isDegraded ? ". Les fonctions disponibles restent utilisables." : ". Toutes les fonctions répondent."))
+                        .accessibilityID(.bannerVersionNotice)
                 }
                 ForEach(map.entries, id: \.contract) { entry in
                     if case .disabled(let message) = entry.state {
