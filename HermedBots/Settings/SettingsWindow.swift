@@ -7,13 +7,16 @@ struct SettingsWindow: View {
     var body: some View {
         TabView {
             ForEach(SettingsPane.allCases, id: \.self) { pane in
-                Tab(pane.title, systemImage: pane.systemImage) {
+                Tab {
                     switch pane {
                     case .connection: ConnectionView(model: model)
                     case .updates: UpdatesSettingsView(model: model)
                     }
+                } label: {
+                    Label(pane.title, systemImage: pane.systemImage)
+                        .accessibilityLabel(pane.title)
+                        .accessibilityIdentifier(pane.accessibilityID)
                 }
-                .accessibilityIdentifier(pane.accessibilityID)
             }
         }
         .frame(minWidth: SettingsLayout.defaultWidth)
