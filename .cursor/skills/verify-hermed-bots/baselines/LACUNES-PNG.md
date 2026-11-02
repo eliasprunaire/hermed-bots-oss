@@ -1,0 +1,63 @@
+# PNG de référence à régénérer
+
+Les captures `baselines/*.png` se produisent sur le Mac, dans la VM du circuit de vérification (`hv-regen-baselines.sh`). Elles ne peuvent pas être générées sur une VM Linux.
+
+Noms observés dans `baselines/` (binaires absents de cette restauration) :
+
+- LACUNE binaire : `hd07-refuse-launch.png`
+- LACUNE binaire : `hd08-bots.png`
+- LACUNE binaire : `hd08-drop-sessions.png`
+- LACUNE binaire : `hd08-empty.png`
+- LACUNE binaire : `hd08-fields.png`
+- LACUNE binaire : `hd08-list-change.png`
+- LACUNE binaire : `hd08-long-names.png`
+- LACUNE binaire : `hd08-no-old.png`
+- LACUNE binaire : `hd08-threads.png`
+- LACUNE binaire : `hd09-blank.png`
+- LACUNE binaire : `hd09-cancelled.png`
+- LACUNE binaire : `hd09-double.png`
+- LACUNE binaire : `hd09-failed-error.png`
+- LACUNE binaire : `hd09-failed.png`
+- LACUNE binaire : `hd09-interrupted.png`
+- LACUNE binaire : `hd09-new.png`
+- LACUNE binaire : `hd09-reopen-past.png`
+- LACUNE binaire : `hd09-reopen.png`
+- LACUNE binaire : `hd09-unknown.png`
+- LACUNE binaire : `hd10-busy.png`
+- LACUNE binaire : `hd10-double.png`
+- LACUNE binaire : `hd10-drop.png`
+- LACUNE binaire : `hd10-pick.png`
+- LACUNE binaire : `hd10-slow.png`
+- LACUNE binaire : `hd10-thread-model.png`
+- LACUNE binaire : `hd10-unknown.png`
+- LACUNE binaire : `hd11-current-tool.png`
+- LACUNE binaire : `hd11-cut.png`
+- LACUNE binaire : `hd11-double.png`
+- LACUNE binaire : `hd11-drop.png`
+- LACUNE binaire : `hd11-huge-params.png`
+- LACUNE binaire : `hd11-no.png`
+- LACUNE binaire : `hd11-sheet.png`
+- LACUNE binaire : `hd11-wait.png`
+- LACUNE binaire : `hd11-yes.png`
+- LACUNE binaire : `hd12-401.png`
+- LACUNE binaire : `hd12-after-pause.png`
+- LACUNE binaire : `hd12-degraded.png`
+- LACUNE binaire : `hd12-down.png`
+- LACUNE binaire : `hd12-drop-approve.png`
+- LACUNE binaire : `hd12-loop-pause.png`
+- LACUNE binaire : `hd12-previous.png`
+- LACUNE binaire : `hd12-slow.png`
+- LACUNE binaire : `hd12-unknown-fake.png`
+- LACUNE binaire : `hd12-video-000.png`
+- LACUNE binaire : `hd12-video-001.png`
+- LACUNE binaire : `hd12-video-002.png`
+- LACUNE binaire : `hd12-video-003.png`
+- LACUNE binaire : `hd12-video-004.png`
+- LACUNE binaire : `hd12-video-005.png`
+- LACUNE binaire : `hd17-key-settings.png`
+- LACUNE binaire : `language-en.png`
+- LACUNE binaire : `language-fr.png`
+- LACUNE binaire : `launch.png`
+- LACUNE binaire : `unreachable.png`
+- LACUNE binaire : `issue56-hv-bot-a.png`
+- LACUNE binaire : `issue56-hv-bot-b.png`
