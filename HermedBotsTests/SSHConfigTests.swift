@@ -1907,13 +1907,53 @@ final class AppModelConnectTests: XCTestCase {
         model.conversation.select(bot: "hv-bot-b")
         prefetch.cancel()
         await model.refreshVersion()
+        _ = await prefetch.result
         XCTAssertEqual(model.versionProfile, "hv-bot-b")
+        XCTAssertEqual(model.version, .known("0.22.1"), "la version de B reste en chargement après les deux tâches")
         XCTAssertNil(model.apiError, "la clé de B est restée introuvable jusqu'à Réessayer")
         XCTAssertFalse(model.isCheckingAPI)
         let probes = KeyStubProtocol.probes.filter { $0.path.contains("/p/hv-bot-b/") && !$0.path.hasSuffix("/health") }
         XCTAssertTrue(probes.contains { $0.authorization == "Bearer key-b" }, "aucune requête authentifiée du profil B")
         XCTAssertTrue(probes.allSatisfy { $0.authorization == "Bearer key-b" }, "une requête du profil B est partie sans sa clé")
         XCTAssertFalse(probes.contains { $0.status == 401 }, "une requête du profil B a reçu 401")
+    }
+
+    /// Le rafraîchissement annulé de A ne reprend pas après la lecture anticipée : B finit en version connue
+    func testACancelledRefreshOfAStopsBeforeTouchingTheStateOfB() async {
+        final class Hold: @unchecked Sendable { var beganB = false }
+        let hold = Hold()
+        let reads = KeyReads { _, profile in profile == "hv-bot-b" ? "key-b" : "key-a" }
+        let reader: @MainActor (String) async throws -> String? = { profile in
+            if profile == "hv-bot-b" {
+                hold.beganB = true
+                try await Task.sleep(for: .milliseconds(400))
+            }
+            return try await reads.read(profile)
+        }
+        let model = keyModel(
+            keys: ["hv-bot-a": "key-a"],
+            profiles: ["hv-bot-a", "hv-bot-b"],
+            reads: reads,
+            reader: reader
+        ) { request in
+            let path = request.url?.path ?? ""
+            let auth = request.value(forHTTPHeaderField: "Authorization")
+            if path.hasSuffix("/health") { return 200 }
+            if path.contains("/p/hv-bot-a/") { return auth == "Bearer key-a" ? 200 : 401 }
+            return auth == "Bearer key-b" ? 200 : 401
+        }
+        await model.bots.refresh()
+        let refreshA = Task { await model.refreshVersion() }
+        await eventually { hold.beganB }
+        XCTAssertEqual(model.version, .loading)
+        model.conversation.select(bot: "hv-bot-b")
+        refreshA.cancel()
+        await model.refreshVersion()
+        _ = await refreshA.result
+        XCTAssertEqual(model.versionProfile, "hv-bot-b")
+        XCTAssertEqual(model.version, .known("0.22.1"))
+        XCTAssertFalse(model.isCheckingAPI)
+        XCTAssertNil(model.apiError)
     }
 
     /// Clé du profil chargé puis refusée par Hermes : le 401 reste affiché

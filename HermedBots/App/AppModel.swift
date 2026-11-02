@@ -461,6 +461,7 @@ final class AppModel {
             await handleAPIError(error, profile: profile)
         }
         await acquireListedAPIKeys(except: profile)
+        guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
         isCheckingAPI = false
         await checkCapabilities()
     }
@@ -559,6 +560,8 @@ final class AppModel {
                 await recheckAPI()
                 return
             }
+        } catch is CancellationError {
+            return
         } catch let failure as APIKeyReadFailure {
             showUnreadableKey(failure, profile: profile)
             return
@@ -601,6 +604,7 @@ final class AppModel {
                 waiters.forEach { $0.resume(returning: key) }
                 return key
             } catch {
+                if error is CancellationError { apiKeyFetches.settle(profile) }
                 keyFetching.remove(profile)
                 let waiters = keyWaiters.removeValue(forKey: profile) ?? []
                 waiters.forEach { $0.resume(throwing: error) }
@@ -636,6 +640,11 @@ final class AppModel {
             environment.secrets = secrets
             // un dépli parti avant la clé attendait : on relit les fils de ce profil s'il est déplié
             bots.reload(profile)
+            return key
+        }
+        if Task.isCancelled {
+            apiKeyFetches.settle(profile)
+            throw CancellationError()
         }
         return key
     }
