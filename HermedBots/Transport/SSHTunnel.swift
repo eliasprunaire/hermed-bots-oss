@@ -57,9 +57,12 @@ enum SSHFailure: Error, Equatable, Sendable {
     static let detailLines = 3
     static let detailLimit = 400
 
-    /// Les dernières lignes de la sortie d'erreur, sans caractère de contrôle et bornées : c'est ce que l'utilisateur voit de la cause
-    static func detail(of stderr: String) -> String {
-        let lines = stderr.split(whereSeparator: \.isNewline)
+    /// Les dernières lignes de la sortie d'erreur, masquées, sans caractère de contrôle et bornées : c'est ce que l'utilisateur voit de la cause
+    /// Le masque porte sur le texte entier, avant tout découpage : c'est le point unique par où une sortie d'erreur atteint l'interface
+    /// `excluding` retire après le masque les lignes qui contiennent ce texte
+    static func detail(of stderr: String, excluding marker: String? = nil) -> String {
+        let lines = RemoteShell.mask(stderr).split(whereSeparator: \.isNewline)
+            .filter { line in marker.map { !line.contains($0) } ?? true }
             .map { String($0.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }).trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         let text = lines.suffix(detailLines).joined(separator: "\n")
@@ -140,10 +143,10 @@ enum RemoteShell {
     /// Hermes ne devrait jamais écrire une valeur ; le masque couvre `NOM=valeur`, `NOM: "valeur"` (JSON, guillemets simples, guillemets échappés), `Bearer valeur` et tout mot de 24 caractères ou plus
     // shortcut: une paire `{"name": "NOM", "value": "x"}` où le nom et la valeur sont deux champs reste visible, à couvrir si Hermes écrit ce format
     static func diagnostic(of stderr: String) -> String {
-        SSHFailure.detail(of: mask(stderr))
+        SSHFailure.detail(of: stderr)
     }
 
-    private static func mask(_ text: String) -> String {
+    static func mask(_ text: String) -> String {
         let rules = [
             (#"(?i)\bbearer\s+\S+"#, "Bearer ****"),
             // le texte entier est masqué avant tout découpage : la valeur peut suivre son nom sur la ligne suivante
@@ -636,7 +639,7 @@ enum HermesAPIKey {
 
     /// Les dernières lignes de la sortie d'erreur d'Hermes pour la bannière, sans la ligne qui nomme la clé absente
     static func diagnostic(of stderr: String) -> String {
-        RemoteShell.diagnostic(of: stderr.split(whereSeparator: \.isNewline).filter { !$0.contains(keyNotSetMarker) }.joined(separator: "\n"))
+        SSHFailure.detail(of: stderr, excluding: keyNotSetMarker)
     }
 
     /// Une clé détenue que Hermes refuse n'est pas une clé introuvable
@@ -949,7 +952,7 @@ actor SystemSSHBackend: SSHBackend {
         if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr, status: output.status) }
         if output.status == 127 { throw SSHFailure.remoteToolNotFound }
         guard output.status == 0 else {
-            throw RemoteCommandFailure(status: output.status, detail: output.stderr.split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? "")
+            throw RemoteCommandFailure(status: output.status, detail: RemoteShell.mask(output.stderr).split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? "")
         }
         return RemoteShell.reply(output.stdout)
     }

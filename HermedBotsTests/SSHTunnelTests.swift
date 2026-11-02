@@ -242,7 +242,8 @@ final class SSHTunnelConfigTests: XCTestCase {
         // le détail est borné : les trois dernières lignes, 400 caractères, sans caractère de contrôle
         let noisy = (1...10).map { "ligne \($0)" }.joined(separator: "\n") + "\n"
         XCTAssertEqual(SSHFailure.classify(stderr: noisy, status: 255), .unreachable("ligne 8\nligne 9\nligne 10"))
-        let long = String(repeating: "x", count: 5_000)
+        // des mots courts : un mot de 24 caractères ou plus est masqué
+        let long = String(repeating: "mot ", count: 1_250)
         guard case .unreachable(let detail) = SSHFailure.classify(stderr: long, status: 255) else { return XCTFail("attendu unreachable") }
         XCTAssertEqual(detail.count, 400)
         XCTAssertTrue(detail.hasPrefix("…"))
@@ -1317,6 +1318,73 @@ final class RemoteLoginShellTests: XCTestCase {
         }
     }
 
+    /// Le nom de la clé et sa valeur, sur deux lignes d'un JSON valide : la ligne « Config key not set » est retirée après le masque, pas avant
+    func testKeyNotSetLineIsDroppedAfterTheMask() async throws {
+        let cases = [
+            "{\"error\":\"Config key not set\",\"API_SERVER_KEY\":\n\"synthetic-927\"}",
+            "{\n  \"error\": \"Config key not set\", \"API_SERVER_KEY\":\n  \"synthetic-927\"\n}",
+            "Config key not set: API_SERVER_KEY=\nsynthetic-927",
+        ]
+        for stderr in cases {
+            let text = stderr + "\nhelper failed\n"
+            let detail = HermesAPIKey.diagnostic(of: text)
+            XCTAssertFalse(detail.contains("synthetic-927"), "\(stderr) -> \(detail)")
+            XCTAssertFalse(detail.contains("Config key not set"), detail)
+            XCTAssertTrue(detail.contains("helper failed"), detail)
+            let backend = try await openedBackend(answering: "1 ", stderr: text)
+            do {
+                _ = try await backend.readAPIKey(tunnel, profile: "cyber")
+                XCTFail("readAPIKey a réussi")
+            } catch let failure as APIKeyReadFailure {
+                guard case .keyNotSet = failure else { return XCTFail("attendu keyNotSet : \(failure)") }
+                let surfaces = [
+                    failure.message(profile: "cyber", holdsKey: false), failure.message(profile: "cyber", holdsKey: true),
+                    "\(failure)", String(reflecting: failure), (failure as NSError).localizedDescription,
+                ]
+                for surface in surfaces { XCTAssertFalse(surface.contains("synthetic-927"), "\(stderr) -> \(surface)") }
+            }
+        }
+    }
+
+    /// Un code 255 garde sa classification ; le détail conservé de la sortie d'erreur est masqué, pour chaque commande ssh et pour la bannière
+    func testExit255KeepsItsClassificationAndMasksTheKeptDetail() async throws {
+        let secret = "synthetic-927"
+        XCTAssertEqual(SSHFailure.classify(stderr: "API_SERVER_KEY=\(secret)\nuser@example.invalid: Permission denied (publickey).", status: 255), .wrongKey(""))
+        XCTAssertEqual(SSHFailure.classify(stderr: "API_SERVER_KEY=\(secret)\nConnection reset by peer", status: 255), .tunnelClosed)
+        XCTAssertEqual(SSHFailure.classify(stderr: "API_SERVER_KEY=\(secret)\ngate-wrapper_failure=17\n", status: 255), .wrapperFailure(name: "gate-wrapper", code: "17"))
+        let stderr = "ssh: connect to host example.invalid port 2200: Connection refused\nAPI_SERVER_KEY=\(secret)\n{\"API_SERVER_KEY\":\n\"\(secret)\"}\n"
+        guard case .unreachable(let detail) = SSHFailure.classify(stderr: stderr, status: 255) else { return XCTFail("attendu unreachable") }
+        XCTAssertFalse(detail.contains(secret), detail)
+        XCTAssertTrue(detail.contains("API_SERVER_KEY"), detail)
+
+        let backend = try await openedBackend(answering: "255 ", stderr: stderr)
+        var errors: [Error] = []
+        do { _ = try await backend.readProfileLocks(tunnel) } catch { errors.append(error) }
+        do { _ = try await backend.readAPIKey(tunnel, profile: "cyber") } catch { errors.append(error) }
+        do { _ = try await backend.readProfileList(tunnel) } catch { errors.append(error) }
+        XCTAssertEqual(errors.count, 3)
+        for error in errors {
+            guard case .unreachable = error as? SSHFailure else { return XCTFail("attendu unreachable : \(error)") }
+            let surfaces = [(error as? SSHFailure)?.message ?? "", "\(error)", String(reflecting: error), (error as NSError).localizedDescription]
+            for surface in surfaces { XCTAssertFalse(surface.contains(secret), surface) }
+            XCTAssertTrue(surfaces[0].contains("Connection refused"), surfaces[0])
+            let banner = await bannerReason(after: error)
+            XCTAssertFalse(banner?.contains(secret) ?? true, banner ?? "pas de bannière")
+        }
+    }
+
+    /// Un autre code de `hermes profile list` : la dernière ligne de la sortie d'erreur est masquée
+    func testProfileListFailureDetailIsMasked() async throws {
+        let backend = try await openedBackend(answering: "3 ", stderr: "Traceback: profil illisible\nAPI_SERVER_KEY=synthetic-927\n")
+        do {
+            _ = try await backend.readProfileList(tunnel)
+            XCTFail("readProfileList a réussi avec le code 3")
+        } catch let failure as RemoteCommandFailure {
+            XCTAssertFalse(failure.detail.contains("synthetic-927"), failure.detail)
+            XCTAssertTrue(failure.detail.contains("API_SERVER_KEY"), failure.detail)
+        }
+    }
+
     @MainActor
     func testAKeyReadFailureWithAReasonIsRememberedByTheKeyReadGuard() async throws {
         var store = InMemorySecretStore(apiKey: nil)
@@ -1759,4 +1827,12 @@ private actor LateBackend: SSHBackend {
     func close() {
         live = 0
     }
+}
+
+/// Le texte de la bannière « détection de Desktop indisponible » quand la sonde échoue avec `error`
+@MainActor
+private func bannerReason(after error: Error) async -> String? {
+    let lock = ProfileLock(connection: { "lab.invalid" }, read: { throw error })
+    await lock.refresh()
+    return lock.reason("hv-bot-a")
 }
