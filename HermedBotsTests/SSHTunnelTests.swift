@@ -1521,7 +1521,8 @@ final class RemoteLoginShellTests: XCTestCase {
         let loop = Task { await lock.run() }
         addTeardownBlock { loop.cancel() }
         try await Task.sleep(for: .milliseconds(1200))
-        XCTAssertTrue(await lock.permits("hv-bot-a", on: host))
+        let allowed = await lock.permits("hv-bot-a", on: host)
+        XCTAssertTrue(allowed)
         XCTAssertEqual(lock.state("hv-bot-a", on: host), .free)
     }
 
@@ -1533,9 +1534,11 @@ final class RemoteLoginShellTests: XCTestCase {
             reads += 1
             return Data(#"{"held": []}"#.utf8)
         })
-        XCTAssertTrue(await lock.refresh())
+        let read = await lock.refresh()
+        XCTAssertTrue(read)
         XCTAssertEqual(reads, 1)
-        XCTAssertTrue(await lock.permits("hv-bot-a", on: host))
+        let allowed = await lock.permits("hv-bot-a", on: host)
+        XCTAssertTrue(allowed)
         XCTAssertEqual(reads, 1)
         XCTAssertEqual(lock.state("hv-bot-a", on: host), .free)
     }
