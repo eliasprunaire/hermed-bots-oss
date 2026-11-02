@@ -1,4 +1,5 @@
 import AppSettings
+import Darwin
 import HermesAdapter
 import Security
 import XCTest
@@ -1490,12 +1491,12 @@ final class AppModelConnectTests: XCTestCase {
         await model.tunnel.stop()
     }
 
-    private func keyModel(keys: [String: String] = [:], profiles: [String], reads: KeyReads, serve: @escaping @Sendable (URLRequest) -> Int) -> AppModel {
+    private func keyModel(keys: [String: String] = [:], profiles: [String], reads: KeyReads, apiURL: String = "http://hermes.invalid", serve: @escaping @Sendable (URLRequest) -> Int) -> AppModel {
         let table = (["Profile  Model  Gateway  Alias  Distribution"] + profiles.map { "  \($0)   hv-fake-1   running   —   —" }).joined(separator: "\n")
         let environment = AppEnvironment.resolve(
             [
                 "HV_TEST_MODE": "1",
-                "HV_API_URL": "http://hermes.invalid",
+                "HV_API_URL": apiURL,
                 "HV_TEST_PROFILE_TABLE": table,
                 "HV_TEST_API_KEYS": String(decoding: try! JSONEncoder().encode(keys), as: UTF8.self),
             ],
@@ -1830,6 +1831,44 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertFalse(probes.contains { $0.status == 401 }, "une requête du nouveau profil a reçu 401")
     }
 
+    /// Deux profils listés : la clé du second n'est pas encore en cache, un troisième n'en a pas. KillSwitch ne part pas sans Bearer.
+    func testKillSwitchAcquiresListedKeysAndNeverSendsWithoutOne() async throws {
+        let recorder = try KillSwitchProbeRecorder()
+        addTeardownBlock { recorder.stop() }
+        let reads = KeyReads { _, profile in
+            switch profile {
+            case "hv-bot-b": return "key-b"
+            case "hv-bot-a": return "key-a"
+            default: return nil
+            }
+        }
+        let model = keyModel(
+            keys: ["hv-bot-a": "key-a"],
+            profiles: ["hv-bot-a", "hv-bot-b", "hv-bot-c"],
+            reads: reads,
+            apiURL: recorder.url.absoluteString
+        ) { request in
+            let path = request.url?.path ?? ""
+            let auth = request.value(forHTTPHeaderField: "Authorization")
+            if path.hasSuffix("/health") { return 200 }
+            if path.contains("/p/hv-bot-a/") { return auth == "Bearer key-a" ? 200 : 401 }
+            if path.contains("/p/hv-bot-b/") { return auth == "Bearer key-b" ? 200 : 401 }
+            return 401
+        }
+        await model.bots.refresh()
+        await model.refreshVersion()
+        XCTAssertNil(model.apiError)
+        XCTAssertNotNil(model.capabilities)
+        XCTAssertEqual(Set(reads.profiles), ["hv-bot-b", "hv-bot-c"])
+        await model.killSwitch.checkSupport()
+        let probes = recorder.probes.filter { $0.path.contains("/v1/capabilities") }
+        XCTAssertTrue(probes.contains { $0.path.contains("/p/hv-bot-a/") && $0.authorization == "Bearer key-a" })
+        XCTAssertTrue(probes.contains { $0.path.contains("/p/hv-bot-b/") && $0.authorization == "Bearer key-b" })
+        XCTAssertFalse(probes.contains { $0.path.contains("/p/hv-bot-c/") }, "une sonde est partie pour un profil sans clé")
+        XCTAssertTrue(probes.allSatisfy { $0.authorization != nil }, "une sonde KillSwitch est partie sans clé")
+        XCTAssertFalse(model.killSwitch.isDisabled)
+    }
+
     /// Clé du profil chargé puis refusée par Hermes : le 401 reste affiché
     func testAReal401OnTheSelectedProfileStaysVisible() async {
         let reads = KeyReads { _, profile in profile == "hv-bot-b" ? "bad-b" : "key-a" }
@@ -1960,5 +1999,94 @@ private final class KeyStubProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {}
+}
+
+/// Socket local : les sondes KillSwitchAPI n'utilisent pas la session injectée, elles doivent être lues sur le fil
+private final class KillSwitchProbeRecorder: @unchecked Sendable {
+    struct Probe: Equatable, Sendable {
+        var path: String
+        var authorization: String?
+    }
+
+    private let descriptor: Int32
+    private let lock = NSLock()
+    private var stored: [Probe] = []
+    private var acceptSource: DispatchSourceRead?
+    private var stopped = false
+    let url: URL
+
+    init() throws {
+        let socketDescriptor = socket(AF_INET, SOCK_STREAM, 0)
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let size = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socketDescriptor, $0, size) }
+        }
+        var length = size
+        let named = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(socketDescriptor, $0, &length) }
+        }
+        guard socketDescriptor >= 0, bound == 0, named == 0, listen(socketDescriptor, 8) == 0 else {
+            let code = POSIXErrorCode(rawValue: errno) ?? .EIO
+            close(socketDescriptor)
+            throw POSIXError(code)
+        }
+        descriptor = socketDescriptor
+        url = URL(string: "http://127.0.0.1:\(UInt16(bigEndian: address.sin_port))")!
+        let source = DispatchSource.makeReadSource(fileDescriptor: socketDescriptor, queue: .global())
+        source.setEventHandler { [weak self] in self?.acceptOne() }
+        source.resume()
+        acceptSource = source
+    }
+
+    deinit { stop() }
+
+    func stop() {
+        lock.lock()
+        if stopped {
+            lock.unlock()
+            return
+        }
+        stopped = true
+        let source = acceptSource
+        acceptSource = nil
+        lock.unlock()
+        source?.cancel()
+        close(descriptor)
+    }
+
+    var probes: [Probe] {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+
+    private func acceptOne() {
+        let client = accept(descriptor, nil, nil)
+        guard client >= 0 else { return }
+        defer { close(client) }
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        let readCount = recv(client, &buffer, buffer.count, 0)
+        guard readCount > 0 else { return }
+        let text = String(decoding: buffer.prefix(readCount), as: UTF8.self)
+        let lines = text.split(whereSeparator: { $0 == "\r" || $0 == "\n" })
+        let path = lines.first.flatMap { line -> String? in
+            let parts = line.split(separator: " ")
+            guard parts.count >= 2 else { return nil }
+            return String(parts[1])
+        } ?? ""
+        let authorization = lines.first { $0.lowercased().hasPrefix("authorization:") }.map {
+            $0.drop { $0 != ":" }.dropFirst().trimmingCharacters(in: .whitespaces)
+        }
+        lock.lock()
+        stored.append(Probe(path: path, authorization: authorization))
+        lock.unlock()
+        let body = #"{"features":{"run_stop":true}}"#
+        let reply = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+        _ = reply.withCString { send(client, $0, strlen($0), 0) }
+    }
 }
 #endif
