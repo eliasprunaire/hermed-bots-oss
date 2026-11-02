@@ -336,9 +336,9 @@ do {
         if !result.resolved { fail("le serveur n'avait aucune demande en attente pour \(result.requestID)") }
     case "capabilities":
         let map = try await client.capabilities(profile: profile)
-        print("version: \(map.version ?? "absente") (\(map.isVersionKnown ? "connue" : "inconnue"))")
+        print("version: \(map.version ?? "absente") (\(map.versionNotice ?? "testée"))")
         var reasons: [String] = []
-        if !map.isVersionKnown { reasons.append("version inconnue") }
+        if !map.isVersionSupported { reasons.append(map.versionNotice ?? "version inconnue") }
         if map.entries.contains(where: { $0.state != .available }) { reasons.append("fonction désactivée") }
         print("degraded: " + (reasons.isEmpty ? "no" : "yes (\(reasons.joined(separator: ", ")))"))
         for entry in map.entries {

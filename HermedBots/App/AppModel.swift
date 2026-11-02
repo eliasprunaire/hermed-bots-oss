@@ -451,6 +451,22 @@ final class AppModel {
         }
     }
 
+    /// Saisie des réglages : la clé du profil va au Trousseau, remplace celle qui s'y trouve et sert aux requêtes suivantes
+    /// La valeur ne revient jamais à l'écran ni dans un journal ; les espaces d'un collage sont retirés
+    /// Une erreur de l'API après la saisie s'affiche dans la bannière, elle ne fait pas échouer l'enregistrement
+    func storeAPIKey(_ key: String, profile: String) async throws {
+        let profile = try HermesAPIKey.validate(profile)
+        let key = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty, !key.contains(where: \.isNewline) else { throw ManualAPIKeyError.invalidKey }
+        var secrets = environment.secrets
+        try secrets.setAPIKey(key, profile: profile)
+        environment.secrets = secrets
+        // une clé neuve rouvre la lecture SSH, que la garde avait fermée pour ce refus
+        apiKeyFetches.reset()
+        bots.reload(profile)
+        if apiError != nil { await recheckAPI() }
+    }
+
     /// Bouton « Réessayer » : une lecture SSH échouée plus tôt peut repartir, pour le profil refusé
     func retryAPI() async {
         guard !isCheckingAPI else { return }
@@ -487,6 +503,7 @@ final class AppModel {
 
     /// `profile` est celui de la requête refusée, pas forcément celui qui est à l'écran
     func handleAPIError(_ error: Error, profile: String) async {
+        if let failure = error as? APIKeyReadFailure { return showUnreadableKey(failure, profile: profile) }
         guard Self.isUnauthorized(error) else {
             apiError = Self.apiMessage(error)
             return
@@ -501,6 +518,9 @@ final class AppModel {
                 await recheckAPI()
                 return
             }
+        } catch let failure as APIKeyReadFailure {
+            showUnreadableKey(failure, profile: profile)
+            return
         } catch {
             apiError = Self.apiMessage(error)
             return
@@ -511,19 +531,40 @@ final class AppModel {
         apiError = message
     }
 
+    /// La cause de la lecture ratée remplace « introuvable » ; « Réessayer » relit la clé de ce profil
+    private func showUnreadableKey(_ failure: APIKeyReadFailure, profile: String) {
+        let holdsKey = (try? environment.secrets.resolvedAPIKey(profile: profile)) != nil
+        let message = failure.message(profile: profile, holdsKey: holdsKey)
+        refusal = (profile, message)
+        apiError = message
+    }
+
     /// Une lecture SSH par profil et par refus : le Trousseau est mis à jour, la valeur n'est pas journalisée
+    /// Une saisie de clé ou un nouvel essai pendant la lecture la périme : sa valeur et sa panne sont jetées, la clé du Trousseau reste
     @discardableResult
     private func fetchRemoteAPIKey(_ profile: String) async throws -> String? {
-        let read: @MainActor (String) async throws -> String?
+        let source: @MainActor (String) async throws -> String?
         if let apiKeyReader {
-            read = apiKeyReader
+            source = apiKeyReader
         } else if let sshBackend, let sshConfig, case .open = tunnel.state {
-            read = { try await sshBackend.readAPIKey(sshConfig, profile: $0) }
+            source = { try await sshBackend.readAPIKey(sshConfig, profile: $0) }
         } else {
             return nil
         }
+        let generation = apiKeyFetches.generation
+        let read: @MainActor (String) async throws -> String? = { [apiKeyFetches] name in
+            do {
+                let value = try await source(name)
+                return apiKeyFetches.generation == generation ? value : nil
+            } catch {
+                guard apiKeyFetches.generation == generation else { return nil }
+                throw error
+            }
+        }
         var secrets = environment.secrets
         let key = try await apiKeyFetches.fetch(profile: profile, into: &secrets, read: read)
+        // lecture périmée : la clé du Trousseau, saisie entre-temps, est celle que l'appelant reprend
+        guard apiKeyFetches.generation == generation else { return try? environment.secrets.resolvedAPIKey(profile: profile) }
         if key != nil {
             environment.secrets = secrets
             // un dépli parti avant la clé a gardé son 401 : on relit les fils de ce profil s'il est déplié
@@ -567,4 +608,9 @@ final class AppModel {
         }
         return String(localized: "Hermes ne répond pas. Vérifiez la liaison puis réessayez.")
     }
+}
+
+enum ManualAPIKeyError: Error, Equatable {
+    /// Vide, ou sur plusieurs lignes : ce n'est pas une clé
+    case invalidKey
 }

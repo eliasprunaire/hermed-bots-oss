@@ -175,7 +175,7 @@ final class ConversationModel {
     var isBusy: Bool { profileLockReason == nil && pauseCause == nil && machine.shown.step == .sending }
     var canSend: Bool { !stopInProgress && profileLockReason == nil && pauseCause == nil && machine.canSend(draft) }
 
-    var profileLockReason: String? { botID.flatMap { profileLock?.state($0).reason } }
+    var profileLockReason: String? { botID.flatMap { profileLock?.reason($0) } }
 
     private func permits(_ key: ConversationMachine.Key, on host: String, queueOnUnknown: Bool = false) async -> Bool {
         guard let profileLock, host == connection() else { return true }
@@ -183,7 +183,7 @@ final class ConversationModel {
             // Les effets gardent leur traitement d'une liaison quittée, dont l'approbation mise en attente
             guard host == connection() else { return true }
             if queueOnUnknown, profileLock.state(key.bot, on: host) == .unknown { return false }
-            let reason = profileLock.state(key.bot, on: host).reason ?? String(localized: "La détection du profil a changé. Réessayez.")
+            let reason = profileLock.reason(key.bot, on: host) ?? String(localized: "La détection du profil a changé. Réessayez.")
             apply(.modelFailed(key, reason), on: host)
             apply(.failed(key, reason), on: host)
             return false
@@ -455,7 +455,7 @@ final class ConversationModel {
                     try await Task.sleep(for: approvalRetry)
                     continue
                 }
-                if let profileLock, let reason = profileLock.state(key.bot, on: connection).reason {
+                if let profileLock, let reason = profileLock.reason(key.bot, on: connection) {
                     apply(.failed(key, reason), on: connection)
                     return
                 }

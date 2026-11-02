@@ -18,10 +18,36 @@ public struct CapabilityMap: Equatable, Sendable {
     // ponytail: les versions des deux fixtures ; une version de plus se déclare ici après le test quotidien
     static let knownVersions: Set<String> = ["0.22.1", "0.22.2"]
 
+    /// Version testée, au sens exact : elle figure dans `knownVersions`
     public var isVersionKnown: Bool { version.map(Self.knownVersions.contains) ?? false }
 
-    /// Mode dégradé : version inconnue ou au moins une fonction désactivée. Il ne refuse jamais la connexion
-    public var isDegraded: Bool { !isVersionKnown || states.values.contains { $0 != .available } }
+    /// Une version de correctif non testée (`0.22.5`) d'une mineure testée (`0.22`) n'a pas besoin d'avoir été vue : la sonde des contrats la juge
+    public var isVersionSupported: Bool {
+        guard let version else { return false }
+        if Self.knownVersions.contains(version) { return true }
+        guard let minor = Self.minor(of: version) else { return false }
+        return Self.knownVersions.contains { Self.minor(of: $0) == minor }
+    }
+
+    /// Mode dégradé : version d'une autre mineure que les versions testées, ou au moins une fonction désactivée. Il ne refuse jamais la connexion
+    public var isDegraded: Bool { !isVersionSupported || states.values.contains { $0 != .available } }
+
+    /// Ce que la bannière dit de la version ; nil quand elle est testée
+    /// Une version lue mais non testée est nommée, une version absente reste « inconnue »
+    public var versionNotice: String? {
+        guard let version else { return "Version de Hermes inconnue" }
+        return isVersionKnown ? nil : "Hermes \(version) non testée"
+    }
+
+    /// Le bandeau se montre pour un mode dégradé ou pour une version non testée, même quand tous les contrats répondent
+    public var showsBanner: Bool { isDegraded || versionNotice != nil }
+
+    /// `majeure.mineure` d'un numéro `majeure.mineure.correctif` fait de chiffres seulement ; nil pour toute autre forme
+    private static func minor(of version: String) -> String? {
+        let parts = version.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count >= 3, parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isASCII) && $0.allSatisfy(\.isNumber) }) else { return nil }
+        return "\(parts[0]).\(parts[1])"
+    }
 
     public subscript(_ contract: Contract) -> CapabilityState { states[contract] ?? .available }
 

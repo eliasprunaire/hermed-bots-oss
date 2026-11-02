@@ -43,7 +43,7 @@ struct HomeView: View {
         if let shown = bots.list.shown, !shown.isEmpty {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 220, maximum: 320), spacing: 14)], spacing: 14) {
                 ForEach(shown) { bot in
-                    BotCard(bot: bot, activity: activity(bot.id), lockReason: profileLock.state(bot.id).reason) { open(bot.id) }
+                    BotCard(bot: bot, activity: activity(bot.id), lockReason: profileLock.reason(bot.id)) { open(bot.id) }
                 }
             }
         } else if needsConnection {

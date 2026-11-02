@@ -4,6 +4,11 @@ import Foundation
 enum FixtureVersion: String, CaseIterable {
     case current
     case previous
+    /// Dérivée de `current`, jamais observée : une version de correctif non testée de la même mineure
+    case patch = "0.22.5"
+
+    /// Les versions testées seulement : les tests qui itèrent sur `allCases` ne voient pas `patch`
+    static var allCases: [FixtureVersion] { [.current, .previous] }
 }
 
 // Les fixtures vivent dans Fixtures/ à côté de ce fichier : le paquet les lit en place, sans copie
