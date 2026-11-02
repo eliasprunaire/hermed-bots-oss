@@ -156,7 +156,7 @@ final class BotsModel {
         switch error {
         case let failure as SSHFailure: failure.message
         case let failure as RemoteCommandFailure:
-            String(localized: "La commande « hermes profile list » a échoué (code \(String(failure.status))) : \(failure.detail)")
+            String(localized: "La commande « hermes profile list » a échoué (code \(String(failure.status))).")
         default: "\(error)"
         }
     }

@@ -71,7 +71,7 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 | Certificat expiré | Le certificat SSH a expiré. Renouvelle-le, puis réessaie. |
 | Serveur refuse l'identité | Le serveur refuse l'identité SSH. Vérifie la config de l'alias, puis réessaie. |
 | Clé d'hôte changée | La clé de l'hôte a changé. Le tunnel reste fermé. Vérifie la clé d'hôte dans OpenSSH, hors de l'app. |
-| Hôte injoignable | Hôte injoignable. Vérifie le réseau, puis réessaie. |
+| Hôte injoignable | Hôte injoignable. Vérifie le réseau, puis réessaie. Puis, sur une seconde ligne : Échec SSH (code N). |
 | Tunnel fermé par le serveur | Le serveur a fermé le tunnel. Réessaie la connexion. |
 | `example-host` en mode test, sur l'alias ou sur l'hôte résolu d'un lancement (tunnel, liste, détection, lecture de clé) ; l'alias tapé est refusé avant `ssh -G` | Cet hôte est refusé en mode test. |
 | `ProxyJump` ou `ProxyCommand`, quelle que soit la valeur (hors `none` entier ; `none,none` est une liste de sauts), vu par l'un des trois lancements ou par la lecture de clé ; tous les modes | Cet alias passe par un relais (ProxyJump ou ProxyCommand). Hermed Bots le refuse : utilise un alias qui se connecte directement à l'hôte. |

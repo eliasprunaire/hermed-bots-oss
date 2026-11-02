@@ -1553,14 +1553,14 @@ final class AppModelConnectTests: XCTestCase {
 
     /// La lecture SSH échoue avec une cause (source de secrets en échec) : la bannière la dit au lieu de « introuvable »
     func testTheReasonOfAnUnreadableKeyIsShownInTheBanner() async {
-        let failure = APIKeyReadFailure.keyNotSet(detail: "Command helper: no secrets applied")
+        let failure = APIKeyReadFailure.keyNotSet
         let reads = KeyReads(failure: failure) { _, _ in nil }
         let model = keyModel(profiles: ["hv-bot-a"], reads: reads) { $0.url?.path.hasSuffix("/health") == true ? 200 : 401 }
         await model.bots.refresh()
         await model.refreshVersion()
         XCTAssertEqual(reads.profiles, ["hv-bot-a"])
         XCTAssertEqual(model.apiError, failure.message(profile: "hv-bot-a", holdsKey: false))
-        XCTAssertTrue(model.apiError?.contains("no secrets applied") == true)
+        XCTAssertTrue(model.apiError?.contains("source de secrets") == true)
         // un second refus du même profil ne relit pas et garde la cause
         await model.handleAPIError(refusal(), profile: "hv-bot-a")
         XCTAssertEqual(reads.profiles, ["hv-bot-a"])
@@ -1573,7 +1573,7 @@ final class AppModelConnectTests: XCTestCase {
     }
 
     func testTheReasonNamesAHeldKeyThatHermesRefusesWhenTheHostCannotBeRead() async {
-        let failure = APIKeyReadFailure.commandFailed(status: 2, detail: "PermissionError")
+        let failure = APIKeyReadFailure.commandFailed(status: 2)
         let reads = KeyReads(failure: failure) { _, _ in nil }
         let model = keyModel(keys: ["hv-bot-a": "held-key"], profiles: ["hv-bot-a"], reads: reads) { $0.url?.path.hasSuffix("/health") == true ? 200 : 401 }
         await model.bots.refresh()
@@ -1599,7 +1599,7 @@ final class AppModelConnectTests: XCTestCase {
         }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [KeyStubProtocol.self]
-        let reads = KeyReads(failure: APIKeyReadFailure.keyNotSet(detail: "")) { _, _ in nil }
+        let reads = KeyReads(failure: APIKeyReadFailure.keyNotSet) { _, _ in nil }
         let model = AppModel(environment: environment, apiKeyReader: reads.read, urlConfiguration: configuration)
         await model.bots.refresh()
         await model.refreshVersion()
@@ -1652,7 +1652,7 @@ final class AppModelConnectTests: XCTestCase {
         await eventually { gate.started }
         try await model.storeAPIKey("manual-VALUE", profile: "hv-bot-a")
 
-        gate.finish(.failure(APIKeyReadFailure.keyNotSet(detail: "Command helper: no secrets applied")))
+        gate.finish(.failure(APIKeyReadFailure.keyNotSet))
         await recovery.value
         XCTAssertNil(model.apiError)
         XCTAssertEqual(items.values["\(KeychainSecretStore.account):hv-bot-a"], Data("manual-VALUE".utf8))

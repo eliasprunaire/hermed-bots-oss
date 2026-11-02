@@ -9,7 +9,8 @@ import os
 
 /// Pourquoi le tunnel ne s'ouvre pas ou s'est fermé
 /// Seul `unreachable` donne lieu à une réouverture : une clé refusée ou un hôte changé ne se règle pas en réessayant
-/// Une cause connue garde un texte fixe, sans la sortie brute de ssh ; seul `unreachable` (cause inconnue) montre les dernières lignes de sa sortie d'erreur
+/// Aucune cause ne montre la sortie brute de ssh : l'interface affiche un texte classé, `unreachable` (cause inconnue) y ajoute le code de sortie
+/// La sortie d'erreur va seulement au journal local (`record`), masquée en entier avant toute coupe
 enum SSHFailure: Error, Equatable, Sendable {
     case forbiddenHost
     case relayRefused
@@ -38,7 +39,9 @@ enum SSHFailure: Error, Equatable, Sendable {
         if case .unreachable = self { true } else { false }
     }
 
+    /// Classe la sortie brute de ssh et la note au journal local ; le résultat ne porte aucun morceau de cette sortie
     static func classify(stderr: String, status: Int32 = 255) -> SSHFailure {
+        record(stderr, status: status)
         switch SSHExitClassification.kind(stderr: stderr, status: status) {
         case .agentUnavailable: return .missingAgent
         case .missingKey: return .missingKey
@@ -47,7 +50,7 @@ enum SSHFailure: Error, Equatable, Sendable {
         case .authRefused: return .wrongKey("")
         case .hostKeyChanged: return .hostKeyChanged("")
         case .tunnelClosed: return .tunnelClosed
-        case .hostUnreachable: return .unreachable(Self.detail(of: stderr))
+        case .hostUnreachable: return .unreachable(String(localized: "Échec SSH (code \(status))"))
         case .wrapperFailure:
             let found = SSHExitClassification.wrapperFailure(stderr: stderr)
             return .wrapperFailure(name: found?.name ?? "", code: found?.code ?? "")
@@ -57,21 +60,29 @@ enum SSHFailure: Error, Equatable, Sendable {
     static let detailLines = 3
     static let detailLimit = 400
 
-    /// Les dernières lignes de la sortie d'erreur, masquées, sans caractère de contrôle et bornées : c'est ce que l'utilisateur voit de la cause
-    /// Le masque porte sur le texte entier, avant tout découpage : c'est le point unique par où une sortie d'erreur atteint l'interface
-    /// `excluding` retire après le masque les lignes qui contiennent ce texte
-    static func detail(of stderr: String, excluding marker: String? = nil) -> String {
+    /// Les dernières lignes de la sortie d'erreur, masquées, sans caractère de contrôle et bornées : c'est ce que le journal local garde de la cause
+    /// Le masque porte sur le texte entier, avant tout découpage : le nom d'une clé et sa valeur peuvent être sur deux lignes
+    static func detail(of stderr: String) -> String {
         let lines = RemoteShell.mask(stderr).split(whereSeparator: \.isNewline)
-            .filter { line in marker.map { !line.contains($0) } ?? true }
             .map { String($0.unicodeScalars.filter { !CharacterSet.controlCharacters.contains($0) }).trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
         let text = lines.suffix(detailLines).joined(separator: "\n")
         return text.count > detailLimit ? "…" + text.suffix(detailLimit - 1) : text
     }
+
+    private static let journal = Logger(subsystem: Bundle.main.bundleIdentifier ?? "HermedBots", category: "ssh")
+
+    /// Le seul endroit où la sortie d'erreur d'une commande ssh sort de la mémoire : le journal local, texte masqué en entier puis borné
+    /// Le texte est privé pour le journal système : il ne se lit qu'avec les données privées activées
+    static func record(_ stderr: String, status: Int32, source: String = "ssh") {
+        let text = detail(of: stderr)
+        guard !text.isEmpty else { return }
+        journal.error("\(source, privacy: .public) code \(status, privacy: .public) : \(text, privacy: .private)")
+    }
 }
 
 extension SSHFailure {
-    /// Le texte de la cause, puis, pour une cause inconnue, le détail repris de ssh
+    /// Le texte de la cause, puis, pour une cause inconnue, le code de sortie ou la cause interne qui l'accompagne
     var message: String {
         guard case .unreachable(let detail) = self, !detail.isEmpty else { return summary }
         return summary + "\n" + detail
@@ -102,9 +113,9 @@ extension SSHFailure {
     }
 }
 
+/// Une commande distante a rendu un code non nul : l'interface montre le code, la sortie d'erreur reste au journal local
 struct RemoteCommandFailure: Error, Equatable, Sendable {
     let status: Int32
-    let detail: String
 }
 
 enum SSHInvocation: CaseIterable, Sendable {
@@ -139,13 +150,9 @@ enum RemoteShell {
         return lines[(mark + 1)...].joined(separator: "\n")
     }
 
-    /// La fin de la sortie d'erreur d'une commande distante pour un message : bornée par `SSHFailure.detail`, valeurs de secret masquées
+    /// Le masque du journal local : valeurs de secret cachées
     /// Hermes ne devrait jamais écrire une valeur ; le masque couvre `NOM=valeur`, `NOM: "valeur"` (JSON, guillemets simples, guillemets échappés), `Bearer valeur` et tout mot de 24 caractères ou plus
-    // shortcut: une paire `{"name": "NOM", "value": "x"}` où le nom et la valeur sont deux champs reste visible, à couvrir si Hermes écrit ce format
-    static func diagnostic(of stderr: String) -> String {
-        SSHFailure.detail(of: stderr)
-    }
-
+    // shortcut: une paire `{"name": "NOM", "value": "x"}` où le nom et la valeur sont deux champs reste visible dans le journal, à couvrir si Hermes écrit ce format
     static func mask(_ text: String) -> String {
         let rules = [
             (#"(?i)\bbearer\s+\S+"#, "Bearer ****"),
@@ -333,7 +340,7 @@ struct LoginPath: Sendable {
 
 // MARK: - Processus enfants
 
-/// Un processus lancé par `posix_spawn`, avec la fin de la sortie d'erreur gardée en mémoire (8 Kio au plus) et la sortie standard gardée en entier
+/// Un processus lancé par `posix_spawn`, avec la fin de la sortie d'erreur gardée en mémoire (8 Kio au plus, sauf `stderrLimit`) et la sortie standard gardée en entier
 final class Child: Sendable {
     let pid: pid_t
     /// le groupe de processus auquel il appartient ; un signal envoyé au groupe atteint toute sa descendance
@@ -408,6 +415,9 @@ enum Spawn {
     }
 
     fileprivate static let maxStderr = 8192
+    /// Pas de plafond : les lectures de diagnostic masquent la sortie d'erreur entière avant de la couper, et reconnaissent « Config key not set » où qu'il soit
+    // shortcut: la sortie d'erreur d'une lecture n'a pas de plafond, bornée par le délai de `run` comme la sortie standard, à plafonner avec un indicateur de coupe si un hôte hostile devient un cas
+    fileprivate static let wholeStderr = Int.max
 
     /// Lance `path` dans un groupe de processus neuf, ou dans celui de `leader`
     /// Le processus n'hérite ni de l'environnement de l'app (il reçoit `environment` seulement) ni de ses descripteurs
@@ -521,7 +531,7 @@ enum Spawn {
 
     /// Lit `fd` jusqu'à sa fermeture et garde les `limit` derniers octets
     /// La sortie standard n'a pas de plafond : un plafond couperait en silence une table de profils et inventerait un profil
-    /// Elle est bornée par le délai de `run` ; la sortie d'erreur ne sert qu'à un message, donc 8 Kio suffisent
+    /// Elle est bornée par le délai de `run` ; la sortie d'erreur d'un tunnel ne sert qu'à classer la cause et à la journaliser, donc 8 Kio suffisent
     /// La cause d'un échec (`<nom>_failure=<code>`, dernières lignes de ssh) est à la fin de la sortie d'erreur, pas au début
     fileprivate static func drain(_ fd: Int32, into buffer: OSAllocatedUnfairLock<Data>, limit: Int) {
         defer { close(fd) }
@@ -637,11 +647,6 @@ enum HermesAPIKey {
     /// La ligne que `hermes config get` écrit quand ni le .env du profil ni une source de secrets ne donne la clé
     static let keyNotSetMarker = "Config key not set"
 
-    /// Les dernières lignes de la sortie d'erreur d'Hermes pour la bannière, sans la ligne qui nomme la clé absente
-    static func diagnostic(of stderr: String) -> String {
-        SSHFailure.detail(of: stderr, excluding: keyNotSetMarker)
-    }
-
     /// Une clé détenue que Hermes refuse n'est pas une clé introuvable
     static func unauthorizedMessage(profile: String, holdsKey: Bool) -> String {
         holdsKey ? String(localized: "La clé API est refusée pour le profil \(profile).") : missingMessage(profile: profile)
@@ -652,17 +657,17 @@ enum HermesProfileName: Error, Equatable {
     case invalid
 }
 
-/// Pourquoi `hermes config get API_SERVER_KEY` n'a pas rendu de clé sur l'hôte ; le détail est la sortie d'erreur, bornée et sans secret
+/// Pourquoi `hermes config get API_SERVER_KEY` n'a pas rendu de clé sur l'hôte ; la sortie d'erreur n'est pas gardée ici, elle va au journal local
 /// Un 255 de ssh et un 127 (outil absent) gardent leur `SSHFailure`
 enum APIKeyReadFailure: Error, Equatable, Sendable {
-    /// Hermes répond « Config key not set » : le détail porte les diagnostics des sources de secrets qui précèdent cette ligne
-    case keyNotSet(detail: String)
+    /// Hermes répond « Config key not set »
+    case keyNotSet
     /// Un autre code non nul : config illisible, source de secrets en échec
-    case commandFailed(status: Int32, detail: String)
+    case commandFailed(status: Int32)
 
+    /// `stderr` ne sert qu'à reconnaître la réponse « Config key not set » ; aucun morceau n'est gardé
     init(status: Int32, stderr: String) {
-        let detail = HermesAPIKey.diagnostic(of: stderr)
-        self = stderr.contains(HermesAPIKey.keyNotSetMarker) ? .keyNotSet(detail: detail) : .commandFailed(status: status, detail: detail)
+        self = stderr.contains(HermesAPIKey.keyNotSetMarker) ? .keyNotSet : .commandFailed(status: status)
     }
 
     /// `holdsKey` : le Trousseau a une clé que Hermes refuse ; le refus passe avant l'échec de la relecture
@@ -670,17 +675,11 @@ enum APIKeyReadFailure: Error, Equatable, Sendable {
         let head = holdsKey
             ? String(localized: "La clé API est refusée pour le profil \(profile) et sa relecture sur l'hôte a échoué.")
             : String(localized: "La clé API du profil \(profile) n'a pas pu être lue sur l'hôte.")
-        let cause: String
-        let detail: String
-        switch self {
-        case .keyNotSet(let text):
-            cause = String(localized: "Hermes ne la trouve ni dans le .env du profil ni dans une source de secrets.")
-            detail = text
-        case .commandFailed(let status, let text):
-            cause = String(localized: "La commande hermes a rendu le code \(status).")
-            detail = text
+        let cause = switch self {
+        case .keyNotSet: String(localized: "Hermes ne la trouve ni dans le .env du profil ni dans une source de secrets.")
+        case .commandFailed(let status): String(localized: "La commande hermes a rendu le code \(status).")
         }
-        return [head, cause, detail].filter { !$0.isEmpty }.joined(separator: "\n")
+        return head + "\n" + cause
     }
 }
 
@@ -941,7 +940,8 @@ actor SystemSSHBackend: SSHBackend {
                 launchArguments(config.profileListArguments()),
                 environment: sshEnvironment,
                 joining: watchdog.pid,
-                timeout: .seconds(15)
+                timeout: .seconds(15),
+                stderrLimit: Spawn.wholeStderr
             )
         } catch SpawnError.timedOut {
             throw SSHFailure.unreachable("délai dépassé")
@@ -952,7 +952,8 @@ actor SystemSSHBackend: SSHBackend {
         if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr, status: output.status) }
         if output.status == 127 { throw SSHFailure.remoteToolNotFound }
         guard output.status == 0 else {
-            throw RemoteCommandFailure(status: output.status, detail: RemoteShell.mask(output.stderr).split(whereSeparator: \.isNewline).last.map { $0.trimmingCharacters(in: .whitespaces) } ?? "")
+            SSHFailure.record(output.stderr, status: output.status, source: "hermes profile list")
+            throw RemoteCommandFailure(status: output.status)
         }
         return RemoteShell.reply(output.stdout)
     }
@@ -972,7 +973,8 @@ actor SystemSSHBackend: SSHBackend {
                 launchArguments(try config.apiKeyArguments(profile: profile)),
                 environment: sshEnvironment,
                 joining: watchdog.pid,
-                timeout: .seconds(15)
+                timeout: .seconds(15),
+                stderrLimit: Spawn.wholeStderr
             )
         } catch SpawnError.timedOut {
             throw SSHFailure.unreachable("délai dépassé")
@@ -983,7 +985,10 @@ actor SystemSSHBackend: SSHBackend {
         }
         if output.status == 255 { throw SSHFailure.classify(stderr: output.stderr, status: output.status) }
         if output.status == 127 { throw SSHFailure.remoteToolNotFound }
-        guard output.status == 0 else { throw APIKeyReadFailure(status: output.status, stderr: output.stderr) }
+        guard output.status == 0 else {
+            SSHFailure.record(output.stderr, status: output.status, source: "hermes config get")
+            throw APIKeyReadFailure(status: output.status, stderr: output.stderr)
+        }
         return HermesAPIKey.parse(RemoteShell.reply(output.stdout))
     }
 
@@ -999,7 +1004,7 @@ actor SystemSSHBackend: SSHBackend {
             output = try await Spawn.run(
                 sshBinary, launchArguments(config.profileLocksArguments()),
                 environment: sshEnvironment,
-                joining: watchdog.pid, timeout: timeout
+                joining: watchdog.pid, timeout: timeout, stderrLimit: Spawn.wholeStderr
             )
         } catch SpawnError.timedOut {
             throw ProfileProbeFailure.timedOut
@@ -1011,7 +1016,9 @@ actor SystemSSHBackend: SSHBackend {
         case 255: throw SSHFailure.classify(stderr: output.stderr, status: output.status)
         case 127: throw ProfileProbeFailure.toolNotFound
         case ProfileLock.moduleMissingStatus: throw ProfileProbeFailure.moduleMissing("psutil")
-        default: throw ProfileProbeFailure.failed(status: output.status, detail: RemoteShell.diagnostic(of: output.stderr))
+        default:
+            SSHFailure.record(output.stderr, status: output.status, source: "sonde Desktop")
+            throw ProfileProbeFailure.failed(status: output.status)
         }
     }
 

@@ -33,7 +33,7 @@ L'onglet Réglages « À propos » (`hd.settings.updates`) affiche la version de
 
 Lire `features/connection.md`.
 
-L'utilisateur saisit un alias SSH. L'app résout tout le reste avec `/usr/bin/ssh -G` plus les arguments de chaque lancement, lecture de clé comprise (config par défaut, `Include` et `Match` compris). Le tunnel, `hermes profile list` et la lecture de `API_SERVER_KEY` passent par `/usr/bin/ssh` et le même alias. Pas de `-F /dev/null`, pas de `-i`, pas de `-vv`, pas d'agent privé. Connect ne lit pas le Trousseau. Un échec de ssh affiche la dernière ligne de stderr.
+L'utilisateur saisit un alias SSH. L'app résout tout le reste avec `/usr/bin/ssh -G` plus les arguments de chaque lancement, lecture de clé comprise (config par défaut, `Include` et `Match` compris). Le tunnel, `hermes profile list` et la lecture de `API_SERVER_KEY` passent par `/usr/bin/ssh` et le même alias. Pas de `-F /dev/null`, pas de `-i`, pas de `-vv`, pas d'agent privé. Connect ne lit pas le Trousseau. Un échec de ssh affiche une cause classée et son code de sortie, jamais la sortie brute de ssh.
 
 Aucune saisie de clé API. Récupération figée : `hermes -p <profil> config get API_SERVER_KEY --raw`. Un profil n'utilise que sa propre clé, jamais celle de `default`. Échec sans clé : « Clé API introuvable sur l'hôte pour le profil … ». Clé détenue mais refusée : « La clé API est refusée pour le profil … ». Jamais la valeur.
 

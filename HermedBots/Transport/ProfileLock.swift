@@ -172,13 +172,13 @@ print(json.dumps({'held': sorted(held)}))
 """#
 }
 
-/// Pourquoi la sonde de Hermes Desktop n'a pas répondu ; le détail est la fin de sa sortie d'erreur, bornée et sans secret
+/// Pourquoi la sonde de Hermes Desktop n'a pas répondu ; sa sortie d'erreur n'est pas gardée ici, elle va au journal local
 enum ProfileProbeFailure: Error, Equatable, Sendable {
     /// Ni l'interpréteur de Hermes ni `python3` n'a le module
     case moduleMissing(String)
     /// Le shell de connexion de l'hôte ne trouve pas `python3` (code 127)
     case toolNotFound
-    case failed(status: Int32, detail: String)
+    case failed(status: Int32)
     case timedOut
 
     /// La cause, pour la fin du message du verrou de profil
@@ -186,7 +186,7 @@ enum ProfileProbeFailure: Error, Equatable, Sendable {
         switch self {
         case .moduleMissing(let name): String(localized: "le module Python \(name) est absent de l'interpréteur de Hermes et de python3 sur l'hôte")
         case .toolNotFound: String(localized: "python3 est introuvable dans le PATH du shell de connexion de l'hôte")
-        case .failed(let status, let detail): detail.isEmpty ? String(localized: "la sonde a échoué (code \(status))") : String(localized: "la sonde a échoué (code \(status)) : \(detail)")
+        case .failed(let status): String(localized: "la sonde a échoué (code \(status))")
         case .timedOut: String(localized: "la sonde n'a pas répondu à temps")
         }
     }
