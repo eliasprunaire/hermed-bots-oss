@@ -60,12 +60,15 @@ final class AppModel {
     @ObservationIgnored lazy var killSwitch = KillSwitch(
         endpoint: { [unowned self] in
             guard !self.isCheckingAPI, self.apiError == nil, self.capabilities != nil else { return nil }
-            let secrets = self.environment.secrets
-            return self.apiURL.map { KillSwitchAPI(baseURL: $0, apiKey: nil, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) }) }
+            return self.apiURL.map { KillSwitchAPI(baseURL: $0, apiKey: nil, apiKeyForProfile: Self.boundAPIKey(self.environment.secrets)) }
         },
         connection: { [unowned self] in self.connection },
         runs: { [unowned self] in self.conversation.runningTurns },
-        profiles: { [unowned self] in (self.bots.list.shown ?? []).map(\.id) },
+        profiles: { [unowned self] in
+            (self.bots.list.shown ?? []).map(\.id).filter { id in
+                (try? self.environment.secrets.resolvedAPIKey(profile: id)) != nil
+            }
+        },
         confirmed: { [unowned self] in self.conversation.confirmStopped($0, status: $1, on: $2) },
         pending: { [unowned self] in self.conversation.startingTurns() },
         setStopping: { [unowned self] in self.conversation.stopInProgress = $0 }
@@ -457,8 +460,18 @@ final class AppModel {
             version = .unknown
             await handleAPIError(error, profile: profile)
         }
+        await acquireListedAPIKeys(except: profile)
         isCheckingAPI = false
         await checkCapabilities()
+    }
+
+    /// Les sondes du coupe-circuit portent sur chaque profil listé : leur clé est lue avant qu'une requête parte
+    private func acquireListedAPIKeys(except current: String) async {
+        for id in (bots.list.shown ?? []).map(\.id) where id != current {
+            if (try? environment.secrets.resolvedAPIKey(profile: id)) == nil {
+                _ = try? await fetchRemoteAPIKey(id)
+            }
+        }
     }
 
     func checkCapabilities() async {
