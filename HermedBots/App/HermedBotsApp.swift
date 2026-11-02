@@ -22,43 +22,40 @@ extension AppModel.Version {
 
 struct ContentView: View {
     let model: AppModel
+    @Environment(\.openSettings) private var openSettings
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: 0) {
-            ErrorBanner(model: model)
-            DegradedBanner(map: model.capabilities)
-            StopAllButton(model: model.killSwitch).padding(8).frame(maxWidth: .infinity, alignment: .leading)
-            NavigationSplitView {
-                BotListView(model: model.bots, profileLock: model.profileLock, selectedSession: model.conversation.sessionID, select: model.conversation.select(bot:), open: model.conversation.open(session:of:))
-                    .navigationSplitViewColumnWidth(min: 220, ideal: 260)
-                    .safeAreaInset(edge: .bottom) {
-                        HStack(spacing: 4) {
-                            Text("Version de Hermes")
-                            model.version.text.accessibilityID(.statusVersion)
-                            if let port = model.displayedPort {
-                                Text(verbatim: port.statusText).accessibilityID(.statusPort)
-                            }
-                            Spacer()
-                            SettingsLink {
-                                Label("Réglages", systemImage: "gearshape").labelStyle(.iconOnly)
-                            }
-                            .buttonStyle(.borderless)
-                            .help("Réglages")
-                            .accessibilityID(.connectionOpen)
-                        }
-                        .lineLimit(1)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .padding(8)
-                    }
-            } detail: {
-                if model.conversation.botID != nil {
-                    ConversationView(model: model.conversation, killSwitch: model.killSwitch)
+        NavigationSplitView {
+            // pied sous la liste, pas en safeAreaInset : une ligne glissée sous un pied opaque reste « atteignable » pour XCUITest mais le clic tombe sur le pied
+            VStack(spacing: 0) {
+                BotListView(model: model.bots, profileLock: model.profileLock, selectedBot: model.conversation.botID, selectedSession: model.conversation.sessionID,
+                            activity: model.conversation.activity(of:), select: model.conversation.select(bot:), open: model.conversation.open(session:of:))
+                SidebarFooter(model: model)
+            }
+            .navigationSplitViewColumnWidth(min: 220, ideal: 260)
+        } detail: {
+            VStack(spacing: 0) {
+                ErrorBanner(model: model)
+                DegradedBanner(map: model.capabilities)
+                if let bot = shownBot {
+                    ConversationView(model: model.conversation, killSwitch: model.killSwitch, bot: bot)
                 } else {
-                    Text("Aucun bot sélectionné").foregroundStyle(.secondary)
+                    HomeView(bots: model.bots, profileLock: model.profileLock, activity: model.conversation.activity(of:), needsConnection: needsConnection,
+                             open: open(bot:), configure: { openSettings() })
                 }
             }
+            .overlay(alignment: .top) { ConnectingPill(model: model) }
+            // dans la barre d'outils et non dans la barre latérale : l'arrêt reste visible quand l'utilisateur masque la barre latérale
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) { StopAllButton(model: model.killSwitch) }
+            }
+            .animation(.easeOut(duration: 0.2), value: model.isCheckingAPI)
         }
+        .frame(minWidth: 720, minHeight: 480)
+        .environment(\.motion, !model.isTestMode && !reduceMotion)
+        .preferredColorScheme(model.testDarkAppearance ? .dark : nil)
+        .background { if let size = model.testWindowSize { TestWindowSize(size: size) } }
         #if DEBUG
         .overlay(alignment: .bottomTrailing) {
             if let watch = model.mainThreadWatch {
@@ -101,6 +98,96 @@ struct ContentView: View {
             await model.bots.run()
         }
     }
+}
+
+extension ContentView {
+    /// Le bot ouvert, tel que la liste le montre ; un bot sorti de la liste garde son identifiant pour nom
+    private var shownBot: Bot? {
+        guard let id = model.conversation.botID else { return nil }
+        return model.bots.list.shown?.first { $0.id == id } ?? Bot(id: id, name: id, model: nil)
+    }
+
+    /// Aucune adresse d'API, et aucun tunnel en train de s'ouvrir : l'accueil propose la connexion
+    private var needsConnection: Bool {
+        switch model.tunnel.state {
+        case .opening, .reopening: false
+        case .idle, .open, .failed: model.apiURL == nil
+        }
+    }
+
+    /// Une carte de l'accueil fait ce que fait un clic sur la ligne du bot, sans replier ses fils déjà dépliés
+    private func open(bot id: String) {
+        if model.profileLock.state(id) == .free, !model.bots.expanded.contains(id) { model.bots.toggle(id) }
+        model.conversation.select(bot: id)
+    }
+}
+
+/// Le pied de la barre latérale : le statut du kill switch, puis l'état de la liaison, la version de Hermes, le port et les réglages
+private struct SidebarFooter: View {
+    let model: AppModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            StopAllStatus(model: model.killSwitch)
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(health)
+                    .frame(width: 7, height: 7)
+                    .shadow(color: health.opacity(0.7), radius: 3)
+                    .accessibilityHidden(true)
+                Text("Version de Hermes")
+                model.version.text.accessibilityID(.statusVersion)
+                if let port = model.displayedPort {
+                    Text(verbatim: port.statusText).accessibilityID(.statusPort)
+                }
+                Spacer()
+                SettingsLink {
+                    Label("Réglages", systemImage: "gearshape").labelStyle(.iconOnly)
+                }
+                .buttonStyle(.borderless)
+                .help("Réglages")
+                .accessibilityID(.connectionOpen)
+            }
+            .lineLimit(1)
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .background(.bar)
+    }
+
+    /// Vert : version lue sans erreur ; rouge : tunnel ou API en échec ; orange : lecture en cours ou version inconnue
+    private var health: Color {
+        if model.apiError != nil { return .red }
+        if case .failed = model.tunnel.state { return .red }
+        if case .known = model.version, !model.isCheckingAPI { return .green }
+        return .orange
+    }
+}
+
+/// Mode test seulement : donne au contenu de la fenêtre la taille de `HV_WINDOW_SIZE` dès que la vue rejoint sa fenêtre
+/// Une taille gardée par un lancement précédent l'emporterait sur `defaultSize`, d'où la fenêtre réglée ici
+private struct TestWindowSize: NSViewRepresentable {
+    let size: CGSize
+
+    final class Sizer: NSView {
+        var size = CGSize.zero
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard let window else { return }
+            window.isRestorable = false
+            // au tour suivant : macOS pose le cadre restauré après l'arrivée de la vue dans la fenêtre
+            DispatchQueue.main.async { [size] in window.setContentSize(size) }
+        }
+    }
+
+    func makeNSView(context: Context) -> Sizer {
+        let view = Sizer()
+        view.size = size
+        return view
+    }
+
+    func updateNSView(_ view: Sizer, context: Context) {}
 }
 
 #if DEBUG

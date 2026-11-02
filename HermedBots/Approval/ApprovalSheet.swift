@@ -16,16 +16,30 @@ struct ApprovalSheet: View {
     private func content(_ approval: ConversationMachine.Approval) -> some View {
         let request = approval.request
         let params = ApprovalParams(request.command)
-        return VStack(alignment: .leading, spacing: 12) {
-            Label("Le bot demande l'autorisation d'utiliser un outil", systemImage: "exclamationmark.shield.fill")
-                .font(.headline)
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text("Outil")
-                    .foregroundStyle(.secondary)
-                Text(request.tool ?? String(localized: "inconnu"))
-                    .font(.body.monospaced())
-                    .textSelection(.enabled)
-                    .accessibilityID(.approvalTool)
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 14) {
+                Image(systemName: "exclamationmark.shield.fill")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 46, height: 46)
+                    .background(Palette.gradient([.orange, .pink]), in: .rect(cornerRadius: 14))
+                    .shadow(color: .orange.opacity(0.45), radius: 12, y: 4)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Le bot demande l'autorisation d'utiliser un outil")
+                        .font(.system(.title3, design: .rounded, weight: .bold))
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("Outil")
+                            .foregroundStyle(.secondary)
+                        Text(request.tool ?? String(localized: "inconnu"))
+                            .font(.callout.monospaced().weight(.semibold))
+                            .textSelection(.enabled)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 2)
+                            .background(.orange.opacity(0.14), in: .capsule)
+                            .accessibilityID(.approvalTool)
+                    }
+                }
             }
             if !request.description.isEmpty {
                 Text(request.description)
@@ -43,7 +57,7 @@ struct ApprovalSheet: View {
             }
             buttons(approval)
         }
-        .padding(20)
+        .padding(24)
         .frame(width: 560)
         // le groupe garde ses enfants adressables : l'outil, les paramètres et les boutons portent chacun leur identifiant
         .accessibilityElement(children: .contain)
@@ -55,16 +69,19 @@ struct ApprovalSheet: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Paramètres")
                 .foregroundStyle(.secondary)
+            // un bloc de terminal, sombre dans les deux apparences : la commande se lit comme elle s'exécutera
             ScrollView {
                 Text(params.shown.isEmpty ? String(localized: "Aucun paramètre.") : params.shown)
-                    .font(.body.monospaced())
+                    .font(.callout.monospaced())
+                    .foregroundStyle(Color(rgb: 0xE6EDF3))
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
+                    .padding(12)
                     .accessibilityID(.approvalParams)
             }
             .frame(minHeight: 100, maxHeight: 260)
-            .background(.quaternary.opacity(0.5), in: .rect(cornerRadius: 6))
+            .background(Color(rgb: 0x0D1117), in: .rect(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.08)))
             if params.isChanged {
                 cut(params)
             }
@@ -128,15 +145,19 @@ struct ApprovalSheet: View {
             if case .disabled = model.approveSupport { return true }
             return model.stopInProgress || model.profileLockReason != nil || approval.decision != nil
         }()
-        return HStack {
+        return HStack(spacing: 10) {
             Spacer()
             // Échap refuse : refuser est le choix sans effet ; Approuver n'a pas de raccourci
-            Button("Refuser") { model.answer(.no) }
+            Button { model.answer(.no) } label: { Label("Refuser", systemImage: "xmark").padding(.horizontal, 6) }
+                .buttonStyle(.glass)
                 .keyboardShortcut(.cancelAction)
                 .accessibilityID(.approvalNo)
-            Button("Approuver") { model.answer(.yes) }
+            Button { model.answer(.yes) } label: { Label("Approuver", systemImage: "checkmark").padding(.horizontal, 6) }
+                .buttonStyle(.glassProminent)
+                .tint(.green)
                 .accessibilityID(.approvalYes)
         }
+        .controlSize(.large)
         .disabled(isDisabled)
     }
 }

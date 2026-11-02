@@ -98,6 +98,9 @@ final class AppModel {
     let mainThreadWatch: MainThreadWatch?
     var testHangMilliseconds: Int { environment.testHangMilliseconds }
     #endif
+    var isTestMode: Bool { environment.isTestMode }
+    var testDarkAppearance: Bool { environment.testDarkAppearance }
+    var testWindowSize: CGSize? { environment.testWindowSize }
     // de quoi lire la liste des profils par un second ssh : le même alias que le tunnel
     private var sshBackend: SystemSSHBackend?
     private var sshConfig: SSHTunnelConfig?

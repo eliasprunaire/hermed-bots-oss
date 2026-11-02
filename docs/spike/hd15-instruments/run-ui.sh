@@ -8,6 +8,13 @@ HV_EVIDENCE="$WORK/evidence/hd15-ui-$(date +%Y%m%d-%H%M%S)"
 export HV_EVIDENCE
 mkdir -p "$HV_EVIDENCE"
 bash "$SK/hv-guard.sh" snapshot "$HV_EVIDENCE/guard-before.txt" || exit $?
+# une clé par profil servi, comme hv-run.sh ui fake : sans elle l'app n'a aucune adresse d'API et Tout arrêter reste grisé
+HV_TEST_API_KEYS=$(python3 - Packages/HermesAdapter/Tests/HermesAdapterTests/Fixtures/hermes-current/contract.json <<'PYKEYS'
+import json, secrets, sys
+print(json.dumps({profile: secrets.token_urlsafe(32) for profile in json.load(open(sys.argv[1]))["profiles"]["served"]}))
+PYKEYS
+) || exit 32
+export HV_TEST_API_KEYS TEST_RUNNER_HV_TEST_API_KEYS=$HV_TEST_API_KEYS
 python3 docs/spike/hd15-instruments/fake.py > "$HV_EVIDENCE/fake.log" 2>&1 & SERVER=$!
 STOP=$HV_EVIDENCE/stop-net
 bash docs/spike/hd08-instruments/netsample.sh "$HV_EVIDENCE/net.txt" "$STOP" & NET=$!

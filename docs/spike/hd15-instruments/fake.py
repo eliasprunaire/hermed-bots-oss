@@ -61,7 +61,9 @@ class Handler(BaseHTTPRequestHandler):
             rows = []
             for run in RUNS.values():
                 connection = http.client.HTTPConnection('127.0.0.1', PORT + 1, timeout=5)
-                connection.request('GET', f"/p/{run['profile']}/api/sessions/{run['session']}/messages")
+                # la lecture de contrôle porte la clé du profil, comme l'app : hv-fake-hermes.py refuse une requête sans elle quand HV_TEST_API_KEYS existe
+                key = json.loads(os.environ.get('HV_TEST_API_KEYS', '{}')).get(run['profile'])
+                connection.request('GET', f"/p/{run['profile']}/api/sessions/{run['session']}/messages", headers={'Authorization': f'Bearer {key}'} if key else {})
                 response = connection.getresponse()
                 messages = json.loads(response.read()).get('data', [])
                 rows.append({'id': run['session'], 'profile': run['profile'], 'messages': len(messages), 'ids': [m['id'] for m in messages], 'http': response.status})

@@ -198,6 +198,24 @@ struct ConversationMachine: Equatable {
     /// L'état du fil à l'écran
     var shown: ThreadState { screen.flatMap { threads[$0] } ?? ThreadState() }
 
+    /// Ce que fait un bot sur l'ensemble de ses fils, pour son badge et son avatar
+    enum Activity: Equatable {
+        case idle
+        case working
+        /// Une demande d'approbation attend la réponse de l'utilisateur
+        case waiting
+    }
+
+    /// Une demande qui attend l'utilisateur passe avant un tour en vol : c'est le seul état qui exige une action
+    func activity(of bot: String) -> Activity {
+        var activity = Activity.idle
+        for (key, state) in threads where key.bot == bot {
+            if let approval = state.pendingApproval, approval.decision == nil { return .waiting }
+            if state.step == .sending { activity = .working }
+        }
+        return activity
+    }
+
     /// Envoyer exige un fil à l'écran, rien en vol dans ce fil et un brouillon non vide
     func canSend(_ draft: String) -> Bool {
         screen != nil && shown.step == .ready && shown.conversation.canSend(draft)
