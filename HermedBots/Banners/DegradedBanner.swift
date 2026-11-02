@@ -1,12 +1,14 @@
 import HermesAdapter
 import SwiftUI
 
+/// Le mode dégradé : chaque fonction que la version de Hermes ne sert plus, avec son message ; le reste marche
 struct DegradedBanner: View {
     let map: CapabilityMap?
 
     var body: some View {
         if let map, map.showsBanner {
-            VStack(alignment: .leading, spacing: 4) {
+            // un avis de version seul n'est pas une dégradation : teinte d'information
+            NoticeCard(tint: map.isDegraded ? .orange : .blue, symbol: map.isDegraded ? "bandage.fill" : "info.circle.fill") {
                 if map.isDegraded {
                     Text("Mode dégradé").fontWeight(.semibold).accessibilityID(.bannerDegraded)
                 }
@@ -20,9 +22,8 @@ struct DegradedBanner: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
-            .background(.orange.opacity(0.12))
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
         }
     }
 }

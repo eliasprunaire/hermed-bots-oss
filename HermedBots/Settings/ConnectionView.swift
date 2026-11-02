@@ -149,6 +149,7 @@ struct ConnectionView: View {
                     .accessibilityID(.connectionClose)
                     .accessibilityRespondsToUserInteraction(true)
                 Button("Connecter") { model.connect() }
+                    .buttonStyle(.glassProminent)
                     .keyboardShortcut(.defaultAction)
                     .accessibilityID(.connectionConnect)
                     .accessibilityRespondsToUserInteraction(true)

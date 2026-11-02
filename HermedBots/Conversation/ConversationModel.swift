@@ -222,6 +222,7 @@ final class ConversationModel {
     var approval: ConversationMachine.Approval? { pauseCause == nil ? machine.shown.pendingApproval : nil }
     /// Le bot attend l'utilisateur : la demande est affichée et personne n'a encore répondu
     var isWaitingForUser: Bool { approval.map { $0.decision == nil } ?? false }
+    func activity(of bot: String) -> ConversationMachine.Activity { machine.activity(of: bot) }
     var approveSupport: RouteSupport { supportOf(.approve) }
 
     /// Répond à la demande du fil à l'écran ; rien ne part sans demande, pour une décision déjà prise, ni quand `approve` est désactivée

@@ -12,6 +12,10 @@ struct AppEnvironment {
     var testProfileLocks = false
     var testResumeScope: String?
     var testProfileTable: String?
+    /// Mode test seulement : `HV_APPEARANCE=dark` force l'apparence sombre, pour la lane de rendu
+    var testDarkAppearance = false
+    /// Mode test seulement : `HV_WINDOW_SIZE=<largeur>x<hauteur>`, la taille du contenu de la fenêtre au lancement ; nil pour une valeur absente ou invalide
+    var testWindowSize: CGSize?
 
     /// Le mode test refuse l'hôte factice `example-host`. Hors mode test, aucun hôte n'est refusé.
     var refuseTestHost: Bool { isTestMode }
@@ -36,10 +40,19 @@ struct AppEnvironment {
                 testHangMilliseconds: environment["HV_HANG_MS"].flatMap { Int($0) } ?? 0,
                 testProfileLocks: environment["HV_PROFILE_LOCKS"] == "1",
                 testResumeScope: environment["HV_RESUME_SCOPE"],
-                testProfileTable: environment["HV_TEST_PROFILE_TABLE"]
+                testProfileTable: environment["HV_TEST_PROFILE_TABLE"],
+                testDarkAppearance: environment["HV_APPEARANCE"] == "dark",
+                testWindowSize: environment["HV_WINDOW_SIZE"].flatMap(windowSize)
             )
         }
         #endif
         return AppEnvironment(secrets: keychain(), baseURL: nil, ssh: SSHEndpoint.stored(in: defaults), isTestMode: false, defaults: defaults)
+    }
+
+    /// « 760x520 » : deux entiers positifs séparés par un x
+    private static func windowSize(_ value: String) -> CGSize? {
+        let parts = value.split(separator: "x", omittingEmptySubsequences: false).map { Int($0) }
+        guard parts.count == 2, let width = parts[0], let height = parts[1], width > 0, height > 0 else { return nil }
+        return CGSize(width: width, height: height)
     }
 }

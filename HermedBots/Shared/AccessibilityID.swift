@@ -78,6 +78,8 @@ enum AccessibilityID: String, CaseIterable {
     case connectionConnect = "hd.connection.connect"
     case connectionCheck = "hd.connection.check"
     case connectionClose = "hd.connection.close"
+    /// Le bouton de l'accueil qui ouvre les réglages de connexion quand aucune adresse d'API n'existe
+    case homeConfigure = "hd.home.configure"
     case updatesCheck = "hd.updates.check"
     case settingsConnection = "hd.settings.connection"
     case settingsUpdates = "hd.settings.updates"
@@ -93,6 +95,8 @@ enum AccessibilityID: String, CaseIterable {
     static func botModel(_ profileID: String) -> String { "\(botRow(profileID)).model" }
     static func botThreads(_ profileID: String) -> String { "\(botRow(profileID)).threads" }
     static func threadRow(_ sessionID: String) -> String { "hd.threads.row.\(sessionID)" }
+    /// La carte d'un bot à l'accueil : un autre préfixe que la ligne de la barre latérale, que les tests comptent
+    static func homeBot(_ profileID: String) -> String { "hd.home.bot.\(profileID)" }
     /// Message des fils d'un bot : fonction `list_sessions` désactivée, aucun fil, ou lecture en échec
     static func threadsDisabled(_ profileID: String) -> String { "hd.threads.disabled.\(profileID)" }
     static func threadsEmpty(_ profileID: String) -> String { "hd.threads.empty.\(profileID)" }

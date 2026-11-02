@@ -9,8 +9,9 @@ struct ModelPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Text("Modèle")
+            HStack(spacing: 6) {
+                Image(systemName: "sparkle").foregroundStyle(.secondary).accessibilityHidden(true)
+                Text("Modèle").foregroundStyle(.secondary)
                 picker
                 if model.isModelPending {
                     ProgressView().controlSize(.small)
@@ -40,6 +41,7 @@ struct ModelPicker: View {
         }
         .labelsHidden()
         .pickerStyle(.menu)
+        .controlSize(.small)
         .fixedSize()
         .disabled(isDisabled)
         .accessibilityID(.modelPicker)

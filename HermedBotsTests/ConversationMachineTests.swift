@@ -946,6 +946,34 @@ final class ConversationMachineTests: XCTestCase {
         }
     }
 
+    // MARK: activité d'un bot, que son badge et son avatar partagent
+
+    func testABotWithoutTurnInFlightIsIdle() {
+        var h = Harness()
+        h.apply(.select(bot: a))
+        XCTAssertEqual(h.machine.activity(of: a), .idle)
+        XCTAssertEqual(h.machine.activity(of: b), .idle, "un bot jamais ouvert")
+    }
+
+    func testABotWithATurnInFlightWorksEvenOffScreen() {
+        var h = runningTurn()
+        XCTAssertEqual(h.machine.activity(of: a), .working)
+        h.apply(.select(bot: b))
+        XCTAssertEqual(h.machine.activity(of: a), .working, "le tour continue quand l'écran passe à un autre bot")
+        XCTAssertEqual(h.machine.activity(of: b), .idle)
+    }
+
+    func testAnApprovalThatWaitsForTheUserComesBeforeTheTurnInFlight() {
+        var h = runningTurn()
+        h.apply(.observed(key(a, "t"), tool: "file.write", approval: ask))
+        XCTAssertEqual(h.machine.activity(of: a), .waiting)
+        h.apply(.open(session: "u", bot: a))
+        XCTAssertEqual(h.machine.activity(of: a), .waiting, "la demande d'un fil hors écran attend toujours l'utilisateur")
+        h.apply(.open(session: "t", bot: a))
+        h.apply(.answer(.yes))
+        XCTAssertEqual(h.machine.activity(of: a), .working, "la réponse est partie : le bot travaille de nouveau")
+    }
+
     func testAnApprovalOfAThreadOffScreenWaitsForTheUserToComeBack() {
         var h = runningTurn()
         h.apply(.observed(key(a, "t"), tool: "file.write", approval: ask))

@@ -4,6 +4,8 @@ import SwiftUI
 /// Les fils passés d'un bot, sous sa ligne ; un clic rouvre le fil avec son transcript (HD-09)
 struct ThreadsView: View {
     let botID: String
+    /// La couleur du bot : le trait qui relie ses fils et le fond du fil ouvert
+    let tint: Color
     let state: BotsModel.Threads?
     let selected: String?
     let open: (String) -> Void
@@ -22,9 +24,11 @@ struct ThreadsView: View {
                     Text(session.title ?? session.id)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                        .foregroundStyle(session.id == selected ? .primary : .secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 2)
-                        .background(session.id == selected ? Color.accentColor.opacity(0.18) : .clear, in: .rect(cornerRadius: 4))
+                        .padding(.vertical, 3)
+                        .padding(.horizontal, 8)
+                        .background(session.id == selected ? tint.opacity(0.18) : .clear, in: .rect(cornerRadius: 7))
                         .contentShape(Rectangle())
                         .onTapGesture { open(session.id) }
                         .help(session.title ?? session.id)
@@ -39,7 +43,9 @@ struct ThreadsView: View {
             }
         }
         .font(.callout)
-        .padding(.leading, 20)
+        .padding(.leading, 10)
+        .overlay(alignment: .leading) { Capsule().fill(tint.opacity(0.45)).frame(width: 2) }
+        .padding(.leading, 19)
         // le groupe reste un élément à part : ses lignes gardent leur identifiant et ne prennent pas celui du groupe
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(AccessibilityID.botThreads(botID))

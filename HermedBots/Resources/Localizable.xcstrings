@@ -51,11 +51,6 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "No bots" } }
       }
     },
-    "Aucun bot sélectionné" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "No bot selected" } }
-      }
-    },
     "Aucun fil passé" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "No past threads" } }
@@ -72,6 +67,11 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "No SSH identity is available. Load a key into the agent or set a key command in Settings, then try again." } }
       }
     },
+    "Avec quel bot voulez-vous parler ?" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Which bot do you want to talk to?" } }
+      }
+    },
     "Certificat" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Certificate" } }
@@ -85,6 +85,16 @@
     "Cet alias SSH est inconnu." : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "This SSH alias is unknown." } }
+      }
+    },
+    "Choisissez un bot pour ouvrir sa conversation." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pick a bot to open its conversation." } }
+      }
+    },
+    "Configurer la connexion" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Set up the connection" } }
       }
     },
     "Outil introuvable sur l'hôte : la commande hermes n'est pas dans le PATH du shell de connexion. Ajoute son dossier au profil de connexion de l'hôte, puis réessaie." : {
@@ -130,6 +140,11 @@
     "Connexion" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Connection" } }
+      }
+    },
+    "Écrire à %@…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Message %@…" } }
       }
     },
     "en échec" : {
@@ -373,6 +388,11 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Refuse" } }
       }
     },
+    "Reliez l'app à votre instance Hermes pour voir vos bots." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect the app to your Hermes instance to see your bots." } }
+      }
+    },
     "Retiré : %@" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Removed: %@" } }
@@ -431,6 +451,11 @@
     "Version de Hermes" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Hermes version" } }
+      }
+    },
+    "Vos bots apparaissent ici dès que Hermes les liste." : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your bots show up here as soon as Hermes lists them." } }
       }
     }
   },

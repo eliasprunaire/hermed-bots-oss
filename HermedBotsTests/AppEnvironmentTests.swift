@@ -68,6 +68,23 @@ final class AppEnvironmentTests: XCTestCase {
         XCTAssertNil(AppEnvironment.resolve(["HV_TEST_PROFILE_TABLE": table], defaults: isolatedDefaults(), keychain: { SpyKeychain() }).testProfileTable)
     }
 
+    func testTheDarkAppearanceAndTheWindowSizeAreReadOnlyInTestMode() {
+        let values = ["HV_APPEARANCE": "dark", "HV_WINDOW_SIZE": "760x520"]
+        let test = AppEnvironment.resolve(values.merging(["HV_TEST_MODE": "1"]) { $1 }, keychain: spy)
+        XCTAssertTrue(test.testDarkAppearance)
+        XCTAssertEqual(test.testWindowSize, CGSize(width: 760, height: 520))
+        let product = AppEnvironment.resolve(values, defaults: isolatedDefaults(), keychain: { SpyKeychain() })
+        XCTAssertFalse(product.testDarkAppearance)
+        XCTAssertNil(product.testWindowSize)
+    }
+
+    func testAnInvalidWindowSizeIsIgnored() {
+        for value in ["760", "760x", "x520", "axb", "0x520", "-760x520", "760x520x3", ""] {
+            XCTAssertNil(AppEnvironment.resolve(["HV_TEST_MODE": "1", "HV_WINDOW_SIZE": value], keychain: spy).testWindowSize, value)
+        }
+        XCTAssertFalse(AppEnvironment.resolve(["HV_TEST_MODE": "1", "HV_APPEARANCE": "light"], keychain: spy).testDarkAppearance)
+    }
+
     func testInvalidProfileMapFailsClosed() throws {
         for value in ["invalid", #"{"cyber":123}"#] {
             let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1", "HV_TEST_API_KEY": "legacy-test-key", "HV_TEST_API_KEYS": value], keychain: spy)

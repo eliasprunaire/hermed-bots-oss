@@ -23,15 +23,17 @@ final class KillSwitchTests: HD12Harness {
     private func revealBot(_ profile: String) {
         let row = element("hd.bots.row.\(profile)")
         XCTAssertTrue(row.waitForExistence(timeout: 15))
-        if !row.isHittable {
-            let list = element("hd.bots.list")
+        let list = element("hd.bots.list")
+        // isHittable reste vrai pour une ligne de List sortie de la zone visible : le clic tombe alors dans le vide
+        func visible() -> Bool { row.isHittable && list.frame.contains(CGPoint(x: row.frame.midX, y: row.frame.midY)) }
+        if !visible() {
             list.scroll(byDeltaX: 0, deltaY: 2000)
             for _ in 0..<12 {
-                if row.isHittable { break }
+                if visible() { break }
                 list.scroll(byDeltaX: 0, deltaY: -180)
             }
         }
-        XCTAssertTrue(row.isHittable)
+        XCTAssertTrue(visible())
         row.click()
     }
 
@@ -180,7 +182,7 @@ final class KillSwitchTests: HD12Harness {
             click(button)
             cancelled()
             let rows = request("/_hv/runs").filter { ($0["cancelled_at"] as? Double ?? 0) >= start }
-            XCTAssertEqual(rows.count, 3)
+            XCTAssertEqual(rows.count, 3, "start=\(start) statut=\(text(status)) runs=\(request("/_hv/runs").suffix(3).map { "\($0["profile"] ?? "?"):\($0["status"] ?? "?"):\($0["cancelled_at"] ?? "-")" })")
             samples.append(((rows.compactMap { $0["cancelled_at"] as? Double }.max() ?? start + 100) - start) * 1000)
         }
         print("HV-PERF15 click_to_server_cancelled_ms=\(samples) median_ms=\(samples.sorted()[2]) budget_ms=3000")
