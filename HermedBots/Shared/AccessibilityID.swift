@@ -75,6 +75,11 @@ enum AccessibilityID: String, CaseIterable {
     case updatesCheck = "hd.updates.check"
     case settingsConnection = "hd.settings.connection"
     case settingsUpdates = "hd.settings.updates"
+    case aboutAppVersion = "hd.about.app-version"
+    case aboutAppBuild = "hd.about.app-build"
+    case aboutHermes = "hd.about.hermes"
+    case aboutMacOS = "hd.about.macos"
+    case aboutChannel = "hd.about.channel"
 
     static func botRow(_ profileID: String) -> String { "hd.bots.row.\(profileID)" }
     static func botLock(_ profileID: String) -> String { "\(botRow(profileID)).lock" }
