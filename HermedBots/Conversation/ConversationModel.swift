@@ -183,7 +183,7 @@ final class ConversationModel {
             // Les effets gardent leur traitement d'une liaison quittée, dont l'approbation mise en attente
             guard host == connection() else { return true }
             if queueOnUnknown, profileLock.state(key.bot, on: host) == .unknown { return false }
-            let reason = profileLock.reason(key.bot, on: host) ?? String(localized: "La détection du profil a changé. Réessayez.")
+            let reason = profileLock.reason(key.bot, on: host) ?? String(localized: "Détection de Hermes Desktop en cours, réessayez.")
             apply(.modelFailed(key, reason), on: host)
             apply(.failed(key, reason), on: host)
             return false
