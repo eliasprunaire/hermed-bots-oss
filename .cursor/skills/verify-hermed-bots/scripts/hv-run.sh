@@ -180,7 +180,12 @@ PYKEYS
     esac
     cp "$shot" "$HV_EVIDENCE/reference-shots/" || worst 15
   done
-  "$HERE/hv-shotdiff.sh" "$HV_EVIDENCE/reference-shots" "${HV_BASELINES:-$HERE/../baselines}" "$HV_EVIDENCE/diffs" 0.02; s=$?; worst "$s"
+  # Tolérance visuelle : orb 3 % (drift Hermes réel vs baselines fake), fake/autres 2 %.
+  case "${HV_UI_BACKEND:-$ENVMODE}" in
+    orb) SHOT_TOL=0.03 ;;
+    *) SHOT_TOL=0.02 ;;
+  esac
+  "$HERE/hv-shotdiff.sh" "$HV_EVIDENCE/reference-shots" "${HV_BASELINES:-$HERE/../baselines}" "$HV_EVIDENCE/diffs" "$SHOT_TOL"; s=$?; worst "$s"
 }
 
 # shellcheck disable=SC2329,SC2317

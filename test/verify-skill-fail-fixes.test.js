@@ -21,6 +21,8 @@ const VM_UI = join(ROOT, ".cursor/skills/verify-hermed-bots/scripts/hv-vm-ui.py"
 const CONTRACT = join(ROOT, ".cursor/skills/verify-hermed-bots/scripts/hv-contract-check.py");
 const FIXTURE = join(ROOT, ".cursor/skills/verify-hermed-bots/fixtures/hermes-current/contract.json");
 const START = join(ROOT, ".cursor/skills/verify-hermed-bots/orb/hv-start.sh");
+const SHOTDIFF = join(ROOT, ".cursor/skills/verify-hermed-bots/scripts/hv-shotdiff.sh");
+const HV_RUN = join(ROOT, ".cursor/skills/verify-hermed-bots/scripts/hv-run.sh");
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -315,6 +317,11 @@ exit 2
   assert.match(argv, /hv-run\.sh/);
   assert.match(argv, /HV_RUNNER_DIR=/);
   assert.match(argv, /HV_UNDER_RUNNER=1/);
+  // Le script invité lit un fichier 0600 ; le nom de variable peut apparaître, pas les valeurs.
+  assert.equal(argv.includes("aaaaaaaaaaaaaaaaaaaa"), false, "key material in argv: " + argv);
+  assert.equal(argv.includes("bbbbbbbbbbbbbbbbbbbb"), false, "key material in argv: " + argv);
+  assert.match(argv, /hv-ui-keys-private\.json/);
+  assert.equal(run.stdout.includes("aaaaaaaaaaaaaaaaaaaa"), false, run.stdout);
   assert.equal(run.status, 0, run.stdout + run.stderr + argv);
   rmSync(dir, { recursive: true, force: true });
 });
@@ -410,4 +417,294 @@ ${body}
   assert.match(readFileSync(join(dir, ".env"), "utf8"), /^API_SERVER_KEY=keep-original$/m);
   assert.match(readFileSync(join(dir, "profiles", "hv-bot-a", ".env"), "utf8"), /^API_SERVER_KEY=keep-profile$/m);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("fake Hermes dedupes transcript by run id, not assistant text", async () => {
+  const port = await freePort();
+  const keys = { "hv-bot-a": "key-a-aaaaaaaaaaaaaaaa", "hv-bot-b": "key-b-bbbbbbbbbbbbbbbb" };
+  const child = await waitReady(port, { HV_TEST_API_KEYS: JSON.stringify(keys) });
+  try {
+    const auth = { Authorization: "Bearer " + keys["hv-bot-a"] };
+    const sid = "s-open";
+    for (const input of ["first turn", "second turn"]) {
+      const started = await request(port, "/p/hv-bot-a/v1/runs", {
+        method: "POST",
+        headers: auth,
+        body: JSON.stringify({ input, session_id: sid }),
+      });
+      assert.ok([200, 202].includes(started.status), started.raw);
+      const runId = started.json && (started.json.id || started.json.run_id);
+      assert.ok(runId, started.raw);
+      // Drain SSE to completion so record_run_transcript runs.
+      await new Promise((resolve, reject) => {
+        const req = http.request(
+          {
+            host: "127.0.0.1",
+            port,
+            path: `/p/hv-bot-a/v1/runs/${runId}/events`,
+            method: "GET",
+            headers: auth,
+          },
+          (res) => {
+            res.on("data", () => {});
+            res.on("end", resolve);
+          },
+        );
+        req.on("error", reject);
+        req.end();
+      });
+    }
+    const messages = await request(port, `/p/hv-bot-a/api/sessions/${sid}/messages`, { headers: auth });
+    assert.equal(messages.status, 200, messages.raw);
+    const data = messages.json && messages.json.data;
+    assert.ok(Array.isArray(data));
+    const added = data.filter((m) => m.id >= 1000);
+    assert.equal(added.length, 4, JSON.stringify(added));
+    assert.equal(added.filter((m) => m.role === "assistant").length, 2);
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("fake Hermes partitions transcripts by profile", async () => {
+  const port = await freePort();
+  const keys = { "hv-bot-a": "key-a-aaaaaaaaaaaaaaaa", "hv-bot-b": "key-b-bbbbbbbbbbbbbbbb" };
+  const child = await waitReady(port, { HV_TEST_API_KEYS: JSON.stringify(keys) });
+  try {
+    const authA = { Authorization: "Bearer " + keys["hv-bot-a"] };
+    const authB = { Authorization: "Bearer " + keys["hv-bot-b"] };
+    const created = await request(port, "/p/hv-bot-a/api/sessions", {
+      method: "POST",
+      headers: authA,
+      body: JSON.stringify({ title: "private-a" }),
+    });
+    assert.ok([200, 201].includes(created.status), created.raw);
+    const sid =
+      (created.json && created.json.session && created.json.session.id) ||
+      (created.json && (created.json.id || created.json.session_id));
+    assert.ok(sid, created.raw);
+
+    const started = await request(port, "/p/hv-bot-a/v1/runs", {
+      method: "POST",
+      headers: authA,
+      body: JSON.stringify({ input: "secret-for-a", session_id: sid }),
+    });
+    assert.ok([200, 202].includes(started.status), started.raw);
+    const runId = started.json && (started.json.id || started.json.run_id);
+    await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port,
+          path: `/p/hv-bot-a/v1/runs/${runId}/events`,
+          method: "GET",
+          headers: authA,
+        },
+        (res) => {
+          res.on("data", () => {});
+          res.on("end", resolve);
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+
+    const own = await request(port, `/p/hv-bot-a/api/sessions/${sid}/messages`, { headers: authA });
+    assert.equal(own.status, 200);
+    assert.ok((own.json.data || []).some((m) => String(m.content).includes("secret-for-a")));
+
+    // Même session id côté B : 404 (pas dans SESSIONS[B]) — pas de fuite du transcript A.
+    const crossed = await request(port, `/p/hv-bot-b/api/sessions/${sid}/messages`, { headers: authB });
+    assert.equal(crossed.status, 404, crossed.raw);
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("fake Hermes keeps approval decision across Last-Event-ID resume", async () => {
+  const port = await freePort();
+  const keys = { "hv-bot-a": "key-a-aaaaaaaaaaaaaaaa", "hv-bot-b": "key-b-bbbbbbbbbbbbbbbb" };
+  const child = await waitReady(port, { HV_TEST_API_KEYS: JSON.stringify(keys) });
+  try {
+    const auth = { Authorization: "Bearer " + keys["hv-bot-a"] };
+    const started = await request(port, "/p/hv-bot-a/v1/runs", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ input: "HV_APPROVAL please", session_id: "s-open" }),
+    });
+    assert.ok([200, 202].includes(started.status), started.raw);
+    const runId = started.json && (started.json.id || started.json.run_id);
+    assert.ok(runId, started.raw);
+
+    // Open stream briefly to create PENDING / RUN_SSE, then decide.
+    const first = await new Promise((resolve, reject) => {
+      const events = [];
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port,
+          path: `/p/hv-bot-a/v1/runs/${runId}/events`,
+          method: "GET",
+          headers: auth,
+        },
+        (res) => {
+          let buf = "";
+          res.on("data", (c) => {
+            buf += c.toString("utf8");
+            if (buf.includes("approval.request") && events.length === 0) {
+              events.push("seen");
+              const m = buf.match(/"request_id":\s*"([^"]+)"/);
+              const requestId = m ? m[1] : "apr_" + runId;
+              // Decide once the request is visible.
+              request(port, `/p/hv-bot-a/v1/runs/${runId}/approval`, {
+                method: "POST",
+                headers: auth,
+                body: JSON.stringify({ choice: "once", request_id: requestId }),
+              }).catch(reject);
+            }
+          });
+          res.on("end", () => resolve(buf));
+        },
+      );
+      req.on("error", reject);
+      req.end();
+    });
+    assert.match(first, /approval\.responded/);
+    assert.match(first, /"choice": "once"/);
+
+    // Resume after the last event id (5 = last of head(2)+tail(4) zero-based → use 5).
+    const resumed = await new Promise((resolve, reject) => {
+      const req = http.request(
+        {
+          host: "127.0.0.1",
+          port,
+          path: `/p/hv-bot-a/v1/runs/${runId}/events`,
+          method: "GET",
+          headers: { ...auth, "Last-Event-ID": "5" },
+        },
+        (res) => {
+          let buf = "";
+          res.on("data", (c) => {
+            buf += c.toString("utf8");
+          });
+          res.on("end", () => resolve(buf));
+        },
+      );
+      req.on("error", reject);
+      req.setTimeout(3000, () => {
+        req.destroy(new Error("resume hung waiting for a new decision"));
+      });
+      req.end();
+    });
+    assert.equal(resumed.includes("tool.started"), false, resumed);
+    assert.equal(resumed.includes("approval.request"), false, resumed);
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("hv-shotdiff rejects a large ratio under fr_FR and C locales", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-"));
+  const cap = join(dir, "cap");
+  const base = join(dir, "base");
+  const dif = join(dir, "dif");
+  mkdirSync(cap);
+  mkdirSync(base);
+  // Two very different solid PNGs → ratio well above 0.02.
+  const mk = (path, color) => {
+    const r = spawnSync(
+      "magick",
+      ["-size", "40x40", `xc:${color}`, path],
+      { encoding: "utf8" },
+    );
+    assert.equal(r.status, 0, r.stderr);
+  };
+  mk(join(base, "x.png"), "white");
+  mk(join(cap, "x.png"), "black");
+
+  for (const locale of ["C", "fr_FR.UTF-8"]) {
+    const run = spawnSync("bash", [SHOTDIFF, cap, base, join(dif, locale), "0.02"], {
+      encoding: "utf8",
+      env: { ...process.env, LC_ALL: locale, LANG: locale },
+    });
+    assert.equal(run.status, 11, `locale=${locale} out=${run.stdout} err=${run.stderr}`);
+    assert.match(run.stdout, /DIFF/);
+  }
+  rmSync(dir, { recursive: true, force: true });
+});
+
+
+test("hv-run shotdiff tolerance is 0.03 for orb and 0.02 otherwise", () => {
+  const src = readFileSync(HV_RUN, "utf8");
+  assert.match(src, /SHOT_TOL=0\.03/);
+  assert.match(src, /SHOT_TOL=0\.02/);
+  assert.match(src, /"\$SHOT_TOL"/);
+  assert.doesNotMatch(src, /hv-shotdiff\.sh".*diffs" 0\.02/);
+  for (const [backend, expected] of [
+    ["orb", "0.03"],
+    ["fake", "0.02"],
+    ["", "0.02"],
+  ]) {
+    const run = spawnSync(
+      "bash",
+      [
+        "-c",
+        `HV_UI_BACKEND=${backend}; ENVMODE=fake; case "\${HV_UI_BACKEND:-\$ENVMODE}" in orb) SHOT_TOL=0.03 ;; *) SHOT_TOL=0.02 ;; esac; printf '%s' "$SHOT_TOL"`,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(run.status, 0, run.stderr);
+    assert.equal(run.stdout, expected, `backend=${backend || "(empty)"}`);
+  }
+});
+
+test("hv-shotdiff mid-ratio fails at 0.02 (fake) and passes at 0.03 (orb)", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-tol-"));
+  const cap = join(dir, "cap");
+  const base = join(dir, "base");
+  const dif = join(dir, "dif");
+  mkdirSync(cap);
+  mkdirSync(base);
+  mkdirSync(dif);
+  // 100x100 white vs white+50x5 black bar → ~2.5 % AE (between 0.02 and 0.03).
+  const mkBase = spawnSync(
+    "magick",
+    ["-size", "100x100", "xc:white", join(base, "x.png")],
+    { encoding: "utf8" },
+  );
+  assert.equal(mkBase.status, 0, mkBase.stderr);
+  const mkCap = spawnSync(
+    "magick",
+    [
+      join(base, "x.png"),
+      "-fill",
+      "black",
+      "-draw",
+      "rectangle 0,0 49,4",
+      join(cap, "x.png"),
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(mkCap.status, 0, mkCap.stderr);
+  const fake = spawnSync("bash", [SHOTDIFF, cap, base, join(dif, "fake"), "0.02"], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C" },
+  });
+  assert.equal(fake.status, 11, `fake tol out=${fake.stdout}`);
+  assert.match(fake.stdout, /DIFF/);
+  const orb = spawnSync("bash", [SHOTDIFF, cap, base, join(dif, "orb"), "0.03"], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C" },
+  });
+  assert.equal(orb.status, 0, `orb tol out=${orb.stdout}`);
+  assert.match(orb.stdout, /OK/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("hv-vm-ui host guest argv never carries HV_TEST_API_KEYS", () => {
+  const src = readFileSync(VM_UI, "utf8");
+  assert.match(src, /install_transport_shim/);
+  assert.match(src, /hv-ui-keys-private\.json/);
+  // guest_env list must not append the packed keys.
+  assert.doesNotMatch(src, /guest_env\.append\(\s*"HV_TEST_API_KEYS=/);
 });

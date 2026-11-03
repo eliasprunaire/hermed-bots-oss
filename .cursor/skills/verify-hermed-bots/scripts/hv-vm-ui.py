@@ -178,6 +178,79 @@ def install_ssh_reverse_wrapper(port: str) -> Path:
     return d
 
 
+
+def install_transport_shim(port: str | None, keys_packed: str | None) -> Path:
+    """Un seul shim PATH/ZDOTDIR : tunnel -R (orb) et/ou dépôt des clés (hors argv).
+
+    Les clés vont dans un fichier local 0600, recopiées vers ~/hv-ui-keys-private.json
+    sur hvtest au scp de vmui-run.sh ou juste avant le ssh qui le lance. Jamais dans
+    VMUI_CMD / meta/vmui-run.sh.
+    """
+    d = Path(tempfile.mkdtemp(prefix="hv-ssh-shim-"))
+    keys_path = None
+    if keys_packed is not None:
+        keys_path = d / "keys.json"
+        keys_path.write_text(keys_packed, encoding="utf-8")
+        keys_path.chmod(0o600)
+        scp_body = (
+            "#!/bin/sh\n"
+            "set -e\n"
+            "dest=$(eval echo \"\\${$#}\")\n"
+            "/usr/bin/scp \"$@\"\n"
+            "case \"$dest\" in\n"
+            "  hvtest@*:*)\n"
+            "    host=${dest%%:*}\n"
+            "    /usr/bin/scp -q %s \"$host:hv-ui-keys-private.json\"\n"
+            "    /usr/bin/ssh \"$host\" 'chmod 600 \"$HOME/hv-ui-keys-private.json\"'\n" 
+            "    ;;\n"
+            "esac\n"
+        ) % (keys_path,)
+        (d / "scp").write_text(scp_body, encoding="utf-8")
+        (d / "scp").chmod(0o755)
+    ssh_lines = ["#!/bin/sh", "set -e"]
+    if keys_path is not None:
+        ssh_lines += [
+            "host=",
+            "remote=",
+            "for a in \"$@\"; do",
+            "  case \"$a\" in",
+            "    hvtest@*) host=$a ;;",
+            "    *vmui-run.sh*) remote=$a ;;",
+            "  esac",
+            "done",
+            "if [ -n \"$host\" ] && [ -n \"$remote\" ]; then",
+            "  /usr/bin/scp -q %s \"$host:hv-ui-keys-private.json\"" % keys_path,
+            "  /usr/bin/ssh \"$host\" 'chmod 600 \"$HOME/hv-ui-keys-private.json\"'", 
+            "fi",
+        ]
+    if port is not None:
+        spec = reverse_tunnel_spec(port)
+        ssh_lines.append("exec /usr/bin/ssh -o ExitOnForwardFailure=yes -R %s \"$@\"" % spec)
+    else:
+        ssh_lines.append("exec /usr/bin/ssh \"$@\"")
+    (d / "ssh").write_text("\n".join(ssh_lines) + "\n", encoding="utf-8")
+    (d / "ssh").chmod(0o755)
+    zdot = d / "zdot"
+    zdot.mkdir()
+    wrap = str(d / "ssh")
+    (zdot / ".zshenv").write_text(
+        "timeout() {\n"
+        "  local -a a\n"
+        "  local x\n"
+        "  for x in \"$@\"; do\n"
+        "    if [[ \"$x\" == ssh || \"$x\" == */ssh ]]; then\n"
+        "      a+=(%s)\n"
+        "    else\n"
+        "      a+=(\"$x\")\n"
+        "    fi\n"
+        "  done\n"
+        "  command timeout \"${a[@]}\"\n"
+        "}\n" % (wrap,),
+        encoding="utf-8",
+    )
+    return d
+
+
 def start_reverse_tunnel(port: str) -> subprocess.Popen | None:
     """Prépare le tunnel inverse via shim PATH + un exec vm.sh qui reste vivant pour le test unitaire.
 
@@ -225,11 +298,6 @@ def host() -> int:
     env = os.environ.copy()
     env.setdefault("HV_UI_BACKEND", "orb")
     backend = env.get("HV_UI_BACKEND", "orb")
-    shim = None
-    if backend == "orb":
-        shim = install_ssh_reverse_wrapper(port)
-        env["PATH"] = "%s:%s" % (shim, env.get("PATH", ""))
-        env["ZDOTDIR"] = str(shim / "zdot")
     env.setdefault("HV_UNDER_RUNNER", "1")
     env.setdefault("HV_API_URL", "http://127.0.0.1:%s" % port)
     # Invité : hv-run.sh exige HV_RUNNER_DIR (set -u / :?). Chemin générique absent OK
@@ -241,11 +309,11 @@ def host() -> int:
         "HV_UNDER_RUNNER=1",
         "HV_RUNNER_DIR=%s" % guest_runner,
     ]
+    packed = None
     try:
         packed, table = load_ui_secrets()
+        # Hôte seulement (pas d'argv invité) : utile aux tests unitaires locaux.
         env["HV_TEST_API_KEYS"] = packed
-        # Traversent l'invité via « env » sur la commande (fichier de clés hors VM).
-        guest_env.append("HV_TEST_API_KEYS=%s" % packed)
         # Table vide : ne pas exporter ("" est non-nil en Swift et casse ProfileTable.parse).
         if table:
             env["HV_TEST_PROFILE_TABLE"] = table
@@ -254,23 +322,31 @@ def host() -> int:
                 guest_env.append("HV_TEST_PROFILE_TABLE=%s" % table)
     except (OSError, ValueError, json.JSONDecodeError):
         packed = None
+    # Tunnel -R (orb) + fichier clés 0600 : un seul shim. Les clés ne passent jamais par argv.
+    shim = install_transport_shim(port if backend == "orb" else None, packed)
+    env["PATH"] = "%s:%s" % (shim, env.get("PATH", ""))
+    env["ZDOTDIR"] = str(shim / "zdot")
+    # Invité : lire ~/hv-ui-keys-private.json (posé par le shim), exporter, effacer, puis hv-run.
+    guest_script = (
+        'K="$HOME/hv-ui-keys-private.json"; '
+        "trap 'rm -f \"$K\"' EXIT; " 
+        'if [ -f "$K" ]; then '
+        'export HV_TEST_API_KEYS=$(cat "$K"); '
+        'rm -f "$K"; '
+        "trap - EXIT; " 
+        "fi; " 
+        "exec env " 
+        + " ".join(guest_env)
+        + " bash .cursor/skills/verify-hermed-bots/scripts/hv-run.sh ui fake"
+    )
     # Une seule VM : vm.sh fait build-for-testing, pose HV_XCTESTRUN sur le produit invité, puis la commande.
     # Ne pas chercher le .xctestrun sur l'hôte après une compilation invitée.
-    cmd = vm_argv(
-        "exec",
-        "env",
-        *guest_env,
-        "bash",
-        ".cursor/skills/verify-hermed-bots/scripts/hv-run.sh",
-        "ui",
-        "fake",
-    )
+    cmd = vm_argv("exec", "bash", "-c", guest_script)
     try:
         proc = subprocess.run(cmd, env=env)
         rc = proc.returncode
     finally:
-        if shim is not None:
-            shutil.rmtree(shim, ignore_errors=True)
+        shutil.rmtree(shim, ignore_errors=True)
     if rc in (6,):
         log("HV-UI SAUTÉE")
         chemin = "attente"
@@ -279,6 +355,7 @@ def host() -> int:
     preuves = os.environ.get("HV_EVIDENCE", "")
     log("HV-UI chemin=%s rc=%s durée=%.0f preuves=%s" % (chemin, rc, time.time() - t0, preuves or "vm"))
     return rc
+
 
 
 def main(argv: list[str]) -> int:

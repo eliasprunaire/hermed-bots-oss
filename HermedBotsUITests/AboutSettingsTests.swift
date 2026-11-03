@@ -5,6 +5,14 @@ final class AboutSettingsTests: XCTestCase {
     private let environment = ProcessInfo.processInfo.environment
     private var apiURL: String? { environment["HV_API_URL"] }
 
+    /// `/_hv/ready` n'existe que sur le faux serveur (pas sur orb).
+    private func isFakeServer() -> Bool {
+        guard let apiURL, let url = URL(string: apiURL + "/_hv/ready") else { return false }
+        guard let data = try? Data(contentsOf: url),
+              let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return body["mode"] != nil
+    }
+
     override func setUp() {
         continueAfterFailure = false
     }
@@ -47,7 +55,14 @@ final class AboutSettingsTests: XCTestCase {
         let app = launch()
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10), "la fenêtre ne s'ouvre pas")
         let bot = app.descendants(matching: .any).matching(identifier: AccessibilityID.botRow("hv-bot-a")).firstMatch
-        try XCTSkipUnless(bot.waitForExistence(timeout: 20), "profil hv-bot-a absent : table/clés de test ou instance orb sans ces profils")
+        if !bot.waitForExistence(timeout: 20) {
+            if isFakeServer() {
+                XCTFail("profil hv-bot-a absent sous faux serveur (table/clés de test attendues)")
+            } else {
+                throw XCTSkip("profil hv-bot-a absent : instance orb sans ces profils")
+            }
+            return
+        }
         let shown = settledVersion(in: app)
         let open = element(.connectionOpen, in: app)
         XCTAssertTrue(open.waitForExistence(timeout: 10), "hd.connection.open absent")

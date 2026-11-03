@@ -39,13 +39,15 @@ CUT_UNTIL = [0.0]
 RUNS = set()
 MODEL, MSGS = {}, {}  # verrou de modèle et nombre de messages par session
 PROFILE_MODELS = {}  # modèles posés par POST /_hv/profile-models (reset les efface)
-SESSION_MSGS = {}  # messages par session ; seed = fixtures, nouvelle session = []
-RUN_INPUT = {}  # run_id -> input du POST /v1/runs
+SESSION_MSGS = {}  # (profile, session) -> messages ; seed = fixtures, nouvelle session = []
+RUN_INPUT = {}  # run_id -> {input, session, profile}
 PENDING = {}  # run_id -> {gate, choice, request_id} pour HV_APPROVAL
+RECORDED_RUNS = set()  # run_id déjà versés au transcript (dédup par id, pas par texte)
+RUN_SSE = {}  # run_id -> {events, choice, request_id} pour reprise Last-Event-ID
 MALFORMED = os.environ.get("HV_MALFORMED", "null")
-SESSIONS = {s["id"] for s in C["contracts"]["list_sessions"]["response"]["data"]}
+SEED_SESSIONS = {s["id"] for s in C["contracts"]["list_sessions"]["response"]["data"]}
+SESSIONS = {}  # profile -> set(session_id)
 MODES = {"normal", "slow", "down", "drop-route", "fields", "malformed"}
-SEED_SESSIONS = set(SESSIONS)
 SEED_MSG_DATA = [
     {"id": 13, "session_id": "{session}", "role": "user", "content": "Bonjour", "tool_call_id": None, "tool_calls": None, "tool_name": None, "timestamp": 1792330255.35, "token_count": None, "finish_reason": None, "reasoning": None, "reasoning_content": None, "display_kind": None},
     {"id": 14, "session_id": "{session}", "role": "assistant", "content": "Réponse de test", "tool_call_id": None, "tool_calls": None, "tool_name": None, "timestamp": 1792330255.68, "token_count": None, "finish_reason": "stop", "reasoning": None, "reasoning_content": None, "display_kind": None},
@@ -59,10 +61,21 @@ STATE = {
     "profiles": None,
 }
 
+def _seed_profiles():
+    if STATE["profiles"] is not None:
+        return list(STATE["profiles"])
+    return list(C["profiles"]["served"])
+
 def seed_session_messages():
     SESSION_MSGS.clear()
-    for sid in SEED_SESSIONS:
-        SESSION_MSGS[sid] = [dict(m, session_id=sid) for m in SEED_MSG_DATA]
+    SESSIONS.clear()
+    RECORDED_RUNS.clear()
+    RUN_SSE.clear()
+    PENDING.clear()
+    for profile in _seed_profiles():
+        SESSIONS[profile] = set(SEED_SESSIONS)
+        for sid in SEED_SESSIONS:
+            SESSION_MSGS[(profile, sid)] = [dict(m, session_id=sid) for m in SEED_MSG_DATA]
 
 seed_session_messages()
 
@@ -89,13 +102,15 @@ def record_run_transcript(run_id, assistant_text):
     if not isinstance(meta, dict):
         return
     sid = meta.get("session")
+    profile = meta.get("profile")
     user_txt = meta.get("input") or ""
-    if not sid:
+    if not sid or not profile:
         return
-    bucket = SESSION_MSGS.setdefault(sid, [])
-    # évite les doublons si le client relit deux fois
-    if bucket and bucket[-1].get("role") == "assistant" and bucket[-1].get("content") == assistant_text:
+    # Déduplique par identifiant de run (deux tours à même texte restent distincts).
+    if run_id in RECORDED_RUNS:
         return
+    RECORDED_RUNS.add(run_id)
+    bucket = SESSION_MSGS.setdefault((profile, sid), [])
     base = 1000 + len(bucket)
     if user_txt:
         bucket.append(_msg(sid, "user", user_txt, base))
@@ -103,8 +118,16 @@ def record_run_transcript(run_id, assistant_text):
     if assistant_text:
         bucket.append(_msg(sid, "assistant", assistant_text, base))
 
-def session_row(sid):
-    msgs = SESSION_MSGS.get(sid) or []
+def session_row(sid, profile=None):
+    if profile is not None:
+        msgs = SESSION_MSGS.get((profile, sid)) or []
+    else:
+        # repli : première occurrence (listes hors profil)
+        msgs = []
+        for (p, s), bucket in SESSION_MSGS.items():
+            if s == sid:
+                msgs = bucket
+                break
     preview = ""
     for m in msgs:
         if m.get("role") == "user" and m.get("content"):
@@ -114,7 +137,7 @@ def session_row(sid):
         "id": sid,
         "source": "api_server",
         "user_id": None,
-        "model": MODEL.get(sid),
+        "model": MODEL.get((profile, sid)) if profile is not None else MODEL.get(sid),
         "title": None,
         "started_at": time.time(),
         "ended_at": None,
@@ -169,11 +192,11 @@ def reset_state():
     PROFILE_MODELS.clear()
     RUN_INPUT.clear()
     PENDING.clear()
-    SESSIONS.clear()
-    SESSIONS.update(SEED_SESSIONS)
-    seed_session_messages()
+    RECORDED_RUNS.clear()
+    RUN_SSE.clear()
     CUT_UNTIL[0] = 0.0
     STATE.update(mode=a.mode, drop=DROP, reject_key=False, omit_tokens=False, version=C["version"], profiles=None)
+    seed_session_messages()
 
 def compile_path(path):
     parts = re.split(r"\{(\w+)\}", path)  # le découpage alterne texte et nom de variable
@@ -318,15 +341,20 @@ class H(BaseHTTPRequestHandler):
     def _approval_events(self, run, inp):
         huge = "HV_APPROVAL_HUGE" in inp
         cmd = ("HUGE-BEGIN " + ("x" * 200000)) if huge else "/tmp/hv.txt"
-        req_id = "apr_" + (run or "x")
         with LOCK:
+            cached = RUN_SSE.get(run)
+            if cached is not None:
+                return list(cached["head"]), cached["request_id"], True
+            req_id = "apr_" + (run or "x")
             PENDING[run] = {"gate": threading.Event(), "choice": None, "request_id": req_id}
-        return [
-            {"event": "tool.started", "run_id": run, "tool": "file.write", "preview": cmd},
-            {"event": "approval.request", "run_id": run, "request_id": req_id, "tool": "file.write",
-             "command": cmd, "description": "écrire le fichier", "choices": ["once", "session", "always", "deny"],
-             "allow_permanent": True, "allow_session": True},
-        ], req_id
+            head = [
+                {"event": "tool.started", "run_id": run, "tool": "file.write", "preview": cmd},
+                {"event": "approval.request", "run_id": run, "request_id": req_id, "tool": "file.write",
+                 "command": cmd, "description": "écrire le fichier", "choices": ["once", "session", "always", "deny"],
+                 "allow_permanent": True, "allow_session": True},
+            ]
+            RUN_SSE[run] = {"head": list(head), "tail": None, "request_id": req_id, "choice": None}
+            return head, req_id, False
     def _stream(self, v):
         self._stamp_log(200)
         run = v.get("run")
@@ -359,12 +387,33 @@ class H(BaseHTTPRequestHandler):
             record_run_transcript(run, "HV-FAKE-TOOL-DONE")
             return out
         if run and "HV_APPROVAL" in inp:
-            head, req_id = self._approval_events(run, inp)
+            head, req_id, resumed = self._approval_events(run, inp)
             self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
             try:
                 self.wfile.write(b": open\n\n")
+                last = int(self.headers.get("Last-Event-ID") or -1)
                 i = 0
+                # Reprise : rejouer head+tail déjà émis après Last-Event-ID, sans recréer l'approbation.
+                with LOCK:
+                    cached = RUN_SSE.get(run) or {}
+                    prior_choice = cached.get("choice")
+                    prior_tail = cached.get("tail")
+                if resumed and prior_tail is not None:
+                    replay = list(head) + list(prior_tail)
+                    for ev in replay:
+                        if i <= last:
+                            i += 1
+                            continue
+                        ev = dict(strip_usage(ev), seq=i, timestamp=time.time())
+                        self.wfile.write(("id: %d\ndata: %s\n\n" % (i, json.dumps(ev, ensure_ascii=False))).encode()); self.wfile.flush()
+                        i += 1
+                        time.sleep(pace)
+                    self.wfile.write(b": stream closed\n\n"); self.wfile.flush()
+                    return
                 for ev in head:
+                    if i <= last:
+                        i += 1
+                        continue
                     ev = dict(strip_usage(ev), seq=i, timestamp=time.time())
                     if ev.get("event") == "approval.request":
                         with LOCK:
@@ -372,13 +421,16 @@ class H(BaseHTTPRequestHandler):
                     self.wfile.write(("id: %d\ndata: %s\n\n" % (i, json.dumps(ev, ensure_ascii=False))).encode()); self.wfile.flush()
                     i += 1
                     time.sleep(pace)
-                gate = PENDING.get(run, {}).get("gate")
-                # attend la décision (ou coupure / kill) ; keepalives pour le client
-                # Coupure / down : garder le flux ouvert (la feuille reste) ; seul POST /approval
-                # reçoit 503 — sinon un break émet deny et hd.approval.status n'apparaît jamais.
-                while gate is not None and not gate.wait(1.0):
-                    self.wfile.write(b": keepalive\n\n"); self.wfile.flush()
-                choice = (PENDING.get(run) or {}).get("choice") or "deny"
+                if prior_choice is not None:
+                    choice = prior_choice
+                else:
+                    gate = PENDING.get(run, {}).get("gate")
+                    # attend la décision (ou coupure / kill) ; keepalives pour le client
+                    # Coupure / down : garder le flux ouvert (la feuille reste) ; seul POST /approval
+                    # reçoit 503 — sinon un break émet deny et hd.approval.status n'apparaît jamais.
+                    while gate is not None and not gate.wait(1.0):
+                        self.wfile.write(b": keepalive\n\n"); self.wfile.flush()
+                    choice = (PENDING.get(run) or {}).get("choice") or "deny"
                 if choice in ("once", "session", "always"):
                     tail = [
                         {"event": "approval.responded", "run_id": run, "choice": choice, "request_id": req_id, "resolved": 1},
@@ -401,7 +453,14 @@ class H(BaseHTTPRequestHandler):
                          "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0},
                          "runtime": {"provider": "custom", "model": "hv-fake-1", "route_source": "global"}},
                     ]
+                with LOCK:
+                    if run in RUN_SSE:
+                        RUN_SSE[run]["tail"] = list(tail)
+                        RUN_SSE[run]["choice"] = choice
                 for ev in tail:
+                    if i <= last:
+                        i += 1
+                        continue
                     ev = dict(strip_usage(ev), seq=i, timestamp=time.time())
                     self.wfile.write(("id: %d\ndata: %s\n\n" % (i, json.dumps(ev, ensure_ascii=False))).encode()); self.wfile.flush()
                     i += 1
@@ -412,6 +471,7 @@ class H(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
             return
+
         if run and "HV_TOOL_SHELL" in inp:
             # délai volontaire : XCTest doit pouvoir voir hd.tool.current avant tool.completed
             self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
@@ -513,7 +573,11 @@ class H(BaseHTTPRequestHandler):
         served = served_profiles()
         if "profile" in v and v["profile"] not in served: return self._send(404, {"error": "Unknown or unconfigured profile"})
         if "run" in v and v["run"] not in RUNS: return self._send(404, err("run_not_found", "Run not found: " + v["run"]))
-        if "session" in v and v["session"] not in SESSIONS: return self._send(404, err("session_not_found", "Session not found: " + v["session"]))
+        if "session" in v:
+            profile = v.get("profile")
+            owned = SESSIONS.get(profile) if profile is not None else None
+            if owned is None or v["session"] not in owned:
+                return self._send(404, err("session_not_found", "Session not found: " + v["session"]))
         if method == "POST" and "body" in c:  # une clé de `body` absente ou vide donne 400, comme Hermes
             try: j = json.loads(body or "{}")
             except ValueError: return self._send(400, err(None, "Invalid JSON"))
@@ -529,48 +593,53 @@ class H(BaseHTTPRequestHandler):
                 RUN_INPUT[v["new_run"]] = {
                     "input": posted_run.get("input") or "",
                     "session": posted_run.get("session_id") or posted_run.get("session") or v.get("session"),
+                    "profile": v.get("profile"),
                 }
                 if posted_run.get("model"):
                     # le corps du run porte le modèle (S4) : utile au journal / runtime
                     v = dict(v, model=posted_run.get("model"))
         if name == "new_session":
-            SESSIONS.add(v["new_session"])
-            SESSION_MSGS[v["new_session"]] = []  # transcript vide après création
-        if name == "set_model" and not (STATE["mode"] == "malformed" and MALFORMED == "nolock"): MODEL[v["session"]] = json.loads(body)["model"]
+            profile = v.get("profile")
+            SESSIONS.setdefault(profile, set()).add(v["new_session"])
+            SESSION_MSGS[(profile, v["new_session"])] = []  # transcript vide après création
+        if name == "set_model" and not (STATE["mode"] == "malformed" and MALFORMED == "nolock"): MODEL[(v.get("profile"), v["session"])] = json.loads(body)["model"]
         if name == "send_message":  # le chat de session lit le verrou de modèle (S4)
-            MSGS[v["session"]] = MSGS.get(v["session"], 0) + 1
-            v = dict(v, model=MODEL.get(v["session"], "hv-fake-1"), route_source="session_model_lock" if v["session"] in MODEL else "global", n=str(MSGS[v["session"]]))
+            pk = (v.get("profile"), v["session"])
+            MSGS[pk] = MSGS.get(pk, 0) + 1
+            v = dict(v, model=MODEL.get(pk, "hv-fake-1"), route_source="session_model_lock" if pk in MODEL else "global", n=str(MSGS[pk]))
             try:
                 posted = json.loads(body or "{}")
             except ValueError:
                 posted = {}
             user_txt = posted.get("input") or posted.get("content") or "hv-probe"
-            bucket = SESSION_MSGS.setdefault(v["session"], [])
+            bucket = SESSION_MSGS.setdefault((v.get("profile"), v["session"]), [])
             bucket.append({"id": 1000 + len(bucket), "session_id": v["session"], "role": "user", "content": user_txt, "tool_call_id": None, "tool_calls": None, "tool_name": None, "timestamp": time.time(), "token_count": None, "finish_reason": None, "reasoning": None, "reasoning_content": None, "display_kind": None})
             bucket.append({"id": 1000 + len(bucket), "session_id": v["session"], "role": "assistant", "content": "HV-FAKE-REPLY model=%s user_msgs=%s" % (v["model"], v["n"]), "tool_call_id": None, "tool_calls": None, "tool_name": None, "timestamp": time.time(), "token_count": None, "finish_reason": "stop", "reasoning": None, "reasoning_content": None, "display_kind": None})
         if c["response"] == "SSE": return self._stream(v)
         resp = fill(c["response"], v)
         if name == "session_messages":
             sid = v.get("session")
-            resp = {"object": "list", "session_id": sid, "data": list(SESSION_MSGS.get(sid, []))}
+            profile = v.get("profile")
+            resp = {"object": "list", "session_id": sid, "data": list(SESSION_MSGS.get((profile, sid), []))}
         if name == "list_sessions":
             # les verrous MODEL se voient dans la liste (HD-10 nom inconnu / modèle d'un fil)
             # les sessions créées pendant le test doivent apparaître (Nouvelle session / premier envoi)
+            profile = v.get("profile")
             data = list(resp.get("data") or [])
             out = []
             seen = set()
             for row in data:
                 row = dict(row)
                 sid = row.get("id")
-                if sid in MODEL:
-                    row["model"] = MODEL[sid]
+                if (profile, sid) in MODEL:
+                    row["model"] = MODEL[(profile, sid)]
                 out.append(row)
                 if sid:
                     seen.add(sid)
-            for sid in list(SESSIONS):
+            for sid in list(SESSIONS.get(profile, ())):
                 if sid in seen:
                     continue
-                out.append(session_row(sid))
+                out.append(session_row(sid, profile=profile))
                 seen.add(sid)
             resp = dict(resp, data=out)
         if name == "version":

@@ -374,7 +374,15 @@ final class SixActions: XCTestCase {
 
     private func openBot(_ id: String = "hv-bot-a", in app: XCUIApplication) throws {
         let row = element(AccessibilityID.botRow(id), in: app)
-        try XCTSkipUnless(row.waitForExistence(timeout: 20), "profil \(id) absent (hv-bot-a/b ou table de test)")
+        let present = row.waitForExistence(timeout: 20)
+        if !present {
+            if serverMode() != nil {
+                XCTFail("profil \(id) absent sous faux serveur (hv-bot-a/b ou table de test)")
+            } else {
+                throw XCTSkip("profil \(id) absent (instance orb sans ces profils)")
+            }
+            return
+        }
         // la liste existe avant que ses lignes aient une place à l'écran : un clic trop tôt ne trouve pas de point à cliquer
         let hittable = Date().addingTimeInterval(10)
         while !row.isHittable, Date() < hittable { usleep(50_000) }
@@ -711,10 +719,16 @@ final class SixActions: XCTestCase {
         try XCTSkipUnless(serverMode() == "normal", "le faux serveur n'est pas en mode normal")
     }
 
-    /// Profils issue56 / table de test : saute proprement sur une instance orb sans hv-bot-a/b.
+    /// Profils issue56 / table de test : XCTFail sous faux serveur ; XCTSkip seulement hors fake (orb sans ces profils).
     private func requireIssue56Bots(in app: XCUIApplication, timeout: TimeInterval = 20) throws {
         let row = element(AccessibilityID.botRow("hv-bot-a"), in: app)
-        try XCTSkipUnless(row.waitForExistence(timeout: timeout), "profil hv-bot-a absent (clés/table de test ou instance orb sans ces profils)")
+        let present = row.waitForExistence(timeout: timeout)
+        if present { return }
+        if serverMode() != nil {
+            XCTFail("profil hv-bot-a absent sous faux serveur (clés/table de test attendues)")
+        } else {
+            throw XCTSkip("profil hv-bot-a absent (instance orb sans ces profils)")
+        }
     }
 
     /// Le sélecteur n'a qu'une option tant que les profils ont tous le même modèle : `hv-bot-b` prend `model-y`

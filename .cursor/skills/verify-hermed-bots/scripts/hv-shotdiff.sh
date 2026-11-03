@@ -47,13 +47,19 @@ CAP=$1; BASE=$2; DIF=$3; TOL=${4:-0.02}
 compgen -G "$CAP/*.png" >/dev/null || { echo "SHOT FAIL (15): aucune capture dans $CAP" >&2; exit 15; }
 command -v compare >/dev/null 2>&1 || { echo "SHOT FAIL (13): ImageMagick 'compare' absent" >&2; exit 13; }
 mkdir -p "$DIF"; rc=0
+# Locale C : compare/identify/awk doivent produire un point décimal (fr_FR sinon → virgule → faux OK).
+export LC_ALL=C
+export LC_NUMERIC=C
 for f in "$CAP"/*.png; do
   [ -e "$f" ] || continue
   n=$(basename "$f")
   if [ ! -f "$BASE/$n" ]; then echo "MISSING $n"; [ $rc -eq 0 ] && rc=12; continue; fi
   px=$(compare -metric AE -fuzz 5% "$BASE/$n" "$f" "$DIF/$n" 2>&1 >/dev/null || true)
+  # Normalise une éventuelle virgule décimale (locale parent) avant awk.
   px=${px%% *}
+  px=$(printf '%s' "$px" | tr ',' '.')
   tot=$(identify -format '%[fx:w*h]' "$BASE/$n")
+  tot=$(printf '%s' "$tot" | tr ',' '.')
   ratio=$(awk -v a="$px" -v b="$tot" 'BEGIN{ if (a !~ /^[0-9.e+]+$/) a=b; printf "%.5f", a/b }')
   if awk -v r="$ratio" -v t="$TOL" 'BEGIN{exit !(r>t)}'; then echo "DIFF $n ratio=$ratio > $TOL"; rc=11
   else echo "OK   $n ratio=$ratio"; rm -f "$DIF/$n"; fi
