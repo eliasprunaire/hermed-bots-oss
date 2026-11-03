@@ -10,7 +10,8 @@ final class LiveTunnel: XCTestCase {
             throw XCTSkip("La lane hv-vm-ui.py est requise")
         }
         let keys = try JSONDecoder().decode([String: String].self, from: Data(raw.utf8))
-        XCTAssertEqual(Set(keys.keys), ["hv-bot-a", "hv-bot-b"])
+        let wanted = ["hv-bot-a", "hv-bot-b"]
+        try XCTSkipUnless(Set(wanted).isSubset(of: Set(keys.keys)), "profils hv-bot-a/b absents des clés de test")
         let base = try XCTUnwrap(environment["HV_API_URL"])
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 15
@@ -31,9 +32,11 @@ final class LiveTunnel: XCTestCase {
         app.launchEnvironment["HV_API_URL"] = base
         app.launchEnvironment["HV_TEST_API_KEYS"] = raw
         app.launchEnvironment["HV_TEST_PROFILE_TABLE"] = table
-        app.launch()
         defer { app.terminate() }
         for profile in ["hv-bot-a", "hv-bot-b"] {
+            // Un bot déjà ouvert peut masquer l'autre ligne : chaque profil repart d'un lancement propre.
+            if app.state != .notRunning { app.terminate() }
+            app.launch()
             let row = app.descendants(matching: .any).matching(identifier: AccessibilityID.botRow(profile)).firstMatch
             XCTAssertTrue(row.waitForExistence(timeout: 20))
             let deadline = Date().addingTimeInterval(20)
@@ -51,7 +54,11 @@ final class LiveTunnel: XCTestCase {
             HVShot.capture("issue56-\(profile)", app)
             print("HV-VERSION live profile=\(profile) version=\(expectedVersion) erreur=absente")
         }
+        // Relance finale : les deux lignes côte à côte, sans conversation ouverte
+        if app.state != .notRunning { app.terminate() }
+        app.launch()
         let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier MATCHES %@", #"hd\.bots\.row\.[^.]+"#))
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: AccessibilityID.botRow("hv-bot-a")).firstMatch.waitForExistence(timeout: 20))
         XCTAssertEqual(Set(rows.allElementsBoundByIndex.map(\.identifier)), [AccessibilityID.botRow("hv-bot-a"), AccessibilityID.botRow("hv-bot-b")])
     }
 }

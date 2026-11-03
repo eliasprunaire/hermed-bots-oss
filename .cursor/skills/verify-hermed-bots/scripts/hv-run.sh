@@ -156,7 +156,9 @@ PYKEYS
       fi
       export HV_TEST_API_KEYS
       start_env || { worst $?; return; }
-      TEST_RUNNER_HV_TEST_MODE=1 TEST_RUNNER_HV_TEST_API_KEYS="$HV_TEST_API_KEYS" TEST_RUNNER_HV_API_URL="$(URL)" TEST_RUNNER_HV_SHOTS="$HV_EVIDENCE/shots" \
+      TR_ENV=(TEST_RUNNER_HV_TEST_MODE=1 TEST_RUNNER_HV_TEST_API_KEYS="$HV_TEST_API_KEYS" TEST_RUNNER_HV_API_URL="$(URL)" TEST_RUNNER_HV_SHOTS="$HV_EVIDENCE/shots")
+      [ -n "${HV_TEST_PROFILE_TABLE:-}" ] && TR_ENV+=(TEST_RUNNER_HV_TEST_PROFILE_TABLE="$HV_TEST_PROFILE_TABLE")
+      env "${TR_ENV[@]}" \
       xcodebuild test-without-building -xctestrun "$HV_XCTESTRUN" -destination 'platform=macOS' \
         -resultBundlePath "$HV_EVIDENCE/result.xcresult" > "$HV_EVIDENCE/xcodebuild.log" 2>&1; worst $(( $? ? 10 : 0 ))
       ;;

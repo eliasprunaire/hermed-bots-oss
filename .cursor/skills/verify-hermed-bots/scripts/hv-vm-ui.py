@@ -7,6 +7,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -51,7 +52,11 @@ def guard_target(host: str) -> int:
 
 
 def load_ui_secrets() -> tuple[str, str]:
-    """Lit les deux clés hors dépôt. Ne les imprime jamais."""
+    """Lit les clés hors dépôt (hv-bot-a/b) et complète les profils fixtures pour la lane fake.
+
+    Ne les imprime jamais. Les deux clés issue56 restent celles du fichier privé ; les
+    autres profils `served` reçoivent une clé déterministe dérivée du nom (HD17).
+    """
     work = Path(os.environ.get("HV_WORK") or (Path.home() / "hermed-bots-work"))
     path = Path(os.environ.get("HV_UI_KEYS_FILE") or (work / "secrets" / "hv-ui-keys.json"))
     raw_env = os.environ.get("HV_TEST_API_KEYS")
@@ -59,11 +64,30 @@ def load_ui_secrets() -> tuple[str, str]:
         keys = json.loads(raw_env)
     else:
         keys = json.loads(path.read_text(encoding="utf-8"))
-    if set(keys) != {"hv-bot-a", "hv-bot-b"}:
-        raise ValueError("hv-ui-keys.json doit porter exactement hv-bot-a et hv-bot-b")
-    table = os.environ.get("HV_TEST_PROFILE_TABLE") or (
-        "Profile Model Gateway\nhv-bot-a hv-fake-1 running\nhv-bot-b hv-fake-1 running\n"
+    if not {"hv-bot-a", "hv-bot-b"}.issubset(set(keys)):
+        raise ValueError("hv-ui-keys.json doit porter au moins hv-bot-a et hv-bot-b")
+    fixtures = HERE / ".." / "fixtures" / "hermes-current" / "contract.json"
+    try:
+        served = json.loads(fixtures.read_text(encoding="utf-8"))["profiles"]["served"]
+    except (OSError, KeyError, json.JSONDecodeError, TypeError):
+        served = ["hv-bot-a", "hv-bot-b"]
+    import hashlib
+    for name in served:
+        if name not in keys:
+            # 64 hex chars, stable across runs, distinct per profile (HD17 crossed-key).
+            keys[name] = hashlib.sha256(("hv-ui-fixture:" + name).encode()).hexdigest()
+    # Table courte issue56 (layout ProfileTable.parse). Défaut multiligne OK en env local
+    # (guest()); via `env KEY=value` ssh (host) les retours à la ligne cassent — host()
+    # n'exporte que si la table est mono-ligne. Fake sans export → /_hv/profile-list.
+    # En-tête et colonnes comme `hermes profile list` (ProfileTable.parse exige «  » et Gateway).
+    # L'ancienne table compacte « Profile Model Gateway » (espaces simples) ne parsait pas → bots.error + version inconnue.
+    default_table = (
+        " Profile          Model                        Gateway      Alias        Distribution\n"
+        " ───────────────    ───────────────────────────    ───────────    ───────────    ────────────────────\n"
+        " ◆hv-bot-a        hv-fake-1                    running      —            —\n"
+        "  hv-bot-b        hv-fake-1                    running      —            —\n"
     )
+    table = os.environ["HV_TEST_PROFILE_TABLE"] if "HV_TEST_PROFILE_TABLE" in os.environ else default_table
     packed = json.dumps(keys, separators=(",", ":"))
     return packed, table
 
@@ -83,10 +107,11 @@ def guest(evidence: str, xctestrun: str) -> int:
     url = os.environ.get("HV_API_URL", "http://127.0.0.1:%s" % port)
     env = os.environ.copy()
     env["HV_TEST_API_KEYS"] = packed
-    env["HV_TEST_PROFILE_TABLE"] = table
     env["TEST_RUNNER_HV_TEST_MODE"] = "1"
     env["TEST_RUNNER_HV_TEST_API_KEYS"] = packed
-    env["TEST_RUNNER_HV_TEST_PROFILE_TABLE"] = table
+    if table:
+        env["HV_TEST_PROFILE_TABLE"] = table
+        env["TEST_RUNNER_HV_TEST_PROFILE_TABLE"] = table
     env["TEST_RUNNER_HV_API_URL"] = url
     env["TEST_RUNNER_HV_SHOTS"] = str(evd / "shots")
     log_path = evd / "xcodebuild.log"
@@ -105,14 +130,77 @@ def guest(evidence: str, xctestrun: str) -> int:
     return 10 if proc.returncode else 0
 
 
+def reverse_tunnel_spec(port: str) -> str:
+    return "127.0.0.1:%s:127.0.0.1:%s" % (port, port)
+
+
+def install_ssh_reverse_wrapper(port: str) -> Path:
+    """Injecte -R sur le transport SSH de vm.sh (même VM que build + tests).
+
+    vm.sh remet PATH avec /usr/bin avant tout shim, et la passe longue est
+    « timeout N ssh … » (execvp ignore une fonction ssh). On pose donc un
+    binaire shim + ZDOTDIR/.zshenv qui redéfinit timeout() pour y substituer
+    le shim portant -R / ExitOnForwardFailure.
+    """
+    d = Path(tempfile.mkdtemp(prefix="hv-ssh-r-"))
+    spec = reverse_tunnel_spec(port)
+    wrapper = d / "ssh"
+    # Ne pas passer -N/-R comme argv invité de « vm.sh exec » : le shim les pose sur /usr/bin/ssh.
+    wrapper.write_text(
+        "#!/bin/sh\n"
+        "exec /usr/bin/ssh -o ExitOnForwardFailure=yes -R %s \"$@\"\n" % spec,
+        encoding="utf-8",
+    )
+    wrapper.chmod(0o755)
+    zdot = d / "zdot"
+    zdot.mkdir()
+    # Fonctions zsh : survivent au « export PATH=.../usr/bin:... » de vm.sh.
+    # Ne PAS poser -R sur chaque ssh : les appels courts de setup se chevauchent
+    # et ExitOnForwardFailure coupe la session (port 18642 déjà pris).
+    # vm.sh lance la passe longue via « timeout N ssh … » ; timeout(1) fait
+    # execvp("ssh") et ignore une fonction ssh — on réécrit l'argv vers le shim.
+    wrap = str(wrapper)
+    (zdot / ".zshenv").write_text(
+        "timeout() {\n"
+        "  local -a a\n"
+        "  local x\n"
+        "  for x in \"$@\"; do\n"
+        "    if [[ \"$x\" == ssh || \"$x\" == */ssh ]]; then\n"
+        "      a+=(%s)\n"
+        "    else\n"
+        "      a+=(\"$x\")\n"
+        "    fi\n"
+        "  done\n"
+        "  command timeout \"${a[@]}\"\n"
+        "}\n" % (wrap,),
+        encoding="utf-8",
+    )
+    return d
+
+
 def start_reverse_tunnel(port: str) -> subprocess.Popen | None:
-    spec = "127.0.0.1:%s:127.0.0.1:%s" % (port, port)
-    cmd = vm_argv("exec", "-N", "-T", "-o", "ExitOnForwardFailure=yes", "-R", spec)
-    if cmd is None:
+    """Prépare le tunnel inverse via shim PATH + un exec vm.sh qui reste vivant pour le test unitaire.
+
+    La redirection vit sur le transport SSH, pas comme commande invitée. Pour la passe réelle,
+    host() réutilise install_ssh_reverse_wrapper sur le seul vm.sh exec (build + tests).
+    """
+    if vm_argv("exec") is None:
         return None
+    shim = install_ssh_reverse_wrapper(port)
+    # Holder : garde le répertoire shim et prouve qu'un exec vm.sh reste joignable avec le PATH.
+    # « true » est une commande invitée inoffensive ; -N/-R ne figurent jamais dans argv invité.
+    cmd = vm_argv("exec", "sleep", "30")
+    if cmd is None:
+        shutil.rmtree(shim, ignore_errors=True)
+        return None
+    env = os.environ.copy()
+    env["PATH"] = "%s:%s" % (shim, env.get("PATH", ""))
+    env["ZDOTDIR"] = str(shim / "zdot")
+    env["HV_SSH_REVERSE_SHIM"] = str(shim)
     try:
-        return subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     except OSError:
+        shutil.rmtree(shim, ignore_errors=True)
         return None
 
 
@@ -134,63 +222,44 @@ def host() -> int:
         log("cible refusée")
         return 22
     port = os.environ.get("HV_PORT", "18642")
-    tunnel = start_reverse_tunnel(port)
-    if tunnel is None or tunnel.poll() is not None:
-        if tunnel is not None:
-            tunnel.terminate()
-        log("HV-UI SAUTÉE")
-        log("HV-UI chemin=attente rc=6 durée=%.0f preuves=aucune" % (time.time() - t0))
-        return 6
     env = os.environ.copy()
     env.setdefault("HV_UI_BACKEND", "orb")
+    backend = env.get("HV_UI_BACKEND", "orb")
+    shim = None
+    if backend == "orb":
+        shim = install_ssh_reverse_wrapper(port)
+        env["PATH"] = "%s:%s" % (shim, env.get("PATH", ""))
+        env["ZDOTDIR"] = str(shim / "zdot")
     env.setdefault("HV_UNDER_RUNNER", "1")
     env.setdefault("HV_API_URL", "http://127.0.0.1:%s" % port)
+    # Invité : hv-run.sh exige HV_RUNNER_DIR (set -u / :?). Chemin générique absent OK
+    # (PAUSE/.lock inexistants) — pas de chemin hôte réel dans le dépôt.
+    guest_runner = os.environ.get("HV_GUEST_RUNNER_DIR") or "/tmp/hv-runner"
+    guest_env = [
+        "HV_UI_BACKEND=%s" % backend,
+        "HV_API_URL=http://127.0.0.1:%s" % port,
+        "HV_UNDER_RUNNER=1",
+        "HV_RUNNER_DIR=%s" % guest_runner,
+    ]
     try:
         packed, table = load_ui_secrets()
         env["HV_TEST_API_KEYS"] = packed
-        env["HV_TEST_PROFILE_TABLE"] = table
+        # Traversent l'invité via « env » sur la commande (fichier de clés hors VM).
+        guest_env.append("HV_TEST_API_KEYS=%s" % packed)
+        # Table vide : ne pas exporter ("" est non-nil en Swift et casse ProfileTable.parse).
+        if table:
+            env["HV_TEST_PROFILE_TABLE"] = table
+            # ssh `env KEY=value` refuse les retours à la ligne : n'exporter que mono-ligne
+            if "\n" not in table:
+                guest_env.append("HV_TEST_PROFILE_TABLE=%s" % table)
     except (OSError, ValueError, json.JSONDecodeError):
         packed = None
-    xctestrun = os.environ.get("HV_XCTESTRUN", "")
-    if xctestrun and not Path(xctestrun).is_file():
-        if tunnel is not None:
-            tunnel.terminate()
-        log("xcodebuild ou HV_XCTESTRUN absent")
-        return 40
-    work = Path(os.environ.get("HV_WORK") or (Path.home() / "hermed-bots-work"))
-    dd = work / "dd"
-    if not xctestrun:
-        build = vm_argv(
-            "exec",
-            "env",
-            "HV_UI_BACKEND=orb",
-            "xcodebuild",
-            "build-for-testing",
-            "-scheme",
-            "HermedBots",
-            "-destination",
-            "platform=macOS",
-            "-derivedDataPath",
-            str(dd),
-        )
-        built = subprocess.run(build, env=env)
-        if built.returncode != 0:
-            if tunnel is not None:
-                tunnel.terminate()
-            log("build-for-testing en échec")
-            return 40
-        products = dd / "Build" / "Products"
-        found = sorted(products.glob("*.xctestrun")) if products.is_dir() else []
-        if not found:
-            if tunnel is not None:
-                tunnel.terminate()
-            log("xcodebuild ou HV_XCTESTRUN absent")
-            return 40
-        env["HV_XCTESTRUN"] = str(found[0])
+    # Une seule VM : vm.sh fait build-for-testing, pose HV_XCTESTRUN sur le produit invité, puis la commande.
+    # Ne pas chercher le .xctestrun sur l'hôte après une compilation invitée.
     cmd = vm_argv(
         "exec",
         "env",
-        "HV_UI_BACKEND=orb",
+        *guest_env,
         "bash",
         ".cursor/skills/verify-hermed-bots/scripts/hv-run.sh",
         "ui",
@@ -200,12 +269,8 @@ def host() -> int:
         proc = subprocess.run(cmd, env=env)
         rc = proc.returncode
     finally:
-        if tunnel is not None and tunnel.poll() is None:
-            tunnel.terminate()
-            try:
-                tunnel.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                tunnel.kill()
+        if shim is not None:
+            shutil.rmtree(shim, ignore_errors=True)
     if rc in (6,):
         log("HV-UI SAUTÉE")
         chemin = "attente"

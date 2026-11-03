@@ -3,6 +3,7 @@ import XCTest
 @MainActor
 final class ConcurrencyTests: HD12Harness {
     override func setUpWithError() throws {
+        try super.setUpWithError()
         try XCTSkipUnless(environment["HV_HD14_LANE"] == "1", "HD14 nécessite docs/spike/hd14-instruments/run-ui.sh dans la VM")
     }
 

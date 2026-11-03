@@ -7,6 +7,7 @@ final class KillSwitchTests: HD12Harness {
     private let profiles = ["hv-bot-a", "hv-bot-b", "cyber"]
 
     override func setUpWithError() throws {
+        try super.setUpWithError()
         try XCTSkipUnless(environment["HV_HD15_LANE"] == "1", "HD15 nécessite le serveur de lane dans la VM")
     }
 

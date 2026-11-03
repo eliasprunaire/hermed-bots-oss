@@ -203,8 +203,13 @@ if [ "$1" = ssh ]; then
 fi
 if [ "$1" = exec ]; then
   shift
+  # -N as guest argv is the old bug (dispatch 127). Refuse it.
   if [ "$1" = -N ]; then
-    sleep 30
+    echo "guest argv must not carry -N" >&2
+    exit 127
+  fi
+  if [ "$1" = sleep ]; then
+    sleep "$2"
     exit 0
   fi
   exit 0
@@ -222,19 +227,156 @@ exit 2
     "python3",
     [
       "-c",
-      "import time, hv_vm_ui; p = hv_vm_ui.start_reverse_tunnel('18642'); time.sleep(0.4); alive = p is not None and p.poll() is None\n" +
-        "print('alive' if alive else (p.poll() if p else 'none'));\n" +
-        "(p.terminate() if p else None); raise SystemExit(0 if alive else 1)",
+      "import os, time, hv_vm_ui\n" +
+        "p = hv_vm_ui.start_reverse_tunnel('18642'); time.sleep(0.4)\n" +
+        "alive = p is not None and p.poll() is None\n" +
+        "shim = None\n" +
+        "if p is not None:\n" +
+        "  # PATH du holder porte le shim ssh qui injecte -R sur le transport\n" +
+        "  import pathlib\n" +
+        "  # relire via /proc indisponible : inspecter le wrapper créé à côté\n" +
+        "  pass\n" +
+        "shim_dir = hv_vm_ui.install_ssh_reverse_wrapper('18642')\n" +
+        "wrapper = shim_dir / 'ssh'\n" +
+        "body = wrapper.read_text(encoding='utf-8')\n" +
+        "zshenv = (shim_dir / 'zdot' / '.zshenv').read_text(encoding='utf-8')\n" +
+        "print('alive' if alive else (p.poll() if p else 'none'))\n" +
+        "print('WRAPPER', body.replace('\\n', '|'))\n" +
+        "print('ZSHENV', 'timeout()' in zshenv, str(wrapper) in zshenv)\n" +
+        "(p.terminate() if p else None)\n" +
+        "ok = alive and '-R' in body and 'ExitOnForwardFailure' in body and '-N' not in body.split()\n" +
+        "ok = ok and 'timeout()' in zshenv and str(wrapper) in zshenv and 'ssh()' not in zshenv\n" +
+        "raise SystemExit(0 if ok else 1)",
     ],
     { encoding: "utf8", cwd: mod, env: { ...process.env, HV_RUNNER_DIR: dir }, timeout: 10000 },
   );
   const argv = readFileSync(log, "utf8");
   assert.equal(/(^|\n)ssh( |$)/.test(argv), false, argv);
   assert.match(argv, /^exec /m);
-  assert.match(argv, /-N/);
-  assert.match(argv, /-R/);
+  assert.equal(/\n?-N\b/.test(argv) || /(^| )-N( |$)/.test(argv), false, "guest argv must not carry -N: " + argv);
+  assert.match(argv, /sleep/);
   assert.equal(run.status, 0, run.stdout + run.stderr + argv);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("hv-vm-ui default profile table matches ProfileTable.parse layout", () => {
+  const src = readFileSync(VM_UI, "utf8");
+  assert.match(src, /Profile\s+Model\s+Gateway/);
+  assert.match(src, /hv-bot-a\s+hv-fake-1\s+running/);
+  assert.match(src, /hv-bot-b\s+hv-fake-1\s+running/);
+  // Un en-tête à espaces simples (« Profile Model Gateway ») est rejeté par ProfileTable.parse.
+  assert.doesNotMatch(src, /"Profile Model Gateway\\nhv-bot-a hv-fake-1 running/);
+});
+
+test("hv-vm-ui host consumes guest xctestrun in one vm.sh exec", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-vm-host-"));
+  const log = join(dir, "argv.log");
+  writeFileSync(
+    join(dir, "vm.sh"),
+    `#!/bin/sh
+echo "$@" >> "${log}"
+if [ "$1" = exec ]; then
+  exit 0
+fi
+echo usage >&2
+exit 2
+`,
+    { mode: 0o755 },
+  );
+  const work = join(dir, "work");
+  mkdirSync(join(work, "secrets"), { recursive: true });
+  writeFileSync(
+    join(work, "secrets", "hv-ui-keys.json"),
+    JSON.stringify({ "hv-bot-a": "a".repeat(20), "hv-bot-b": "b".repeat(20) }),
+  );
+  const mod = join(dir, "mod");
+  mkdirSync(mod);
+  writeFileSync(join(mod, "hv_vm_ui.py"), readFileSync(VM_UI));
+  const run = spawnSync(
+    "python3",
+    ["-c", "import hv_vm_ui; raise SystemExit(hv_vm_ui.host())"],
+    {
+      encoding: "utf8",
+      cwd: mod,
+      env: {
+        ...process.env,
+        HV_RUNNER_DIR: dir,
+        HV_WORK: work,
+        HV_TARGET_HOST: "hv-hermes-test",
+        // garde : pas de build hôte ni glob .xctestrun
+      },
+      timeout: 10000,
+    },
+  );
+  const argv = readFileSync(log, "utf8");
+  assert.match(argv, /^exec /m);
+  assert.equal(argv.includes("build-for-testing"), false, argv);
+  assert.equal(argv.includes(".xctestrun"), false, argv);
+  assert.match(argv, /hv-run\.sh/);
+  assert.match(argv, /HV_RUNNER_DIR=/);
+  assert.match(argv, /HV_UNDER_RUNNER=1/);
+  assert.equal(run.status, 0, run.stdout + run.stderr + argv);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("fake Hermes lists configured profiles including new names", async () => {
+  const port = await freePort();
+  const child = await waitReady(port, {});
+  try {
+    const posted = await request(port, "/_hv/config", {
+      method: "POST",
+      body: JSON.stringify({ profiles: ["default", "hv-bot-a", "hv-new"] }),
+    });
+    assert.equal(posted.status, 200);
+    const listed = await request(port, "/_hv/profile-list");
+    assert.equal(listed.status, 200);
+    assert.match(listed.raw, /\bhv-new\b/);
+    assert.match(listed.raw, /\bhv-bot-a\b/);
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("new session starts with an empty messages list", async () => {
+  const port = await freePort();
+  const child = await waitReady(port, {});
+  try {
+    const created = await request(port, "/p/hv-bot-a/api/sessions", {
+      method: "POST",
+      body: "{}",
+    });
+    assert.equal(created.status, 201);
+    const sid = created.json && created.json.session && created.json.session.id;
+    assert.ok(sid, "new session id");
+    const messages = await request(port, `/p/hv-bot-a/api/sessions/${sid}/messages`);
+    assert.equal(messages.status, 200);
+    const data = messages.json && messages.json.data;
+    assert.ok(Array.isArray(data));
+    assert.equal(data.length, 0, "new session must not reuse seed fixtures");
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("POST /_hv/profile-models configures models and reset clears them", async () => {
+  const port = await freePort();
+  const child = await waitReady(port, {});
+  try {
+    const posted = await request(port, "/_hv/profile-models", {
+      method: "POST",
+      body: JSON.stringify({ "hv-bot-b": "model-y" }),
+    });
+    assert.equal(posted.status, 200, posted.raw);
+    const listed = await request(port, "/_hv/profile-list");
+    assert.equal(listed.status, 200);
+    assert.match(listed.raw, /model-y/);
+    const reset = await request(port, "/_hv/reset", { method: "POST", body: "{}" });
+    assert.equal(reset.status, 200);
+    const listed2 = await request(port, "/_hv/profile-list");
+    assert.equal(listed2.raw.includes("model-y"), false);
+  } finally {
+    child.kill("SIGTERM");
+  }
 });
 
 test("hv-start.sh keeps an existing API_SERVER_KEY", () => {

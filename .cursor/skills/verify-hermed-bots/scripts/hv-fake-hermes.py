@@ -38,10 +38,18 @@ LOG, INJ, LOCK = [], [], threading.Lock()
 CUT_UNTIL = [0.0]
 RUNS = set()
 MODEL, MSGS = {}, {}  # verrou de modèle et nombre de messages par session
+PROFILE_MODELS = {}  # modèles posés par POST /_hv/profile-models (reset les efface)
+SESSION_MSGS = {}  # messages par session ; seed = fixtures, nouvelle session = []
+RUN_INPUT = {}  # run_id -> input du POST /v1/runs
+PENDING = {}  # run_id -> {gate, choice, request_id} pour HV_APPROVAL
 MALFORMED = os.environ.get("HV_MALFORMED", "null")
 SESSIONS = {s["id"] for s in C["contracts"]["list_sessions"]["response"]["data"]}
 MODES = {"normal", "slow", "down", "drop-route", "fields", "malformed"}
 SEED_SESSIONS = set(SESSIONS)
+SEED_MSG_DATA = [
+    {"id": 13, "session_id": "{session}", "role": "user", "content": "Bonjour", "tool_call_id": None, "tool_calls": None, "tool_name": None, "timestamp": 1792330255.35, "token_count": None, "finish_reason": None, "reasoning": None, "reasoning_content": None, "display_kind": None},
+    {"id": 14, "session_id": "{session}", "role": "assistant", "content": "Réponse de test", "tool_call_id": None, "tool_calls": None, "tool_name": None, "timestamp": 1792330255.68, "token_count": None, "finish_reason": "stop", "reasoning": None, "reasoning_content": None, "display_kind": None},
+]
 STATE = {
     "mode": a.mode,
     "drop": DROP,
@@ -50,6 +58,88 @@ STATE = {
     "version": C["version"],
     "profiles": None,
 }
+
+def seed_session_messages():
+    SESSION_MSGS.clear()
+    for sid in SEED_SESSIONS:
+        SESSION_MSGS[sid] = [dict(m, session_id=sid) for m in SEED_MSG_DATA]
+
+seed_session_messages()
+
+def _msg(session_id, role, content, mid):
+    return {
+        "id": mid,
+        "session_id": session_id,
+        "role": role,
+        "content": content,
+        "tool_call_id": None,
+        "tool_calls": None,
+        "tool_name": None,
+        "timestamp": time.time(),
+        "token_count": None,
+        "finish_reason": ("stop" if role == "assistant" else None),
+        "reasoning": None,
+        "reasoning_content": None,
+        "display_kind": None,
+    }
+
+def record_run_transcript(run_id, assistant_text):
+    """Après un tour : aligne session_messages sur le flux pour que reread ne vide pas l'écran."""
+    meta = RUN_INPUT.get(run_id)
+    if not isinstance(meta, dict):
+        return
+    sid = meta.get("session")
+    user_txt = meta.get("input") or ""
+    if not sid:
+        return
+    bucket = SESSION_MSGS.setdefault(sid, [])
+    # évite les doublons si le client relit deux fois
+    if bucket and bucket[-1].get("role") == "assistant" and bucket[-1].get("content") == assistant_text:
+        return
+    base = 1000 + len(bucket)
+    if user_txt:
+        bucket.append(_msg(sid, "user", user_txt, base))
+        base += 1
+    if assistant_text:
+        bucket.append(_msg(sid, "assistant", assistant_text, base))
+
+def session_row(sid):
+    msgs = SESSION_MSGS.get(sid) or []
+    preview = ""
+    for m in msgs:
+        if m.get("role") == "user" and m.get("content"):
+            preview = str(m["content"])[:80]
+            break
+    return {
+        "id": sid,
+        "source": "api_server",
+        "user_id": None,
+        "model": MODEL.get(sid),
+        "title": None,
+        "started_at": time.time(),
+        "ended_at": None,
+        "end_reason": None,
+        "message_count": len(msgs),
+        "tool_call_count": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "reasoning_tokens": 0,
+        "estimated_cost_usd": None,
+        "actual_cost_usd": None,
+        "api_call_count": 0,
+        "parent_session_id": None,
+        "last_active": time.time(),
+        "preview": preview or sid,
+        "pinned": False,
+        "archived": False,
+        "hidden": False,
+        "has_system_prompt": False,
+        "has_model_config": sid in MODEL,
+        "is_internal_child": False,
+    }
+
 
 def apply_config(obj):
     if not isinstance(obj, dict):
@@ -76,8 +166,12 @@ def reset_state():
     RUNS.clear()
     MODEL.clear()
     MSGS.clear()
+    PROFILE_MODELS.clear()
+    RUN_INPUT.clear()
+    PENDING.clear()
     SESSIONS.clear()
     SESSIONS.update(SEED_SESSIONS)
+    seed_session_messages()
     CUT_UNTIL[0] = 0.0
     STATE.update(mode=a.mode, drop=DROP, reject_key=False, omit_tokens=False, version=C["version"], profiles=None)
 
@@ -92,10 +186,7 @@ MSG = {
     "response": {
         "object": "list",
         "session_id": "{session}",
-        "data": [
-            {"id": 13, "session_id": "{session}", "role": "user", "content": "Bonjour", "tool_call_id": None, "tool_calls": None, "tool_name": None, "timestamp": 1792330255.35, "token_count": None, "finish_reason": None, "reasoning": None, "reasoning_content": None, "display_kind": None},
-            {"id": 14, "session_id": "{session}", "role": "assistant", "content": "Réponse de test", "tool_call_id": None, "tool_calls": None, "tool_name": None, "timestamp": 1792330255.68, "token_count": None, "finish_reason": "stop", "reasoning": None, "reasoning_content": None, "display_kind": None},
-        ],
+        "data": [],  # remplacé à la volée depuis SESSION_MSGS
     },
 }
 VERSION_P = dict(C["contracts"]["version"], path="/p/{profile}/health")
@@ -109,21 +200,44 @@ def served_profiles():
         return STATE["profiles"]
     return C["profiles"]["served"]
 
+def _profile_row(name, model, gateway, diamond=False):
+    mark = "\u25c6" if diamond else " "
+    return " %s%-15s %-28s %-12s %-12s %s\n" % (mark, name, model, gateway, "\u2014", "\u2014")
+
 def profile_list_text():
+    # Construit la table depuis la configuration (profils ajoutés et noms longs inclus).
     out = C["contracts"]["list_profiles"]["output"]
     if STATE["mode"] == "malformed" and MALFORMED == "leak":
         out = out.replace("stopped", "running")
-    if STATE["profiles"] is None:
-        return out
-    allowed = set(STATE["profiles"])
-    lines = []
+    header, seed_rows, order = [], {}, []
+    stopped = set(C["profiles"].get("stopped") or [])
     for line in out.splitlines(True):
         t = line.replace("\u25c6", " ").split()
-        if not t or t[0] == "Profile" or not any(ch.isalnum() for ch in line):
-            lines.append(line)
+        if not seed_rows and (not t or t[0] == "Profile" or not any(ch.isalnum() for ch in line)):
+            header.append(line)
             continue
-        if t[0] in allowed:
-            lines.append(line)
+        if not t:
+            continue
+        name = t[0]
+        if name not in seed_rows:
+            order.append(name)
+        seed_rows[name] = line
+    if STATE["profiles"] is None:
+        names = order
+    else:
+        names = list(STATE["profiles"])
+    lines = list(header)
+    for i, name in enumerate(names):
+        model = PROFILE_MODELS.get(name)
+        if name in seed_rows and model is None:
+            lines.append(seed_rows[name])
+            continue
+        if name in seed_rows:
+            parts = seed_rows[name].replace("\u25c6", " ").split()
+            gateway = parts[2] if len(parts) > 2 else ("stopped" if name in stopped else "running")
+            lines.append(_profile_row(name, model, gateway, diamond=("\u25c6" in seed_rows[name])))
+            continue
+        lines.append(_profile_row(name, model or "hv-fake-1", "running", diamond=(i == 0)))
     return "".join(lines)
 
 def match(method, path):
@@ -165,35 +279,190 @@ def err(code, message, type_="invalid_request_error"):
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *x): pass
+    def _stamp_log(self, code):
+        with LOCK:
+            i = getattr(self, "_log_i", None)
+            if i is None or i >= len(LOG):
+                return
+            if "s" not in LOG[i]:
+                LOG[i]["s"] = code
+                if self.headers.get("X-Hermed-Capability-Probe") == "1":
+                    LOG[i]["probe"] = True
     def _send(self, code, body):
+        self._stamp_log(code)
         b = json.dumps(body, ensure_ascii=False).encode()
         self.send_response(code); self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
     def _send_text(self, code, text):
+        self._stamp_log(code)
         b = text.encode()
         self.send_response(code); self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
-    def _stream(self, v):
-        last = int(self.headers.get("Last-Event-ID") or -1)
-        events = [fill(e, v) for e in C["events"]] + list(INJ)
-        if STATE["omit_tokens"]:
-            events = [{k: x for k, x in ev.items() if k != "usage"} if isinstance(ev, dict) else ev for ev in events]
+    def _emit_sse(self, events, pace):
         self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
         try:
             self.wfile.write(b": open\n\n")
+            last = int(self.headers.get("Last-Event-ID") or -1)
             for i, ev in enumerate(events):
-                if i <= last: continue
+                if i <= last:
+                    continue
                 ev = dict(ev, seq=i, timestamp=time.time())
+                if ev.get("event") == "approval.request":
+                    with LOCK:
+                        LOG.append({"t": time.time(), "m": "SSE", "p": "/_hv/sse/approval.request"})
                 self.wfile.write(("id: %d\ndata: %s\n\n" % (i, json.dumps(ev, ensure_ascii=False))).encode()); self.wfile.flush()
-                time.sleep(0.05)
+                time.sleep(pace)
             self.wfile.write(b": stream closed\n\n"); self.wfile.flush()
-        except (BrokenPipeError, ConnectionResetError):  # le client s'arrête au premier événement terminal
+        except (BrokenPipeError, ConnectionResetError):
             pass
+    def _approval_events(self, run, inp):
+        huge = "HV_APPROVAL_HUGE" in inp
+        cmd = ("HUGE-BEGIN " + ("x" * 200000)) if huge else "/tmp/hv.txt"
+        req_id = "apr_" + (run or "x")
+        with LOCK:
+            PENDING[run] = {"gate": threading.Event(), "choice": None, "request_id": req_id}
+        return [
+            {"event": "tool.started", "run_id": run, "tool": "file.write", "preview": cmd},
+            {"event": "approval.request", "run_id": run, "request_id": req_id, "tool": "file.write",
+             "command": cmd, "description": "écrire le fichier", "choices": ["once", "session", "always", "deny"],
+             "allow_permanent": True, "allow_session": True},
+        ], req_id
+    def _stream(self, v):
+        self._stamp_log(200)
+        run = v.get("run")
+        meta = RUN_INPUT.get(run) if run else None
+        if isinstance(meta, dict):
+            inp = meta.get("input") or ""
+        elif isinstance(meta, str):
+            inp = meta
+        else:
+            inp = ""
+        pace = 1.0 if "HV_SLOW" in inp else 0.05
+        if STATE["omit_tokens"]:
+            def strip_usage(ev):
+                return {k: x for k, x in ev.items() if k != "usage"} if isinstance(ev, dict) else ev
+        else:
+            def strip_usage(ev):
+                return ev
+        if run and "HV_LOOP" in inp:
+            preview = "ls /tmp"
+            events = [
+                {"event": "tool.started", "run_id": run, "tool": "terminal", "preview": preview},
+                {"event": "tool.started", "run_id": run, "tool": "terminal", "preview": preview},
+                {"event": "tool.started", "run_id": run, "tool": "terminal", "preview": preview},
+                {"event": "run.completed", "run_id": run, "output": "HV-FAKE-TOOL-DONE", "completed": True,
+                 "partial": False, "interrupted": False,
+                 "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0},
+                 "runtime": {"provider": "custom", "model": "hv-fake-1", "route_source": "global"}},
+            ]
+            out = self._emit_sse([strip_usage(e) for e in events], pace)
+            record_run_transcript(run, "HV-FAKE-TOOL-DONE")
+            return out
+        if run and "HV_APPROVAL" in inp:
+            head, req_id = self._approval_events(run, inp)
+            self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+            try:
+                self.wfile.write(b": open\n\n")
+                i = 0
+                for ev in head:
+                    ev = dict(strip_usage(ev), seq=i, timestamp=time.time())
+                    if ev.get("event") == "approval.request":
+                        with LOCK:
+                            LOG.append({"t": time.time(), "m": "SSE", "p": "/_hv/sse/approval.request"})
+                    self.wfile.write(("id: %d\ndata: %s\n\n" % (i, json.dumps(ev, ensure_ascii=False))).encode()); self.wfile.flush()
+                    i += 1
+                    time.sleep(pace)
+                gate = PENDING.get(run, {}).get("gate")
+                # attend la décision (ou coupure / kill) ; keepalives pour le client
+                # Coupure / down : garder le flux ouvert (la feuille reste) ; seul POST /approval
+                # reçoit 503 — sinon un break émet deny et hd.approval.status n'apparaît jamais.
+                while gate is not None and not gate.wait(1.0):
+                    self.wfile.write(b": keepalive\n\n"); self.wfile.flush()
+                choice = (PENDING.get(run) or {}).get("choice") or "deny"
+                if choice in ("once", "session", "always"):
+                    tail = [
+                        {"event": "approval.responded", "run_id": run, "choice": choice, "request_id": req_id, "resolved": 1},
+                        {"event": "tool.completed", "run_id": run, "tool": "file.write", "duration": 0.05, "error": False,
+                         "preview": "{\"ok\": true}"},
+                        {"event": "message.delta", "run_id": run, "delta": "Fichier /tmp/hv.txt écrit"},
+                        {"event": "run.completed", "run_id": run, "output": "Fichier /tmp/hv.txt écrit", "completed": True,
+                         "partial": False, "interrupted": False,
+                         "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0},
+                         "runtime": {"provider": "custom", "model": "hv-fake-1", "route_source": "global"}},
+                    ]
+                else:
+                    tail = [
+                        {"event": "approval.responded", "run_id": run, "choice": "deny", "request_id": req_id, "resolved": 1},
+                        {"event": "tool.completed", "run_id": run, "tool": "file.write", "duration": 0.05, "error": True,
+                         "preview": "{\"error\": \"denied\"}"},
+                        {"event": "message.delta", "run_id": run, "delta": "Refus pris en compte"},
+                        {"event": "run.completed", "run_id": run, "output": "Refus pris en compte", "completed": True,
+                         "partial": False, "interrupted": False,
+                         "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0},
+                         "runtime": {"provider": "custom", "model": "hv-fake-1", "route_source": "global"}},
+                    ]
+                for ev in tail:
+                    ev = dict(strip_usage(ev), seq=i, timestamp=time.time())
+                    self.wfile.write(("id: %d\ndata: %s\n\n" % (i, json.dumps(ev, ensure_ascii=False))).encode()); self.wfile.flush()
+                    i += 1
+                    time.sleep(pace)
+                self.wfile.write(b": stream closed\n\n"); self.wfile.flush()
+                # transcript pour reread : Oui écrit le fichier, Non/Échap annonce le refus
+                record_run_transcript(run, "Fichier /tmp/hv.txt écrit" if choice in ("once", "session", "always") else "Refus pris en compte")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
+        if run and "HV_TOOL_SHELL" in inp:
+            # délai volontaire : XCTest doit pouvoir voir hd.tool.current avant tool.completed
+            self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.end_headers()
+            try:
+                self.wfile.write(b": open\n\n")
+                seq = 0
+                for ev, wait in (
+                    ({"event": "tool.started", "run_id": run, "tool": "shell.exec", "preview": "echo ok"}, 1.2),
+                    ({"event": "tool.completed", "run_id": run, "tool": "shell.exec", "duration": 0.05, "error": False, "preview": "ok"}, pace),
+                    ({"event": "message.delta", "run_id": run, "delta": "Outil terminé"}, pace),
+                    ({"event": "run.completed", "run_id": run, "output": "Outil terminé", "completed": True,
+                      "partial": False, "interrupted": False,
+                      "usage": {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0},
+                      "runtime": {"provider": "custom", "model": "hv-fake-1", "route_source": "global"}}, pace),
+                ):
+                    ev = dict(strip_usage(ev), seq=seq, timestamp=time.time())
+                    self.wfile.write(("id: %d\ndata: %s\n\n" % (seq, json.dumps(ev, ensure_ascii=False))).encode()); self.wfile.flush()
+                    seq += 1
+                    time.sleep(wait)
+                self.wfile.write(b": stream closed\n\n"); self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            record_run_transcript(run, "Outil terminé")
+            return
+        events = [fill(e, v) for e in C["events"]] + list(INJ)
+        # tours ordinaires : retirer l'auto-réponse d'approbation de la fixture (sinon la feuille HV_APPROVAL ne s'ouvre jamais).
+        # Garder approval.* pour HV_APPROVAL (UI) et HV_TOOL_DETACH (acceptance approve du contract-check).
+        if "HV_APPROVAL" not in inp and "HV_TOOL_DETACH" not in inp:
+            events = [e for e in events if not (isinstance(e, dict) and str(e.get("event", "")).startswith("approval."))]
+        if STATE["omit_tokens"]:
+            events = [strip_usage(ev) for ev in events]
+        out = self._emit_sse(events, pace)
+        # texte assistant de la fixture (ou dernier message.delta injecté)
+        assistant = "Réponse de test"
+        for e in reversed(events):
+            if isinstance(e, dict) and e.get("event") == "message.delta" and e.get("delta"):
+                assistant = e.get("delta")
+                break
+            if isinstance(e, dict) and e.get("event") == "run.completed" and e.get("output"):
+                assistant = e.get("output")
+                break
+        if run:
+            record_run_transcript(run, assistant)
+        return out
     def _handle(self, method):
         path = self.path.split("?")[0]
         n = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(n).decode() if n else ""
-        with LOCK: LOG.append({"t": time.time(), "m": method, "p": path, "body": body})
+        with LOCK:
+            LOG.append({"t": time.time(), "m": method, "p": path, "body": body})
+            self._log_i = len(LOG) - 1
         if path == "/_hv/ready": return self._send(200, {"ok": True, "version": STATE["version"], "mode": STATE["mode"]})
         if path == "/_hv/log": return self._send(200, LOG)
         if path == "/_hv/config":
@@ -207,6 +476,18 @@ class H(BaseHTTPRequestHandler):
             return self._send(code, {"ok": True} if code == 200 else err(None, "Invalid config"))
         if path == "/_hv/reset":
             reset_state()
+            return self._send(200, {"ok": True})
+        if path == "/_hv/profile-models":
+            if method != "POST":
+                return self._send(404, {"error": "404: Not Found"})
+            try:
+                obj = json.loads(body or "{}")
+            except ValueError:
+                return self._send(400, err(None, "Invalid JSON"))
+            if not isinstance(obj, dict):
+                return self._send(400, err(None, "Invalid body"))
+            for k, val in obj.items():
+                PROFILE_MODELS[str(k)] = str(val)
             return self._send(200, {"ok": True})
         if path == "/_hv/profile-list":
             return self._send_text(200, profile_list_text())
@@ -238,16 +519,75 @@ class H(BaseHTTPRequestHandler):
             except ValueError: return self._send(400, err(None, "Invalid JSON"))
             if not isinstance(j, dict) or [k for k in c["body"] if j.get(k) in (None, "")]: return self._send(400, err(None, "Missing field"))
         v = dict(v, new_run="run_" + uuid.uuid4().hex, new_session="api_%d_%s" % (time.time(), uuid.uuid4().hex[:8]))
-        if name == "start_run": RUNS.add(v["new_run"])
-        if name == "new_session": SESSIONS.add(v["new_session"])
+        if name == "start_run":
+            RUNS.add(v["new_run"])
+            try:
+                posted_run = json.loads(body or "{}")
+            except ValueError:
+                posted_run = {}
+            if isinstance(posted_run, dict):
+                RUN_INPUT[v["new_run"]] = {
+                    "input": posted_run.get("input") or "",
+                    "session": posted_run.get("session_id") or posted_run.get("session") or v.get("session"),
+                }
+                if posted_run.get("model"):
+                    # le corps du run porte le modèle (S4) : utile au journal / runtime
+                    v = dict(v, model=posted_run.get("model"))
+        if name == "new_session":
+            SESSIONS.add(v["new_session"])
+            SESSION_MSGS[v["new_session"]] = []  # transcript vide après création
         if name == "set_model" and not (STATE["mode"] == "malformed" and MALFORMED == "nolock"): MODEL[v["session"]] = json.loads(body)["model"]
         if name == "send_message":  # le chat de session lit le verrou de modèle (S4)
             MSGS[v["session"]] = MSGS.get(v["session"], 0) + 1
             v = dict(v, model=MODEL.get(v["session"], "hv-fake-1"), route_source="session_model_lock" if v["session"] in MODEL else "global", n=str(MSGS[v["session"]]))
+            try:
+                posted = json.loads(body or "{}")
+            except ValueError:
+                posted = {}
+            user_txt = posted.get("input") or posted.get("content") or "hv-probe"
+            bucket = SESSION_MSGS.setdefault(v["session"], [])
+            bucket.append({"id": 1000 + len(bucket), "session_id": v["session"], "role": "user", "content": user_txt, "tool_call_id": None, "tool_calls": None, "tool_name": None, "timestamp": time.time(), "token_count": None, "finish_reason": None, "reasoning": None, "reasoning_content": None, "display_kind": None})
+            bucket.append({"id": 1000 + len(bucket), "session_id": v["session"], "role": "assistant", "content": "HV-FAKE-REPLY model=%s user_msgs=%s" % (v["model"], v["n"]), "tool_call_id": None, "tool_calls": None, "tool_name": None, "timestamp": time.time(), "token_count": None, "finish_reason": "stop", "reasoning": None, "reasoning_content": None, "display_kind": None})
         if c["response"] == "SSE": return self._stream(v)
         resp = fill(c["response"], v)
+        if name == "session_messages":
+            sid = v.get("session")
+            resp = {"object": "list", "session_id": sid, "data": list(SESSION_MSGS.get(sid, []))}
+        if name == "list_sessions":
+            # les verrous MODEL se voient dans la liste (HD-10 nom inconnu / modèle d'un fil)
+            # les sessions créées pendant le test doivent apparaître (Nouvelle session / premier envoi)
+            data = list(resp.get("data") or [])
+            out = []
+            seen = set()
+            for row in data:
+                row = dict(row)
+                sid = row.get("id")
+                if sid in MODEL:
+                    row["model"] = MODEL[sid]
+                out.append(row)
+                if sid:
+                    seen.add(sid)
+            for sid in list(SESSIONS):
+                if sid in seen:
+                    continue
+                out.append(session_row(sid))
+                seen.add(sid)
+            resp = dict(resp, data=out)
         if name == "version":
             resp = dict(resp, version=STATE["version"])
+        if name == "set_model":
+            try:
+                posted_model = json.loads(body or "{}").get("model")
+            except ValueError:
+                posted_model = None
+            if posted_model and isinstance(resp, dict):
+                resp = json.loads(json.dumps(resp))
+                rt = dict(resp.get("runtime") or {})
+                rt["model"] = posted_model
+                req = dict(rt.get("requested") or {})
+                req["model"] = posted_model
+                rt["requested"] = req
+                resp["runtime"] = rt
         if name == "approve":
             try:
                 posted = json.loads(body or "{}")
@@ -258,6 +598,12 @@ class H(BaseHTTPRequestHandler):
                     resp["choice"] = posted["choice"]
                 if posted.get("request_id") is not None:
                     resp["request_id"] = posted["request_id"]
+            run_id = v.get("run")
+            # les sondes de capacité (hd-probe / en-tête) ne doivent pas ouvrir la porte d'un vrai tour
+            is_probe = self.headers.get("X-Hermed-Capability-Probe") == "1" or "hd-probe" in str(run_id or "")
+            if run_id in PENDING and isinstance(posted, dict) and not is_probe:
+                PENDING[run_id]["choice"] = posted.get("choice")
+                PENDING[run_id]["gate"].set()
         self._send(c.get("status", 200), mutate(resp) if STATE["mode"] == "fields" else corrupt(resp) if STATE["mode"] == "malformed" else resp)
     def do_GET(self): self._handle("GET")
     def do_POST(self): self._handle("POST")

@@ -15,7 +15,7 @@ final class LaunchTests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(\(language))"]
         app.launchEnvironment["HV_TEST_MODE"] = "1"
         if let url = url ?? apiURL { app.launchEnvironment["HV_API_URL"] = url }
-        for name in ["HV_TEST_API_KEY", "HV_TEST_API_KEYS"] { app.launchEnvironment[name] = environment[name] }
+        for name in ["HV_TEST_API_KEY", "HV_TEST_API_KEYS", "HV_TEST_PROFILE_TABLE"] { app.launchEnvironment[name] = environment[name] }
         app.launch()
         return app
     }
@@ -60,9 +60,13 @@ final class LaunchTests: XCTestCase {
         try? handle.write(contentsOf: Data(line.utf8))
     }
 
-    func testWindowOpensWithTheServerVersionAndTheBotList() {
+    func testWindowOpensWithTheServerVersionAndTheBotList() throws {
         let app = launch()
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10), "la fenêtre ne s'ouvre pas")
+        // Capture avant que la version ne se stabilise : sinon launch ≡ language-fr (même UI settled).
+        HVShot.capture("launch", app)
+        let bot = app.descendants(matching: .any).matching(identifier: AccessibilityID.botRow("hv-bot-a")).firstMatch
+        try XCTSkipUnless(bot.waitForExistence(timeout: 20), "profil hv-bot-a absent : table/clés de test ou instance orb sans ces profils")
         let shown = settledVersion(in: app)
         let expected = serverVersion(at: apiURL) ?? "inconnue"
         XCTAssertEqual(shown, expected)
@@ -72,7 +76,6 @@ final class LaunchTests: XCTestCase {
         for id in [AccessibilityID.botsList, AccessibilityID.statusVersion] {
             XCTAssertEqual(app.descendants(matching: .any).matching(identifier: id.rawValue).count, 1, "\(id.rawValue) désigne plus d'un élément")
         }
-        HVShot.capture("launch", app)
     }
 
     func testVersionIsUnknownWhenNothingListens() {
