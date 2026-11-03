@@ -14,7 +14,7 @@ with socket.socket() as sock:
     sock.bind(("127.0.0.1", 0))
     port = sock.getsockname()[1]
 server = subprocess.Popen(
-    [sys.executable, str(root / ".cursor/skills/verify-hermed-bots/scripts/hv-fake-hermes.py"), "--port", str(port)],
+    [sys.executable, str(Path(os.environ.get("HV_SKILL_SCRIPTS", root / ".local-skills/verify-hermed-bots/scripts")) / "hv-fake-hermes.py"), "--port", str(port)],
     env={**os.environ, "HV_TEST_API_KEY": ""}, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
 )
 

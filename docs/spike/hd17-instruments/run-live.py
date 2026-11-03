@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Sonde sans mutation des clés existantes de hv-hermes-test, jamais écrites sur le Mac."""
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -9,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / 'evidence/hd17'
 CT = 'hv-hermes-test'
 PROFILES = ['default', 'cyber', 'gaming', 'ia', 'perso', 'recherches', 'sport', 'tiny', 'wikilibriste']
-SK = ROOT / '.cursor/skills/verify-hermed-bots/scripts'
+SK = Path(os.environ.get('HV_SKILL_SCRIPTS', ROOT / '.local-skills/verify-hermed-bots/scripts'))
 PROBE = Path.home() / 'hermed-bots-work/hd17-probe'
 READ_KEYS = r'''
 import json, os, pathlib

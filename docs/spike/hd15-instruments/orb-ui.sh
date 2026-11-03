@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-[ "$HOME" =  ] || { echo 'VM hvtest requise'; exit 2; }
+[ "$(id -un)" = hvtest ] || { echo 'VM hvtest requise'; exit 2; }
 EVD=${HV_WORK:?}/evidence/hd15-orb-ui-$(date +%Y%m%d-%H%M%S)
 mkdir -p "$EVD"
 {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-[ "$HOME" =  ] || { echo 'VM hvtest requise'; exit 2; }
-SK=.cursor/skills/verify-hermed-bots/scripts
+[ "$(id -un)" = hvtest ] || { echo 'VM hvtest requise'; exit 2; }
+SK=${HV_SKILL_SCRIPTS:-.local-skills/verify-hermed-bots/scripts}
 evd=${HV_WORK:?}/evidence/issue57-visual-$(TZ=Europe/Paris date +%Y%m%d-%H%M%S)
 mkdir -p "$evd/base" "$evd/shots" "$evd/diffs"
 magick -size 100x100 xc:white "$evd/base/screen.png"

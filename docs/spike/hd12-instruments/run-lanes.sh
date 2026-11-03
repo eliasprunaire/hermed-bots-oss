@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Lancer uniquement avec zsh <vm-test-script> exec bash docs/spike/hd12-instruments/run-lanes.sh
 set -uo pipefail
-[ "$HOME" =  ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo "VM hvtest requise"; exit 2; }
+[ "$(id -un)" = hvtest ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo "VM hvtest requise"; exit 2; }
 lane_script=docs/spike/hd12-instruments/run-ui.sh
 result=0
 run_lane() {

@@ -140,7 +140,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
-    child = subprocess.Popen([sys.executable, '.cursor/skills/verify-hermed-bots/scripts/hv-fake-hermes.py', '--port', str(PORT + 1)])
+    child = subprocess.Popen([sys.executable, os.path.join(os.environ.get('HV_SKILL_SCRIPTS', '.local-skills/verify-hermed-bots/scripts'), 'hv-fake-hermes.py'), '--port', str(PORT + 1)])
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     try:
         ThreadingHTTPServer(('127.0.0.1', PORT), Handler).serve_forever()

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-SK=.cursor/skills/verify-hermed-bots/scripts
+SK=${HV_SKILL_SCRIPTS:-.local-skills/verify-hermed-bots/scripts}
 EVD=${HV_WORK:-$HOME/hermed-bots-work}/evidence/hd15-orb-$(date +%Y%m%d-%H%M%S)
 mkdir -p "$EVD"
 bash "$SK/hv-guard.sh" target hv-hermes-test

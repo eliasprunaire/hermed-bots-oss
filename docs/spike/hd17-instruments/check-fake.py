@@ -30,7 +30,7 @@ def request(path, key=None):
 
 
 with tempfile.TemporaryFile() as log:
-    server = subprocess.Popen([sys.executable, str(ROOT / '.cursor/skills/verify-hermed-bots/scripts/hv-fake-hermes.py'), '--port', str(port)], env=dict(os.environ, HV_TEST_API_KEYS=json.dumps(keys)), stdout=log, stderr=log)
+    server = subprocess.Popen([sys.executable, str(Path(os.environ.get('HV_SKILL_SCRIPTS', ROOT / '.local-skills/verify-hermed-bots/scripts')) / 'hv-fake-hermes.py'), '--port', str(port)], env=dict(os.environ, HV_TEST_API_KEYS=json.dumps(keys)), stdout=log, stderr=log)
     try:
         for _ in range(50):
             try:

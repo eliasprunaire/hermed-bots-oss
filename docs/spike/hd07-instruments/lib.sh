@@ -3,7 +3,7 @@
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../../.." && pwd)
 HVW=${HV_WORK:-$HOME/hermed-bots-work}
-SK=$REPO/.cursor/skills/verify-hermed-bots/scripts
+SK=${HV_SKILL_SCRIPTS:-$REPO/.local-skills/verify-hermed-bots/scripts}
 ENDPOINT=$HERE/hv-ssh-endpoint.sh
 APPD=${APPD:-$HVW/dd/Build/Products/Debug/HermedBots.app/Contents/MacOS/HermedBots}
 # dossier des clés de test : chemin fixe, hors de tout dossier de preuves, supprimé par drop_alias
