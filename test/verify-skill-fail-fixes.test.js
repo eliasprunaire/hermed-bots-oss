@@ -603,6 +603,19 @@ test("fake Hermes keeps approval decision across Last-Event-ID resume", async ()
   }
 });
 
+const PNG1 = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
+function shotdiffEnv(dir, ae, pixels, extra = {}) {
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(join(bin, "compare"), `#!/bin/sh\nprintf '%s\\n' "${ae}" >&2\nexit 1\n`, { mode: 0o755 });
+  writeFileSync(join(bin, "identify"), `#!/bin/sh\nprintf '%s\\n' "${pixels}"\n`, { mode: 0o755 });
+  return { ...process.env, ...extra, PATH: `${bin}:${process.env.PATH || ""}` };
+}
+
 test("hv-shotdiff rejects a large ratio under fr_FR and C locales", () => {
   const dir = mkdtempSync(join(tmpdir(), "hv-shot-"));
   const cap = join(dir, "cap");
@@ -610,22 +623,14 @@ test("hv-shotdiff rejects a large ratio under fr_FR and C locales", () => {
   const dif = join(dir, "dif");
   mkdirSync(cap);
   mkdirSync(base);
-  // Two very different solid PNGs → ratio well above 0.02.
-  const mk = (path, color) => {
-    const r = spawnSync(
-      "magick",
-      ["-size", "40x40", `xc:${color}`, path],
-      { encoding: "utf8" },
-    );
-    assert.equal(r.status, 0, r.stderr);
-  };
-  mk(join(base, "x.png"), "white");
-  mk(join(cap, "x.png"), "black");
+  writeFileSync(join(base, "x.png"), PNG1);
+  writeFileSync(join(cap, "x.png"), PNG1);
+  const env = shotdiffEnv(dir, "1000", "100");
 
   for (const locale of ["C", "fr_FR.UTF-8"]) {
     const run = spawnSync("bash", [SHOTDIFF, cap, base, join(dif, locale), "0.02"], {
       encoding: "utf8",
-      env: { ...process.env, LC_ALL: locale, LANG: locale },
+      env: { ...env, LC_ALL: locale, LANG: locale },
     });
     assert.equal(run.status, 11, `locale=${locale} out=${run.stdout} err=${run.stderr}`);
     assert.match(run.stdout, /DIFF/);
@@ -666,35 +671,18 @@ test("hv-shotdiff mid-ratio fails at 0.02 (fake) and passes at 0.03 (orb)", () =
   mkdirSync(cap);
   mkdirSync(base);
   mkdirSync(dif);
-  // 100x100 white vs white+50x5 black bar → ~2.5 % AE (between 0.02 and 0.03).
-  const mkBase = spawnSync(
-    "magick",
-    ["-size", "100x100", "xc:white", join(base, "x.png")],
-    { encoding: "utf8" },
-  );
-  assert.equal(mkBase.status, 0, mkBase.stderr);
-  const mkCap = spawnSync(
-    "magick",
-    [
-      join(base, "x.png"),
-      "-fill",
-      "black",
-      "-draw",
-      "rectangle 0,0 49,4",
-      join(cap, "x.png"),
-    ],
-    { encoding: "utf8" },
-  );
-  assert.equal(mkCap.status, 0, mkCap.stderr);
+  writeFileSync(join(base, "x.png"), PNG1);
+  writeFileSync(join(cap, "x.png"), PNG1);
+  const env = shotdiffEnv(dir, "250", "10000", { LC_ALL: "C" });
   const fake = spawnSync("bash", [SHOTDIFF, cap, base, join(dif, "fake"), "0.02"], {
     encoding: "utf8",
-    env: { ...process.env, LC_ALL: "C" },
+    env,
   });
   assert.equal(fake.status, 11, `fake tol out=${fake.stdout}`);
   assert.match(fake.stdout, /DIFF/);
   const orb = spawnSync("bash", [SHOTDIFF, cap, base, join(dif, "orb"), "0.03"], {
     encoding: "utf8",
-    env: { ...process.env, LC_ALL: "C" },
+    env,
   });
   assert.equal(orb.status, 0, `orb tol out=${orb.stdout}`);
   assert.match(orb.stdout, /OK/);
