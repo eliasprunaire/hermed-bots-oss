@@ -835,13 +835,45 @@ test("hv-shotdiff fails when image dimensions differ", () => {
   mkdirSync(cap);
   mkdirSync(base);
   mkdirSync(dif);
-  const mk1 = spawnSync("magick", ["-size", "100x100", "xc:white", join(base, "x.png")], { encoding: "utf8" });
-  assert.equal(mk1.status, 0, mk1.stderr);
-  const mk2 = spawnSync("magick", ["-size", "101x100", "xc:white", join(cap, "x.png")], { encoding: "utf8" });
-  assert.equal(mk2.status, 0, mk2.stderr);
+  // Same 1x1 PNG fixture as other shotdiff tests — dimensions come from the identify stub
+  // (CI has no ImageMagick magick; cdf9e332 pattern).
+  writeFileSync(join(base, "x.png"), PNG1);
+  writeFileSync(join(cap, "x.png"), PNG1);
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, "identify"),
+    [
+      "#!/bin/sh",
+      "fmt=; file=",
+      "while [ $# -gt 0 ]; do",
+      '  case "$1" in',
+      '    -format) fmt=$2; shift 2 ;;',
+      '    *) file=$1; shift ;;',
+      "  esac",
+      "done",
+      'case "$fmt" in',
+      "  %w)",
+      '    case "$file" in',
+      '      */base/*) printf "100\\n" ;;',
+      '      *) printf "101\\n" ;;',
+      "    esac",
+      "    ;;",
+      '  %h) printf "100\\n" ;;',
+      '  *) printf "10000\\n" ;;',
+      "esac",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  writeFileSync(
+    join(bin, "compare"),
+    "#!/bin/sh\nprintf '0\\n' >&2\nexit 0\n",
+    { mode: 0o755 },
+  );
   const run = spawnSync("bash", [SHOTDIFF, cap, base, dif, "0.02"], {
     encoding: "utf8",
-    env: { ...process.env, LC_ALL: "C" },
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH || ""}`, LC_ALL: "C" },
   });
   assert.equal(run.status, 11, `out=${run.stdout} err=${run.stderr}`);
   assert.match(run.stdout, /DIFF/);
