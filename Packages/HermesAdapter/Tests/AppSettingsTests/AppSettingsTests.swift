@@ -5,11 +5,17 @@ import UpdateCheck
 final class FakeUpdateDriver: UpdateDriver {
     var canStartCheck = true
     var starts = 0
+    var installs = 0
     var beginSession = true
 
     func startCheck() -> Bool {
         starts += 1
         return beginSession
+    }
+
+    func startInstall() -> Bool {
+        installs += 1
+        return true
     }
 }
 
@@ -25,43 +31,38 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(SettingsPane.allCases.map(\.title), ["Connexion", "À propos"])
         XCTAssertEqual(SettingsPane.allCases.map(\.accessibilityID), ["hd.settings.connection", "hd.settings.updates"])
         XCTAssertEqual(SettingsCopy.checkForUpdates, "Rechercher les mises à jour…")
+        XCTAssertEqual(SettingsCopy.installUpdate, "Mettre à jour")
     }
 
     func testAboutDisplaysKnownVersions() {
         let snapshot = AboutVersionSnapshot(
             appVersion: "1.2.3",
-            appBuild: "45",
             hermesCLI: "0.22.2",
-            macOS: "27.0.1",
-            updateChannel: "1.2.3"
+            macOS: "27.0.1"
         )
         XCTAssertEqual(snapshot.displayedAppVersion, "1.2.3")
-        XCTAssertEqual(snapshot.displayedAppBuild, "45")
         XCTAssertEqual(snapshot.displayedHermesCLI, "0.22.2")
         XCTAssertEqual(snapshot.displayedMacOS, "27.0.1")
-        XCTAssertEqual(snapshot.displayedUpdateChannel, "1.2.3")
         XCTAssertEqual(AboutVersionSnapshot.macOSString(major: 27, minor: 0, patch: 1), "27.0.1")
         XCTAssertEqual(
             snapshot.versionRows.map { $0.title },
             [
                 AboutVersionSnapshot.appVersionTitle,
-                AboutVersionSnapshot.appBuildTitle,
                 AboutVersionSnapshot.hermesCLITitle,
                 AboutVersionSnapshot.macOSTitle,
-                AboutVersionSnapshot.updateChannelTitle,
             ]
         )
-        XCTAssertEqual(snapshot.versionRows.last?.title, AboutVersionSnapshot.updateChannelTitle)
+        XCTAssertFalse(snapshot.versionRows.map(\.title).contains("Build"))
+        XCTAssertFalse(snapshot.versionRows.map(\.title).contains("Canal de mise à jour"))
         XCTAssertEqual(SettingsCopy.checkForUpdates, "Rechercher les mises à jour…")
+        XCTAssertEqual(SettingsCopy.installUpdate, "Mettre à jour")
     }
 
     func testAboutDisplaysUnknownWhenAVersionIsMissingOrBlank() {
-        let snapshot = AboutVersionSnapshot(appVersion: "  ", appBuild: "", hermesCLI: nil, macOS: nil, updateChannel: " \n")
+        let snapshot = AboutVersionSnapshot(appVersion: "  ", hermesCLI: nil, macOS: nil)
         XCTAssertEqual(snapshot.displayedAppVersion, "inconnue")
-        XCTAssertEqual(snapshot.displayedAppBuild, "inconnue")
         XCTAssertEqual(snapshot.displayedHermesCLI, "inconnue")
         XCTAssertEqual(snapshot.displayedMacOS, "inconnue")
-        XCTAssertEqual(snapshot.displayedUpdateChannel, "inconnue")
         XCTAssertEqual(AboutVersionSnapshot.display(nil), "inconnue")
         XCTAssertEqual(AboutVersionSnapshot.display(""), "inconnue")
         XCTAssertEqual(AboutVersionSnapshot.unknownLabel, "inconnue")
@@ -109,6 +110,19 @@ final class AppSettingsTests: XCTestCase {
         UpdatesSettingsAction.perform(updates)
         XCTAssertEqual(driver.starts, 1)
         XCTAssertTrue(updates.isChecking)
+    }
+
+    func testTheInstallActionStartsTheDriverOnlyWhenAnUpdateIsAvailable() {
+        let driver = FakeUpdateDriver()
+        let updates = UpdateCheck(driver: driver)
+        UpdatesSettingsAction.install(updates)
+        XCTAssertEqual(driver.installs, 0)
+        UpdatesSettingsAction.perform(updates)
+        updates.noteAvailable(version: "0.1.9")
+        updates.noteSessionEnded()
+        UpdatesSettingsAction.install(updates)
+        XCTAssertEqual(driver.installs, 1)
+        XCTAssertEqual(driver.starts, 1)
     }
 
     func testRepeatedStoredReadsStayCheap() {

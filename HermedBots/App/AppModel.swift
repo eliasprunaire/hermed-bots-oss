@@ -120,8 +120,18 @@ final class AppModel {
         return updates.canCheck
     }
 
+    var updateState: UpdateCheckState {
+        _ = updateRender
+        return updates.state
+    }
+
     func checkForUpdates() {
         UpdatesSettingsAction.perform(updates)
+        updateRender += 1
+    }
+
+    func installUpdate() {
+        UpdatesSettingsAction.install(updates)
         updateRender += 1
     }
 
