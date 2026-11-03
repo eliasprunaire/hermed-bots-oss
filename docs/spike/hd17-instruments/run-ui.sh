@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-[ "$HOME" =  ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
+[ "$(id -un)" = hvtest ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
 export HV_TEST_API_KEYS
 HV_TEST_API_KEYS=$(python3 - <<'PY'
 import json, secrets
