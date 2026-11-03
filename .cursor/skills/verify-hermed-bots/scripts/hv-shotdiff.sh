@@ -54,6 +54,15 @@ for f in "$CAP"/*.png; do
   [ -e "$f" ] || continue
   n=$(basename "$f")
   if [ ! -f "$BASE/$n" ]; then echo "MISSING $n"; [ $rc -eq 0 ] && rc=12; continue; fi
+  bw=$(identify -format '%w' "$BASE/$n"); bw=$(printf '%s' "$bw" | tr ',' '.')
+  bh=$(identify -format '%h' "$BASE/$n"); bh=$(printf '%s' "$bh" | tr ',' '.')
+  cw=$(identify -format '%w' "$f"); cw=$(printf '%s' "$cw" | tr ',' '.')
+  ch=$(identify -format '%h' "$f"); ch=$(printf '%s' "$ch" | tr ',' '.')
+  if [ "$bw" != "$cw" ] || [ "$bh" != "$ch" ]; then
+    echo "DIFF $n size ${cw}x${ch} != baseline ${bw}x${bh}"
+    rc=11
+    continue
+  fi
   px=$(compare -metric AE -fuzz 5% "$BASE/$n" "$f" "$DIF/$n" 2>&1 >/dev/null || true)
   # Normalise une éventuelle virgule décimale (locale parent) avant awk.
   px=${px%% *}

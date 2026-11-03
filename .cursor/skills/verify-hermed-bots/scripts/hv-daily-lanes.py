@@ -246,26 +246,41 @@ def main(argv: list[str]) -> int:
     if len(key) < 16:
         key = key + "padding-value"
     root = Path(tempfile.mkdtemp(prefix="hv-daily-"))
-    home = root / "home"
-    runner = root / "runner"
-    work = root / "work"
-    home.mkdir()
-    runner.mkdir()
-    work.mkdir()
-    env = base_env(home, runner, work, key)
+
+    def lane_ctx(tag: str):
+        # HOME / runner / work isolés par lane (artefacts synthétiques de l'une
+        # ne polluent pas les suivantes — FAIL@cdf9e332 lane4 → lane6).
+        home = root / f"home-{tag}"
+        runner = root / f"runner-{tag}"
+        work = root / f"work-{tag}"
+        home.mkdir()
+        runner.mkdir()
+        work.mkdir()
+        return home, runner, work, base_env(home, runner, work, key)
+
     results = {}
     measures = {}
+    home, runner, work, env = lane_ctx("1")
     results["1"] = lane1(env, work)
     measures["daily_fake_head_s"] = results["1"]["duration_s"]
+    home, runner, work, env = lane_ctx("2")
     results["2"] = lane2(env, work)
-    results["3"] = lane3(base_env(home, runner, work, key), work)
-    results["4"] = lane4(base_env(home, runner, work, key), work, home)
-    results["5"] = lane5(base_env(home, runner, work, key), work)
-    results["6"] = lane6(base_env(home, runner, work, key), work)
-    results["7"] = lane7(base_env(home, runner, work, key), work)
-    results["8"] = lane8(base_env(home, runner, work, key), runner)
-    results["9"] = lane9(base_env(home, runner, work, key), runner)
-    results["10"] = lane10(base_env(home, runner, work, key), work, key)
+    home, runner, work, env = lane_ctx("3")
+    results["3"] = lane3(env, work)
+    home, runner, work, env = lane_ctx("4")
+    results["4"] = lane4(env, work, home)
+    home, runner, work, env = lane_ctx("5")
+    results["5"] = lane5(env, work)
+    home, runner, work, env = lane_ctx("6")
+    results["6"] = lane6(env, work)
+    home, runner, work, env = lane_ctx("7")
+    results["7"] = lane7(env, work)
+    home, runner, work, env = lane_ctx("8")
+    results["8"] = lane8(env, runner)
+    home, runner, work, env = lane_ctx("9")
+    results["9"] = lane9(env, runner)
+    home, runner, work, env = lane_ctx("10")
+    results["10"] = lane10(env, work, key)
     payload = {
         "lanes": [
             {"id": i, "name": name, "title": title, **results[i]}

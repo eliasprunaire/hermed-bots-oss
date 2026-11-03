@@ -184,9 +184,28 @@ def install_transport_shim(port: str | None, keys_packed: str | None) -> Path:
 
     Les clés vont dans un fichier local 0600, recopiées vers ~/hv-ui-keys-private.json
     sur hvtest au scp de vmui-run.sh ou juste avant le ssh qui le lance. Jamais dans
-    VMUI_CMD / meta/vmui-run.sh.
+    VMUI_CMD / meta/vmui-run.sh. Les sous-appels scp/ssh de copie privée reprennent
+    les mêmes -i / -o que le transport VM (identité + confiance).
     """
     d = Path(tempfile.mkdtemp(prefix="hv-ssh-shim-"))
+    # Fragment POSIX : collecte -i et -o du transport pour les recopier.
+    # HV_SSH_BIN / HV_SCP_BIN permettent les tests avec des binaires synthétiques.
+    opts_helper = """SSH_BIN="${HV_SSH_BIN:-/usr/bin/ssh}"
+SCP_BIN="${HV_SCP_BIN:-/usr/bin/scp}"
+_hv_transport_opts() {
+  _hv_o=
+  _hv_take=
+  for _hv_a in "$@"; do
+    if [ -n "$_hv_take" ]; then
+      _hv_o="$_hv_o $_hv_take $_hv_a"
+      _hv_take=
+    else
+      case "$_hv_a" in -i|-o) _hv_take=$_hv_a ;; esac
+    fi
+  done
+  printf '%s' "$_hv_o"
+}
+"""
     keys_path = None
     if keys_packed is not None:
         keys_path = d / "keys.json"
@@ -195,39 +214,43 @@ def install_transport_shim(port: str | None, keys_packed: str | None) -> Path:
         scp_body = (
             "#!/bin/sh\n"
             "set -e\n"
-            "dest=$(eval echo \"\\${$#}\")\n"
-            "/usr/bin/scp \"$@\"\n"
-            "case \"$dest\" in\n"
-            "  hvtest@*:*)\n"
-            "    host=${dest%%:*}\n"
-            "    /usr/bin/scp -q %s \"$host:hv-ui-keys-private.json\"\n"
-            "    /usr/bin/ssh \"$host\" 'chmod 600 \"$HOME/hv-ui-keys-private.json\"'\n" 
-            "    ;;\n"
-            "esac\n"
-        ) % (keys_path,)
+            + opts_helper
+            + 'dest=$(eval echo "${$#}")\n'
+            + '$SCP_BIN "$@"\n'
+            + 'case "$dest" in\n'
+            + "  hvtest@*:*)\n"
+            + '    host=${dest%%:*}\n'
+            + '    _opts=$(_hv_transport_opts "$@")\n'
+            + f'    $SCP_BIN $_opts -q {keys_path} "$host:hv-ui-keys-private.json"\n'
+            + "    $SSH_BIN $_opts \"$host\" 'chmod 600 \"$HOME/hv-ui-keys-private.json\"'\n"
+            + "    ;;\n"
+            + "esac\n"
+        )
         (d / "scp").write_text(scp_body, encoding="utf-8")
         (d / "scp").chmod(0o755)
     ssh_lines = ["#!/bin/sh", "set -e"]
+    ssh_lines += opts_helper.rstrip("\n").split("\n")
     if keys_path is not None:
         ssh_lines += [
             "host=",
             "remote=",
-            "for a in \"$@\"; do",
-            "  case \"$a\" in",
+            'for a in "$@"; do',
+            '  case "$a" in',
             "    hvtest@*) host=$a ;;",
             "    *vmui-run.sh*) remote=$a ;;",
             "  esac",
             "done",
-            "if [ -n \"$host\" ] && [ -n \"$remote\" ]; then",
-            "  /usr/bin/scp -q %s \"$host:hv-ui-keys-private.json\"" % keys_path,
-            "  /usr/bin/ssh \"$host\" 'chmod 600 \"$HOME/hv-ui-keys-private.json\"'", 
+            'if [ -n "$host" ] && [ -n "$remote" ]; then',
+            '  _opts=$(_hv_transport_opts "$@")',
+            f'  $SCP_BIN $_opts -q {keys_path} "$host:hv-ui-keys-private.json"',
+            "  $SSH_BIN $_opts \"$host\" 'chmod 600 \"$HOME/hv-ui-keys-private.json\"'",
             "fi",
         ]
     if port is not None:
         spec = reverse_tunnel_spec(port)
-        ssh_lines.append("exec /usr/bin/ssh -o ExitOnForwardFailure=yes -R %s \"$@\"" % spec)
+        ssh_lines.append(f'exec "$SSH_BIN" -o ExitOnForwardFailure=yes -R {spec} "$@"')
     else:
-        ssh_lines.append("exec /usr/bin/ssh \"$@\"")
+        ssh_lines.append('exec "$SSH_BIN" "$@"')
     (d / "ssh").write_text("\n".join(ssh_lines) + "\n", encoding="utf-8")
     (d / "ssh").chmod(0o755)
     zdot = d / "zdot"
@@ -239,13 +262,13 @@ def install_transport_shim(port: str | None, keys_packed: str | None) -> Path:
         "  local x\n"
         "  for x in \"$@\"; do\n"
         "    if [[ \"$x\" == ssh || \"$x\" == */ssh ]]; then\n"
-        "      a+=(%s)\n"
+        f"      a+=({wrap})\n"
         "    else\n"
         "      a+=(\"$x\")\n"
         "    fi\n"
         "  done\n"
         "  command timeout \"${a[@]}\"\n"
-        "}\n" % (wrap,),
+        "}\n",
         encoding="utf-8",
     )
     return d

@@ -22,6 +22,7 @@ const CONTRACT = join(ROOT, ".cursor/skills/verify-hermed-bots/scripts/hv-contra
 const FIXTURE = join(ROOT, ".cursor/skills/verify-hermed-bots/fixtures/hermes-current/contract.json");
 const START = join(ROOT, ".cursor/skills/verify-hermed-bots/orb/hv-start.sh");
 const SHOTDIFF = join(ROOT, ".cursor/skills/verify-hermed-bots/scripts/hv-shotdiff.sh");
+const DAILY_LANES = join(ROOT, ".cursor/skills/verify-hermed-bots/scripts/hv-daily-lanes.py");
 const HV_RUN = join(ROOT, ".cursor/skills/verify-hermed-bots/scripts/hv-run.sh");
 
 function freePort() {
@@ -696,3 +697,184 @@ test("hv-vm-ui host guest argv never carries HV_TEST_API_KEYS", () => {
   // guest_env list must not append the packed keys.
   assert.doesNotMatch(src, /guest_env\.append\(\s*"HV_TEST_API_KEYS=/);
 });
+
+
+test("hv-vm-ui private key copy reuses transport -i and trust options", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-keys-opts-"));
+  const idFile = join(dir, "id_hv");
+  const known = join(dir, "known_hosts");
+  writeFileSync(idFile, "synthetic-identity\n");
+  writeFileSync(known, "hv-ui-vm ssh-ed25519 AAAA\n");
+  const log = join(dir, "bin.log");
+  writeFileSync(log, "");
+  const bin = join(dir, "bin");
+  mkdirSync(bin);
+  writeFileSync(
+    join(bin, "ssh"),
+    [
+      "#!/bin/sh",
+      `printf 'SSH' >> "${log}"`,
+      `for a in "$@" ; do printf ' %s' "$a" >> "${log}" ; done`,
+      `printf '\\n' >> "${log}"`,
+      "exit 0",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  writeFileSync(
+    join(bin, "scp"),
+    [
+      "#!/bin/sh",
+      `printf 'SCP' >> "${log}"`,
+      `for a in "$@" ; do printf ' %s' "$a" >> "${log}" ; done`,
+      `printf '\\n' >> "${log}"`,
+      "exit 0",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  const mod = join(dir, "mod");
+  mkdirSync(mod);
+  writeFileSync(join(mod, "hv_vm_ui.py"), readFileSync(VM_UI));
+  const run = spawnSync(
+    "python3",
+    [
+      "-c",
+      "import hv_vm_ui\n" +
+        "d = hv_vm_ui.install_transport_shim(None, '{\\\"hv-bot-a\\\":\\\"key-aaaaaaaaaaaaaaaa\\\"}')\n" +
+        "print(d)",
+    ],
+    { encoding: "utf8", cwd: mod, timeout: 10000 },
+  );
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  const shimDir = run.stdout.trim();
+  const guestHome = join(dir, "guest-home");
+  mkdirSync(guestHome);
+  const env = {
+    ...process.env,
+    HV_SSH_BIN: join(bin, "ssh"),
+    HV_SCP_BIN: join(bin, "scp"),
+    HOME: guestHome,
+  };
+  const invoked = spawnSync(
+    join(shimDir, "ssh"),
+    [
+      "-o",
+      "StrictHostKeyChecking=yes",
+      "-o",
+      `UserKnownHostsFile=${known}`,
+      "-o",
+      "HostKeyAlias=hv-ui-vm",
+      "-o",
+      "IdentitiesOnly=yes",
+      "-i",
+      idFile,
+      "hvtest@127.0.0.1",
+      "bash ~/vmui-run.sh",
+    ],
+    { encoding: "utf8", env, timeout: 10000 },
+  );
+  assert.equal(invoked.status, 0, invoked.stdout + invoked.stderr);
+  const logged = readFileSync(log, "utf8");
+  assert.match(logged, /SCP.*-i\s+\S*id_hv/);
+  assert.match(logged, /SCP.*StrictHostKeyChecking=yes/);
+  assert.match(logged, /SCP.*UserKnownHostsFile=/);
+  assert.match(logged, /SCP.*HostKeyAlias=hv-ui-vm/);
+  assert.match(logged, /SCP.*IdentitiesOnly=yes/);
+  assert.match(logged, /SCP.*hv-ui-keys-private\.json/);
+  assert.match(logged, /SSH.*-i\s+\S*id_hv/);
+  assert.match(logged, /SSH.*StrictHostKeyChecking=yes/);
+  assert.match(logged, /SSH.*chmod 600/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("fake Hermes rejects cross-profile run approve and events", async () => {
+  const port = await freePort();
+  const keys = { "hv-bot-a": "key-a-aaaaaaaaaaaaaaaa", "hv-bot-b": "key-b-bbbbbbbbbbbbbbbb" };
+  const child = await waitReady(port, { HV_TEST_API_KEYS: JSON.stringify(keys) });
+  try {
+    const authA = { Authorization: "Bearer " + keys["hv-bot-a"] };
+    const authB = { Authorization: "Bearer " + keys["hv-bot-b"] };
+    const started = await request(port, "/p/hv-bot-a/v1/runs", {
+      method: "POST",
+      headers: authA,
+      body: JSON.stringify({ input: "HV_APPROVAL cross-owner" }),
+    });
+    assert.ok([200, 202].includes(started.status), started.raw);
+    const runId = started.json && (started.json.id || started.json.run_id);
+    assert.ok(runId, started.raw);
+
+    const crossApprove = await request(port, `/p/hv-bot-b/v1/runs/${runId}/approval`, {
+      method: "POST",
+      headers: authB,
+      body: JSON.stringify({ request_id: "apr_x", choice: "deny" }),
+    });
+    assert.ok([403, 404].includes(crossApprove.status), crossApprove.raw);
+
+    const crossEvents = await request(port, `/p/hv-bot-b/v1/runs/${runId}/events`, {
+      headers: authB,
+    });
+    assert.ok([403, 404].includes(crossEvents.status), crossEvents.raw);
+
+    const crossCancel = await request(port, `/p/hv-bot-b/v1/runs/${runId}/stop`, {
+      method: "POST",
+      headers: authB,
+      body: "{}",
+    });
+    assert.ok([403, 404].includes(crossCancel.status), crossCancel.raw);
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("hv-shotdiff fails when image dimensions differ", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-dim-"));
+  const cap = join(dir, "cap");
+  const base = join(dir, "base");
+  const dif = join(dir, "dif");
+  mkdirSync(cap);
+  mkdirSync(base);
+  mkdirSync(dif);
+  const mk1 = spawnSync("magick", ["-size", "100x100", "xc:white", join(base, "x.png")], { encoding: "utf8" });
+  assert.equal(mk1.status, 0, mk1.stderr);
+  const mk2 = spawnSync("magick", ["-size", "101x100", "xc:white", join(cap, "x.png")], { encoding: "utf8" });
+  assert.equal(mk2.status, 0, mk2.stderr);
+  const run = spawnSync("bash", [SHOTDIFF, cap, base, dif, "0.02"], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C" },
+  });
+  assert.equal(run.status, 11, `out=${run.stdout} err=${run.stderr}`);
+  assert.match(run.stdout, /DIFF/);
+  assert.match(run.stdout, /size/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("hv-daily-lanes isolates HOME per lane", () => {
+  const src = readFileSync(DAILY_LANES, "utf8");
+  assert.match(src, /def lane_ctx\(/);
+  assert.match(src, /home-\{tag\}/);
+  const dir = mkdtempSync(join(tmpdir(), "hv-daily-home-"));
+  const script =
+    "import importlib.util\n" +
+    "from pathlib import Path\n" +
+    "spec = importlib.util.spec_from_file_location('dl', " + JSON.stringify(DAILY_LANES) + ")\n" +
+    "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)\n" +
+    "root = Path(" + JSON.stringify(dir) + ")\n" +
+    "def ctx(tag):\n" +
+    "  home = root / f'home-{tag}'; runner = root / f'runner-{tag}'; work = root / f'work-{tag}'\n" +
+    "  home.mkdir(); runner.mkdir(); work.mkdir()\n" +
+    "  return home, m.base_env(home, runner, work, 'k'*20)\n" +
+    "h4, e4 = ctx('4')\n" +
+    "hermes = h4 / '.local' / 'bin'; hermes.mkdir(parents=True)\n" +
+    "(hermes / 'hermes').write_text('mutated\\n')\n" +
+    "h6, e6 = ctx('6')\n" +
+    "assert e4['HOME'] != e6['HOME']\n" +
+    "assert not (Path(e6['HOME']) / '.local' / 'bin' / 'hermes').exists()\n" +
+    "assert (Path(e4['HOME']) / '.local' / 'bin' / 'hermes').read_text() == 'mutated\\n'\n" +
+    "print('ok')\n";
+  const run = spawnSync("python3", ["-c", script], { encoding: "utf8", timeout: 10000 });
+  assert.equal(run.status, 0, run.stdout + run.stderr);
+  assert.match(run.stdout, /ok/);
+  rmSync(dir, { recursive: true, force: true });
+});
+

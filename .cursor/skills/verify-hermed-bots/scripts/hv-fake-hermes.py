@@ -573,6 +573,11 @@ class H(BaseHTTPRequestHandler):
         served = served_profiles()
         if "profile" in v and v["profile"] not in served: return self._send(404, {"error": "Unknown or unconfigured profile"})
         if "run" in v and v["run"] not in RUNS: return self._send(404, err("run_not_found", "Run not found: " + v["run"]))
+        if "run" in v:
+            _rmeta = RUN_INPUT.get(v["run"])
+            _owner = _rmeta.get("profile") if isinstance(_rmeta, dict) else None
+            if _owner is not None and v.get("profile") != _owner:
+                return self._send(403, err("forbidden", "Run belongs to another profile"))
         if "session" in v:
             profile = v.get("profile")
             owned = SESSIONS.get(profile) if profile is not None else None
