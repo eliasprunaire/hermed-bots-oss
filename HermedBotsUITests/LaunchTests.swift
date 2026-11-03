@@ -5,6 +5,14 @@ final class LaunchTests: XCTestCase {
     private let environment = ProcessInfo.processInfo.environment
     private var apiURL: String? { environment["HV_API_URL"] }
 
+    /// `/_hv/ready` n'existe que sur le faux serveur (pas sur orb).
+    private func isFakeServer() -> Bool {
+        guard let apiURL, let url = URL(string: apiURL + "/_hv/ready") else { return false }
+        guard let data = try? Data(contentsOf: url),
+              let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return body["mode"] != nil
+    }
+
     override func setUp() {
         continueAfterFailure = false
     }
@@ -15,7 +23,7 @@ final class LaunchTests: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(\(language))"]
         app.launchEnvironment["HV_TEST_MODE"] = "1"
         if let url = url ?? apiURL { app.launchEnvironment["HV_API_URL"] = url }
-        for name in ["HV_TEST_API_KEY", "HV_TEST_API_KEYS"] { app.launchEnvironment[name] = environment[name] }
+        for name in ["HV_TEST_API_KEY", "HV_TEST_API_KEYS", "HV_TEST_PROFILE_TABLE"] { app.launchEnvironment[name] = environment[name] }
         app.launch()
         return app
     }
@@ -60,9 +68,20 @@ final class LaunchTests: XCTestCase {
         try? handle.write(contentsOf: Data(line.utf8))
     }
 
-    func testWindowOpensWithTheServerVersionAndTheBotList() {
+    func testWindowOpensWithTheServerVersionAndTheBotList() throws {
         let app = launch()
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10), "la fenêtre ne s'ouvre pas")
+        // Capture avant que la version ne se stabilise : sinon launch ≡ language-fr (même UI settled).
+        HVShot.capture("launch", app)
+        let bot = app.descendants(matching: .any).matching(identifier: AccessibilityID.botRow("hv-bot-a")).firstMatch
+        if !bot.waitForExistence(timeout: 20) {
+            if isFakeServer() {
+                XCTFail("profil hv-bot-a absent sous faux serveur (table/clés de test attendues)")
+            } else {
+                throw XCTSkip("profil hv-bot-a absent : instance orb sans ces profils")
+            }
+            return
+        }
         let shown = settledVersion(in: app)
         let expected = serverVersion(at: apiURL) ?? "inconnue"
         XCTAssertEqual(shown, expected)
@@ -72,7 +91,6 @@ final class LaunchTests: XCTestCase {
         for id in [AccessibilityID.botsList, AccessibilityID.statusVersion] {
             XCTAssertEqual(app.descendants(matching: .any).matching(identifier: id.rawValue).count, 1, "\(id.rawValue) désigne plus d'un élément")
         }
-        HVShot.capture("launch", app)
     }
 
     func testVersionIsUnknownWhenNothingListens() {

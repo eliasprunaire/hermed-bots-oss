@@ -3,13 +3,13 @@ import XCTest
 @MainActor
 final class ResumeLanes: HD12Harness {
     override func setUpWithError() throws {
+        try super.setUpWithError()
         try XCTSkipUnless(environment["HV13_PROXY"] == "1", "Le proxy HD-13 qui coupe les flux est requis.")
     }
 
     private var since = Date()
 
     override func setUp() {
-        super.setUp()
         since = Date()
     }
 

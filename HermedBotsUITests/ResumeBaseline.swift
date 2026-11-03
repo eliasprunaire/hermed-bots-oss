@@ -3,6 +3,7 @@ import XCTest
 @MainActor
 final class ResumeBaseline: HD12Harness {
     override func setUpWithError() throws {
+        try super.setUpWithError()
         try XCTSkipUnless(environment["HV13_BASELINE"] == "1", "La lane de référence exige trunk.")
     }
 

@@ -209,13 +209,17 @@ final class AppModel {
 
     /// `list_profiles` : `hermes profile list` par un second canal ssh en lecture seule (décision S6)
     private func readProfiles() async throws -> [Profile] {
+        #if DEBUG
+        // Mode test avec table injectée : ne pas dépendre d'un `hermes profile list` SSH
+        // (orb + tunnel inverse : la commande hôte échoue → bots.error + version « inconnue »).
+        if let table = environment.testProfileTable {
+            return try ProfileTable.parse(table)
+        }
+        #endif
         if let sshBackend, let sshConfig, case .open = tunnel.state {
             return try ProfileTable.parse(await sshBackend.readProfileList(sshConfig))
         }
         #if DEBUG
-        if let table = environment.testProfileTable {
-            return try ProfileTable.parse(table)
-        }
         // mode test sans tunnel : le faux serveur sert la même table sur /_hv/profile-list (fixtures/README.md)
         if environment.ssh == nil, let base = environment.baseURL {
             let configuration = URLSessionConfiguration.ephemeral

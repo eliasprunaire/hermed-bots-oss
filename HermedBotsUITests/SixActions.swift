@@ -21,7 +21,7 @@ final class SixActions: XCTestCase {
         app.launchArguments += ["-AppleLanguages", "(fr)"]
         app.launchEnvironment["HV_TEST_MODE"] = "1"
         app.launchEnvironment["HV_RESUME_SCOPE"] = UUID().uuidString
-        for name in ["HV_API_URL", "HV_TEST_API_KEY", "HV_TEST_API_KEYS", "HV_SSH_HOST", "HV_SSH_USER", "HV_TEST_SSH_KEY"] {
+        for name in ["HV_API_URL", "HV_TEST_API_KEY", "HV_TEST_API_KEYS", "HV_TEST_PROFILE_TABLE", "HV_SSH_HOST", "HV_SSH_USER", "HV_TEST_SSH_KEY"] {
             if let value = environment[name] { app.launchEnvironment[name] = value }
         }
         app.launch()
@@ -116,7 +116,8 @@ final class SixActions: XCTestCase {
         environment[name].map { $0.split(separator: ",").map(String.init) } ?? fallback
     }
 
-    func testResumeAfterSleep() {
+    func testResumeAfterSleep() throws {
+        try XCTSkipIf(serverMode() == nil, "Ce scénario exige les contrôles du faux serveur")
         defer { FakeServer.cut(seconds: 0) }
         let app = launch()
         let since = Date()
@@ -141,10 +142,10 @@ final class SixActions: XCTestCase {
 
     // MARK: la liste
 
-    func testListBots() {
+    func testListBots() throws {
         let app = launch()
         let wanted = ["hv-bot-a", "hv-bot-b"]
-        XCTAssertTrue(element(AccessibilityID.botRow(wanted[0]), in: app).waitForExistence(timeout: 20), "hd.bots.row.hv-bot-a absent")
+        try requireIssue56Bots(in: app)
         for id in wanted {
             XCTAssertTrue(element(AccessibilityID.botRow(id), in: app).exists, "hd.bots.row.\(id) absent")
             // un identifiant désigne un seul élément : ni la ligne, ni son nom, ni son modèle ne le prêtent aux autres
@@ -290,6 +291,7 @@ final class SixActions: XCTestCase {
     /// Lane 3 : déplier un bot lit ses fils, une seule fois, sans rien envoyer
     func testExpandingABotListsItsPastThreadsWithOneRequest() throws {
         try XCTSkipIf(apiURL == nil, "HV_API_URL absent : pas de journal du serveur à lire")
+        try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
         let start = Date()
         let app = launch()
         let row = element(AccessibilityID.botRow("hv-bot-a"), in: app)
@@ -370,9 +372,17 @@ final class SixActions: XCTestCase {
         row.click()
     }
 
-    private func openBot(_ id: String = "hv-bot-a", in app: XCUIApplication) {
+    private func openBot(_ id: String = "hv-bot-a", in app: XCUIApplication) throws {
         let row = element(AccessibilityID.botRow(id), in: app)
-        XCTAssertTrue(row.waitForExistence(timeout: 20), "hd.bots.row.\(id) absent")
+        let present = row.waitForExistence(timeout: 20)
+        if !present {
+            if serverMode() != nil {
+                XCTFail("profil \(id) absent sous faux serveur (hv-bot-a/b ou table de test)")
+            } else {
+                throw XCTSkip("profil \(id) absent (instance orb sans ces profils)")
+            }
+            return
+        }
         // la liste existe avant que ses lignes aient une place à l'écran : un clic trop tôt ne trouve pas de point à cliquer
         let hittable = Date().addingTimeInterval(10)
         while !row.isHittable, Date() < hittable { usleep(50_000) }
@@ -448,9 +458,10 @@ final class SixActions: XCTestCase {
     /// Lane 1 : un message part, la réponse de la fixture arrive en flux, l'état terminal est `completed`
     /// Le tour part par `start_run` avec le `session_id` du fil : le chat de session ne rend aucun événement (S1) et répond HTTP 200 à un échec du fournisseur
     func testConversation() throws {
+        try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         XCTAssertFalse(element(.composerSend, in: app).isEnabled, "Envoyer doit être grisé tant que le champ est vide")
         XCTAssertTrue(element(.conversationView, in: app).exists)
         XCTAssertTrue(element(.conversationEmpty, in: app).exists, "une conversation neuve montre son message d'accueil")
@@ -489,7 +500,7 @@ final class SixActions: XCTestCase {
         try XCTSkipIf(expected.isEmpty, "HV_EXPECT_REPLY absent : pas d'instance OrbStack à interroger")
         let reply = expected
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         send("bonjour hd09", in: app)
         XCTAssertTrue(waitForMessage(containing: reply, in: app), "la réponse du modèle n'arrive pas : \(shownMessages(in: app))")
         XCTAssertTrue(waitForState("completed", in: app))
@@ -501,9 +512,10 @@ final class SixActions: XCTestCase {
 
     /// Rouvrir un fil passé montre son transcript, avec les numéros de Hermes, sans rien envoyer
     func testReopeningAThreadShowsItsTranscriptAndSendsNothing() throws {
+        try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         openThread("s-past-1", in: app)
         XCTAssertTrue(waitForMessage(containing: "Réponse de test", in: app), "le transcript du fil n'arrive pas")
         XCTAssertEqual(shownMessages(in: app), ["Bonjour", "Réponse de test"])
@@ -538,7 +550,7 @@ final class SixActions: XCTestCase {
             serverPost("/_hv/reset")
             serverPost("/_hv/inject", item.event)
             let app = launch()
-            openBot(in: app)
+            try openBot(in: app)
             send("etat \(item.state)", in: app)
             XCTAssertTrue(waitForState(item.state, in: app), "\(item.event) : hd.conversation.state ne lit pas \(item.state), il lit \(element(.conversationState, in: app).label)")
             XCTAssertFalse(element(.conversationBusy, in: app).exists)
@@ -561,7 +573,7 @@ final class SixActions: XCTestCase {
         serverPost("/_hv/reset")
         serverPost("/_hv/inject", ["event": "hv.unknown_future_event", "payload": ["x": 2]])
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         send("evenement inconnu", in: app)
         XCTAssertTrue(waitForMessage(containing: "Réponse de test", in: app))
         XCTAssertTrue(waitForState("completed", in: app))
@@ -575,7 +587,7 @@ final class SixActions: XCTestCase {
     func testAMessageOfSpacesCannotBeSent() throws {
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         type("     ", in: app)
         XCTAssertFalse(element(.composerSend, in: app).isEnabled, "Envoyer doit rester grisé pour des espaces")
         // ⏎ ne contourne pas le bouton
@@ -591,9 +603,10 @@ final class SixActions: XCTestCase {
 
     /// Lane 7 : 100 000 caractères collés, une seule requête, la fenêtre répond
     func testAHundredThousandCharacterMessageGoesOutOnce() throws {
+        try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         let long = String(repeating: "é", count: 100_000)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(long, forType: .string)
@@ -617,9 +630,10 @@ final class SixActions: XCTestCase {
 
     /// Lane 8 : un double clic sur Envoyer ne lance qu'un tour
     func testADoubleClickOnSendSendsOnce() throws {
+        try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         type("double clic", in: app)
         element(.composerSend, in: app).doubleClick()
         XCTAssertTrue(waitForState("completed", in: app))
@@ -633,9 +647,10 @@ final class SixActions: XCTestCase {
     /// Lane 9 : pendant un tour, Envoyer est grisé, le champ reste libre et rien de plus ne part
     /// Un message qui contient HV_SLOW espace les événements d'une seconde (faux serveur) ou fait parler le faux fournisseur vingt secondes (orb)
     func testSendingWhileATurnRunsIsRefusedWithoutSendingAnythingExtra() throws {
+        try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         send("HV_SLOW go", in: app)
         let busy = element(.conversationBusy, in: app)
         XCTAssertTrue(busy.waitForExistence(timeout: 10), "hd.conversation.busy absent pendant le tour")
@@ -656,9 +671,10 @@ final class SixActions: XCTestCase {
 
     /// Lane 10 : « Nouvelle session » vide la conversation, l'ancien fil devient un fil passé, rouvrir un fil montre ses messages
     func testNewSessionEmptiesTheConversationAndTheOldOneBecomesAThread() throws {
+        try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         let button = element(.sessionNew, in: app)
         XCTAssertTrue(button.waitForExistence(timeout: 10), "hd.session.new absent")
         XCTAssertEqual(button.label, "Nouvelle session")
@@ -701,6 +717,18 @@ final class SixActions: XCTestCase {
     /// Un faux serveur en mode normal : lui seul règle la table des profils et sert vite ; en slow, drop-route ou fields, chaque lane lance le sien
     private func requireFakeServer() throws {
         try XCTSkipUnless(serverMode() == "normal", "le faux serveur n'est pas en mode normal")
+    }
+
+    /// Profils issue56 / table de test : XCTFail sous faux serveur ; XCTSkip seulement hors fake (orb sans ces profils).
+    private func requireIssue56Bots(in app: XCUIApplication, timeout: TimeInterval = 20) throws {
+        let row = element(AccessibilityID.botRow("hv-bot-a"), in: app)
+        let present = row.waitForExistence(timeout: timeout)
+        if present { return }
+        if serverMode() != nil {
+            XCTFail("profil hv-bot-a absent sous faux serveur (clés/table de test attendues)")
+        } else {
+            throw XCTSkip("profil hv-bot-a absent (instance orb sans ces profils)")
+        }
     }
 
     /// Le sélecteur n'a qu'une option tant que les profils ont tous le même modèle : `hv-bot-b` prend `model-y`
@@ -757,7 +785,7 @@ final class SixActions: XCTestCase {
     func testModelSwitch() throws {
         try requireFakeServer()
         let app = launchWithTwoModels()
-        openBot(in: app)
+        try openBot(in: app)
         let picker = element(.modelPicker, in: app)
         XCTAssertTrue(picker.waitForExistence(timeout: 10), "hd.model.picker absent")
         XCTAssertEqual(text(of: picker), "hv-fake-1", "avant tout choix, le sélecteur montre le modèle du profil")
@@ -787,7 +815,7 @@ final class SixActions: XCTestCase {
     func testAModelPickedBeforeTheFirstMessageIsLockedOnCreationAndTheFirstTurnUsesIt() throws {
         try requireFakeServer()
         let app = launchWithTwoModels()
-        openBot(in: app)
+        try openBot(in: app)
         let start = Date()
         pickModel("model-y", in: app)
         XCTAssertTrue(waitForModel("model-y", in: app), "le choix doit s'afficher avant que le fil existe")
@@ -809,7 +837,7 @@ final class SixActions: XCTestCase {
     func testAChosenModelStaysOnItsSessionAndANewSessionShowsTheProfileModel() throws {
         try requireFakeServer()
         let app = launchWithTwoModels()
-        openBot(in: app)
+        try openBot(in: app)
         openThread("s-past-1", in: app)
         XCTAssertTrue(waitForMessage(containing: "Réponse de test", in: app))
         let start = Date()
@@ -830,7 +858,7 @@ final class SixActions: XCTestCase {
         let unknown = "Modèle inconnu (x) 9"
         FakeServer.lockModel(profile: "hv-bot-a", session: "s-past-1", model: unknown)
         let app = launchWithTwoModels()
-        openBot(in: app)
+        try openBot(in: app)
         openThread("s-past-1", in: app)
         XCTAssertTrue(waitForModel(unknown, in: app), "le nom envoyé par Hermes doit s'afficher tel quel")
         element(.modelPicker, in: app).click()
@@ -849,7 +877,7 @@ final class SixActions: XCTestCase {
         try configureFake(mode: "drop-route", drop: "set_model")
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         let picker = element(.modelPicker, in: app)
         XCTAssertTrue(picker.waitForExistence(timeout: 10), "hd.model.picker absent")
         let message = element(.modelDisabled, in: app)
@@ -870,7 +898,7 @@ final class SixActions: XCTestCase {
     func testSelectingTheSameOptionTwiceFastSendsOneSetModel() throws {
         try requireFakeServer()
         let app = launchWithTwoModels()
-        openBot(in: app)
+        try openBot(in: app)
         openThread("s-past-1", in: app)
         XCTAssertTrue(waitForMessage(containing: "Réponse de test", in: app))
         let start = Date()
@@ -889,7 +917,7 @@ final class SixActions: XCTestCase {
     func testSwitchingWhileATurnRunsLeavesTheTurnAloneAndAppliesToTheNextOne() throws {
         try requireFakeServer()
         let app = launchWithTwoModels()
-        openBot(in: app)
+        try openBot(in: app)
         openThread("s-past-1", in: app)
         XCTAssertTrue(waitForMessage(containing: "Réponse de test", in: app))
         let start = Date()
@@ -915,7 +943,7 @@ final class SixActions: XCTestCase {
     func testASlowServerShowsAWaitStateAndTheWindowStaysResponsive() throws {
         try configureFake(mode: "slow")
         let app = launchWithTwoModels()
-        openBot(in: app)
+        try openBot(in: app)
         // la liste des fils et le transcript attendent 8 s chacun
         let row = element(AccessibilityID.threadRow("s-past-1"), in: app)
         XCTAssertTrue(row.waitForExistence(timeout: 40), "hd.threads.row.s-past-1 absent")
@@ -939,7 +967,7 @@ final class SixActions: XCTestCase {
         FakeServer.lockModel(profile: "hv-bot-a", session: "s-past-1", model: "model-y")
         let start = Date()
         let app = launchWithTwoModels()
-        openBot(in: app)
+        try openBot(in: app)
         XCTAssertEqual(text(of: element(.modelPicker, in: app)), "hv-fake-1", "un fil neuf suit le modèle du profil")
         openThread("s-past-1", in: app)
         XCTAssertTrue(waitForModel("model-y", in: app), "le fil rouvert doit montrer le modèle de sa session")
@@ -971,7 +999,7 @@ final class SixActions: XCTestCase {
         try requireFakeServer()
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         askForApproval(in: app)
         XCTAssertEqual(text(of: element(.approvalTool, in: app)), "file.write")
         XCTAssertTrue(text(of: element(.approvalParams, in: app)).contains("/tmp/hv.txt"), "hd.approval.params ne montre pas /tmp/hv.txt")
@@ -998,7 +1026,7 @@ final class SixActions: XCTestCase {
         try requireFakeServer()
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         askForApproval(in: app)
         XCTAssertEqual(text(of: element(.approvalTool, in: app)), "file.write")
         XCTAssertTrue(text(of: element(.approvalParams, in: app)).contains("/tmp/hv.txt"))
@@ -1019,7 +1047,7 @@ final class SixActions: XCTestCase {
         try requireFakeServer()
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         askForApproval(in: app)
         app.typeKey(.escape, modifierFlags: [])
         XCTAssertTrue(waitForState("completed", in: app), "le tour ne finit pas après Échap")
@@ -1033,7 +1061,7 @@ final class SixActions: XCTestCase {
     func testCurrentTool() throws {
         try requireFakeServer()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         XCTAssertFalse(element(.toolCurrent, in: app).exists, "aucun outil avant le tour")
         send("HV_TOOL_SHELL go", in: app)
         let tool = element(.toolCurrent, in: app)
@@ -1050,7 +1078,7 @@ final class SixActions: XCTestCase {
     func testAHugeParameterScrollsAndMarksWhatItDoesNotShow() throws {
         try requireFakeServer()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         askForApproval("HV_APPROVAL_HUGE go", in: app)
         let params = element(.approvalParams, in: app)
         XCTAssertTrue(params.waitForExistence(timeout: 10), "hd.approval.params absent")
@@ -1075,7 +1103,7 @@ final class SixActions: XCTestCase {
         try requireFakeServer()
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         askForApproval(in: app)
         element(.approvalYes, in: app).doubleClick()
         XCTAssertTrue(waitForState("completed", in: app))
@@ -1091,7 +1119,7 @@ final class SixActions: XCTestCase {
         try requireFakeServer()
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         let sheet = askForApproval(in: app)
         serverPost("/_hv/cut", ["seconds": 8])
         let cutAt = Date()
@@ -1118,7 +1146,7 @@ final class SixActions: XCTestCase {
         try configureFake(mode: "drop-route", drop: "approve")
         let start = Date()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         askForApproval(in: app)
         XCTAssertEqual(text(of: element(.approvalTool, in: app)), "file.write")
         XCTAssertTrue(text(of: element(.approvalParams, in: app)).contains("/tmp/hv.txt"), "la demande doit rester affichée")
@@ -1139,7 +1167,7 @@ final class SixActions: XCTestCase {
     func testASheetLeftWaitingForAMinuteSaysTheBotWaitsAndTheWindowStaysResponsive() throws {
         try requireFakeServer()
         let app = launch()
-        openBot(in: app)
+        try openBot(in: app)
         askForApproval(in: app)
         let status = element(.approvalStatus, in: app)
         XCTAssertTrue(status.waitForExistence(timeout: 5), "hd.approval.status absent")

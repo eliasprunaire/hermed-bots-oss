@@ -103,7 +103,7 @@ function initTls(dataDir, { sans = [] } = {}) {
   for (const san of names) if (!SAN_RE.test(san)) throw new Error(`bad subject alternative name: ${san}`);
   const dir = ensureDir(path.join(dataDir, "tls"));
   const file = (n) => path.join(dir, n);
-  const keyAlg = ["genpkey", "-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:P-256"];
+  const keyAlg = ["genpkey", "-algorithm", "EC", "-pkeyopt", "ec_paramgen_curve:P-256", "-pkeyopt", "ec_param_enc:named_curve"];
   fs.writeFileSync(file("openssl.cnf"), [
     "[req]", "distinguished_name=dn", "[dn]",
     "[ca_ext]", "basicConstraints=critical,CA:TRUE,pathlen:0", "keyUsage=critical,keyCertSign,cRLSign", "subjectKeyIdentifier=hash",
