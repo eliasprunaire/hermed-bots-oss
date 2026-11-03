@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-[ "$HOME" =  ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
-bash .cursor/skills/verify-hermed-bots/scripts/hv-selftest.sh
+[ "$(id -un)" = hvtest ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
+bash "${HV_SKILL_SCRIPTS:-.local-skills/verify-hermed-bots/scripts}/hv-selftest.sh"
 bash docs/spike/issue57/check-visual.sh
 tests=(
   SixActions/testADroppedApproveRouteShowsTheRequestWithTheDisabledMessageAndTheKillSwitch

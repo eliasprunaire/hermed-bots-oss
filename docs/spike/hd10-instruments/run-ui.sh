@@ -8,7 +8,7 @@
 # Pass : le garde rend 0 et la seule destination vue est 127.0.0.1:18642, le faux serveur ; la ligne « NET OK » ou « NET FAIL » et les lignes « GUARD » vont dans le journal
 set -uo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
-SK=$ROOT/.cursor/skills/verify-hermed-bots/scripts
+SK=${HV_SKILL_SCRIPTS:-$ROOT/.local-skills/verify-hermed-bots/scripts}
 WORK=${HV_WORK:-$HOME/hermed-bots-work}
 XCTESTRUN=${HV_XCTESTRUN:?HV_XCTESTRUN absent : lancer par le script de VM de test}
 mode=normal

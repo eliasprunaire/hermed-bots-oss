@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Lancer uniquement par le script de VM de test
 set -uo pipefail
-[ "$HOME" =  ] || { echo 'VM hvtest requise'; exit 2; }
+[ "$(id -un)" = hvtest ] || { echo 'VM hvtest requise'; exit 2; }
 result=0
 for mode in lanes perf review; do
   echo "HD14 passe=$mode"

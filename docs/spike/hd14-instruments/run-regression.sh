@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Lancer uniquement par le script de VM de test
 set -uo pipefail
-[ "$HOME" =  ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
+[ "$(id -un)" = hvtest ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
 evidence=${HV_WORK:?}/evidence/hd14-unit-$(date +%Y%m%d-%H%M%S)
 mkdir -p "$evidence"
 xcodebuild test-without-building -xctestrun "$HV_XCTESTRUN" -destination platform=macOS \
