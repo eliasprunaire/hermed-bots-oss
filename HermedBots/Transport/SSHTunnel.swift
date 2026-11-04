@@ -9,7 +9,8 @@ import os
 
 /// Pourquoi le tunnel ne s'ouvre pas ou s'est fermé
 /// Seul `unreachable` donne lieu à une réouverture : une clé refusée ou un hôte changé ne se règle pas en réessayant
-/// Aucune cause ne montre la sortie brute de ssh : l'interface affiche un texte classé, `unreachable` (cause inconnue) y ajoute le code de sortie
+/// Aucune cause ne montre la sortie brute de ssh : l'interface affiche un texte classé
+/// Un SSH injoignable (code 255) ou un délai de connexion affiche le texte de `SSHExitClassification`, sans code ni hôte
 /// Le journal local (`record`) ne reçoit aucune sortie de ssh : seulement la classe de l'erreur et le code de sortie
 enum SSHFailure: Error, Equatable, Sendable {
     case forbiddenHost
@@ -42,9 +43,9 @@ enum SSHFailure: Error, Equatable, Sendable {
     /// Classe la sortie brute de ssh et note la classe au journal local
     /// Le résultat ne porte aucun morceau de cette sortie, sauf `wrapperFailure` : le nom et le code d'un `<nom>_failure=<code>`, validés et bornés par `SSHExitClassification.wrapperFailure`
     static func classify(stderr: String, status: Int32 = 255) -> SSHFailure {
-        let kind = SSHExitClassification.kind(stderr: stderr, status: status)
-        record(source: "ssh", status: status, kind: kind.rawValue)
-        switch kind {
+        let report = SSHExitClassification.make(stderr: stderr, status: status)
+        record(source: "ssh", status: status, kind: report.fallback.rawValue)
+        switch report.fallback {
         case .agentUnavailable: return .missingAgent
         case .missingKey: return .missingKey
         case .agentEmpty: return .agentLockedOrEmpty("")
@@ -52,7 +53,9 @@ enum SSHFailure: Error, Equatable, Sendable {
         case .authRefused: return .wrongKey("")
         case .hostKeyChanged: return .hostKeyChanged("")
         case .tunnelClosed: return .tunnelClosed
-        case .hostUnreachable: return .unreachable(String(localized: "Échec SSH (code \(status))"))
+        case .hostUnreachable:
+            if let text = report.displayedMessage { return .unreachable(text) }
+            return .unreachable(String(localized: "Échec SSH (code \(status))"))
         case .wrapperFailure:
             let found = SSHExitClassification.wrapperFailure(stderr: stderr)
             return .wrapperFailure(name: found?.name ?? "", code: found?.code ?? "")
@@ -74,9 +77,21 @@ enum SSHFailure: Error, Equatable, Sendable {
 
 extension SSHFailure {
     /// Le texte de la cause, puis, pour une cause inconnue, le code de sortie ou la cause interne qui l'accompagne
+    /// Un délai de connexion SSH et un code 255 au stade ssh n'ajoutent rien : le texte classé suffit
     var message: String {
         guard case .unreachable(let detail) = self, !detail.isEmpty else { return summary }
+        if Self.showsHermesUnreachable(detail) {
+            return SSHExitClassification.hermesUnreachableMessage
+        }
         return summary + "\n" + detail
+    }
+
+    private static func showsHermesUnreachable(_ detail: String) -> Bool {
+        if detail == SSHExitClassification.hermesUnreachableMessage { return true }
+        if detail == "délai dépassé" {
+            return SSHExitClassification.make(stderr: "", status: 255, timedOut: true).displayedMessage != nil
+        }
+        return false
     }
 
     private var summary: String {

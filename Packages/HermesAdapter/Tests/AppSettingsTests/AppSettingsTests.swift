@@ -311,6 +311,63 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(SSHExitClassification.kind(stderr: "", status: 255), .hostUnreachable)
     }
 
+    func testSSHStageExit255ShowsTheGenericHermesMessageAndStripsHostPathAndUser() {
+        let stderr = """
+        ssh: connect to host example.invalid port 22: Connection refused
+        ssh: connect to host 203.0.113.10 port 22: Network is unreachable
+        Identity file /opt/example/id_ed25519 not accessible
+        operator@example.invalid: Network is unreachable
+        """
+        let report = SSHExitClassification.make(stderr: stderr, status: 255)
+        XCTAssertEqual(report.stage, SSHExitClassification.sshStage)
+        XCTAssertEqual(report.fallback, .hostUnreachable)
+        XCTAssertEqual(report.reason, "exit-255")
+        XCTAssertEqual(report.displayedMessage, "la machine Hermes ne répond pas")
+        let shown = report.displayedMessage ?? ""
+        XCTAssertFalse(shown.contains("example.invalid"), shown)
+        XCTAssertFalse(shown.contains("/opt/example"), shown)
+        XCTAssertFalse(shown.contains("operator@"), shown)
+        XCTAssertFalse(shown.contains("Connection refused"), shown)
+        XCTAssertFalse(shown.contains("203.0.113."), shown)
+        XCTAssertEqual(shown, SSHExitClassification.hermesUnreachableMessage)
+    }
+
+    func testSSHConnectionTimeoutShowsTheGenericHermesMessage() {
+        let stderr = "ssh: connect to host example.invalid port 22: Operation timed out\nuser@example.invalid"
+        let report = SSHExitClassification.make(stderr: stderr, status: 255, timedOut: true)
+        XCTAssertEqual(report.stage, SSHExitClassification.sshStage)
+        XCTAssertEqual(report.fallback, .hostUnreachable)
+        XCTAssertEqual(report.reason, "timeout")
+        XCTAssertEqual(report.displayedMessage, "la machine Hermes ne répond pas")
+        let shown = report.displayedMessage ?? ""
+        XCTAssertFalse(shown.contains("example.invalid"), shown)
+        XCTAssertFalse(shown.contains("user@"), shown)
+        XCTAssertFalse(shown.contains("timed out"), shown)
+    }
+
+    func testAnotherStatusOrStageKeepsCurrentClassificationWithoutTheGenericMessage() {
+        XCTAssertNil(SSHExitClassification.make(stderr: "boom", status: 7).displayedMessage)
+        XCTAssertEqual(SSHExitClassification.make(stderr: "boom", status: 7).fallback, .hostUnreachable)
+        XCTAssertEqual(SSHExitClassification.make(stderr: "boom", status: 7).reason, "exit-7")
+        XCTAssertEqual(SSHExitClassification.make(stderr: "boom", status: 7).stage, SSHExitClassification.sshStage)
+
+        let auth = SSHExitClassification.make(stderr: "operator@example.invalid: Permission denied (publickey).", status: 255)
+        XCTAssertEqual(auth.stage, SSHExitClassification.sshStage)
+        XCTAssertEqual(auth.fallback, .authRefused)
+        XCTAssertNil(auth.displayedMessage)
+        XCTAssertEqual(SSHExitClassification.kind(stderr: "operator@example.invalid: Permission denied (publickey).", status: 255), .authRefused)
+
+        let closed = SSHExitClassification.make(stderr: "Connection reset by peer", status: 255)
+        XCTAssertEqual(closed.stage, "tunnel")
+        XCTAssertEqual(closed.fallback, .tunnelClosed)
+        XCTAssertNil(closed.displayedMessage)
+
+        let wrapper = SSHExitClassification.make(stderr: "gate-wrapper_failure=17\n", status: 255)
+        XCTAssertEqual(wrapper.stage, "wrapper")
+        XCTAssertEqual(wrapper.fallback, .wrapperFailure)
+        XCTAssertNil(wrapper.displayedMessage)
+    }
+
     func testAWrapperFailureLineIsNamedWhateverThePrecedingStderrSays() {
         let line = "gate-wrapper_failure=17"
         XCTAssertEqual(
