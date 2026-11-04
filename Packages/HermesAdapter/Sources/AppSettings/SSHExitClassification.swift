@@ -23,7 +23,54 @@ public struct SSHWrapperFailure: Sendable, Equatable {
     }
 }
 
-public enum SSHExitClassification: Sendable {
+public struct SSHExitClassification: Sendable, Equatable {
+    public let stage: String
+    public let fallback: SSHExitKind
+    public let reason: String
+
+    public static let sshStage = "ssh"
+    public static let hermesUnreachableMessage = "la machine Hermes ne répond pas"
+
+    public init(stage: String, fallback: SSHExitKind, reason: String) {
+        self.stage = stage
+        self.fallback = fallback
+        self.reason = reason
+    }
+
+    public static func make(stderr: String, status: Int32, timedOut: Bool = false) -> SSHExitClassification {
+        if timedOut {
+            return SSHExitClassification(stage: sshStage, fallback: .hostUnreachable, reason: "timeout")
+        }
+        let kind = kind(stderr: stderr, status: status)
+        return SSHExitClassification(
+            stage: stageName(kind),
+            fallback: kind,
+            reason: reasonName(kind, status: status)
+        )
+    }
+
+    /// Texte affiché pour un SSH injoignable (code 255) ou un délai dépassé ; nil sinon
+    public var displayedMessage: String? {
+        guard stage == Self.sshStage, fallback == .hostUnreachable else { return nil }
+        if reason == "timeout" || reason == "exit-255" {
+            return Self.hermesUnreachableMessage
+        }
+        return nil
+    }
+
+    private static func stageName(_ kind: SSHExitKind) -> String {
+        switch kind {
+        case .wrapperFailure: return "wrapper"
+        case .tunnelClosed: return "tunnel"
+        default: return sshStage
+        }
+    }
+
+    private static func reasonName(_ kind: SSHExitKind, status: Int32) -> String {
+        if kind == .hostUnreachable { return "exit-\(status)" }
+        return kind.rawValue
+    }
+
     public static func kind(stderr: String, status: Int32) -> SSHExitKind {
         let text = stderr
         // l'exécutable a nommé lui-même son échec : cette ligne l'emporte sur les phrases d'OpenSSH
