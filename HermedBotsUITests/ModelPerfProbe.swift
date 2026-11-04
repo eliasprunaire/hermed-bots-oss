@@ -64,9 +64,6 @@ final class ModelPerfProbe: XCTestCase {
         let hittable = Date().addingTimeInterval(10)
         while !bot.isHittable, Date() < hittable { usleep(50_000) }
         bot.click()
-        let thread = element(AccessibilityID.threadRow("s-past-1"))
-        XCTAssertTrue(thread.waitForExistence(timeout: 10), "hd.threads.row.s-past-1 absent")
-        thread.click()
         let picker = element(AccessibilityID.modelPicker.rawValue)
         XCTAssertTrue(picker.waitForExistence(timeout: 10), "hd.model.picker absent")
         XCTAssertEqual(shown(picker), "hv-fake-1")

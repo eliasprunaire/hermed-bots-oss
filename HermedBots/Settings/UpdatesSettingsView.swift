@@ -1,4 +1,5 @@
 import AppSettings
+import HermesAdapter
 import SwiftUI
 import UpdateCheck
 
@@ -16,6 +17,9 @@ struct UpdatesSettingsView: View {
                 }
                 LabeledContent(AboutVersionSnapshot.macOSTitle) {
                     Text(verbatim: snapshot.displayedMacOS).accessibilityID(.aboutMacOS)
+                }
+                LabeledContent("Compatibilité Hermes") {
+                    Text(compatibilityDetail).accessibilityID(.aboutCompat)
                 }
                 HStack {
                     Button(SettingsCopy.checkForUpdates) { model.checkForUpdates() }
@@ -76,5 +80,24 @@ struct UpdatesSettingsView: View {
         case .known(let version): version
         case .unknown: nil
         }
+    }
+
+    private var compatibilityDetail: String {
+        if model.isCheckingAPI { return CompatibilityStatus.connectingLabel }
+        if let map = model.capabilities {
+            if map.hasDisabledFeature {
+                return map.entries.compactMap {
+                    if case .disabled(let message) = $0.state { return message }
+                    return nil
+                }.joined(separator: " ")
+            }
+            if let notice = map.versionNotice {
+                return notice + ". Toutes les fonctions répondent."
+            }
+            if let version = map.version {
+                return "Hermes \(version) testée. Toutes les fonctions répondent."
+            }
+        }
+        return AboutVersionSnapshot.unknownLabel
     }
 }

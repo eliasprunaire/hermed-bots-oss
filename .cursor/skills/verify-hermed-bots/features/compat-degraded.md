@@ -11,7 +11,7 @@ Une nouvelle version de Hermes ne casse jamais l'app : champs inconnus ignorés,
 
 ## How to get to it (user POV)
 
-- Bandeau `hd.banner.degraded` en haut ; version lue dans `hd.status.version`.
+- Bandeau `hd.banner.degraded` seulement si une fonction est réellement désactivée. Une version non testée dont tout répond : pied `hd.status.compat` (« Compatibilité · voir Réglages ») et détail dans Réglages → À propos (`hd.about.compat`). Version lue dans `hd.status.version`.
 
 ## Driving it with XCUITest
 
@@ -25,7 +25,7 @@ Une nouvelle version de Hermes ne casse jamais l'app : champs inconnus ignorés,
 
 L'app sonde la carte des capacités au lancement, puis pour le bot sélectionné.
 Le bandeau nomme chaque contrat désactivé avec son identifiant `hd.banner.degraded.feature.<contrat>`.
-Une version inconnue affiche le mode dégradé et garde les actions disponibles.
+Une version inconnue ou non testée sans fonction perdue n'affiche pas de bandeau : le pied et les Réglages portent l'avis.
 
 ```text
 API -> carte des capacités -> bandeau -> fonction concernée

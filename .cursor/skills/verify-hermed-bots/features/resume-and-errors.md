@@ -7,6 +7,7 @@ Après une coupure (veille simulée), l'app rouvre la connexion et relit le tour
 - `resume-cut` : reprise après coupure réseau simulée.
 - `resume-inject` : reprise déclenchée par événement injecté.
 - `error-down`, `error-slow` : bandeau `hd.banner.error`.
+- `error-connecting` : pendant les tentatives (0 → 400 ms → 1,2 s) et la relecture de clé, `hd.banner.waiting` / pied « Connexion… », jamais un 401 flash.
 - `event-unknown` : `hv.unknown_future_event` ignoré.
 
 ## How to get to it (user POV)
@@ -20,7 +21,7 @@ Après une coupure (veille simulée), l'app rouvre la connexion et relit le tour
 - **Injoignable.** `HV_FAKE_MODE=down` : `hd.banner.error` visible en < 10 s, `hd.banner.error.retry` présent, fenêtre réactive. Capture `error`.
 - **Lent.** `HV_FAKE_MODE=slow` (8 s) : indicateur d'attente, pas de gel, pas de double requête.
 - **Inconnu.** Flux de la fixture contenant `hv.unknown_future_event` : tour terminé, aucune erreur.
-- **Bords.** Clé fausse (401) : message clair, pas de boucle de réessai. Coupure de 0 s, de 10 min.
+- **Bords.** Clé fausse (401) : « Connexion… » pendant les essais, puis message clair, pas de boucle infinie. Coupure de 0 s, de 10 min. Aucune requête `list_sessions` sans Bearer si la clé du profil manque.
 
 ## Gotchas
 

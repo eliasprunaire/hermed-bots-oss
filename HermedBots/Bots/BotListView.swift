@@ -1,17 +1,14 @@
 import SwiftUI
 
-/// La barre latérale : les bots actifs, chacun dépliable sur ses fils passés
+/// La barre latérale : les bots actifs seulement, un chat unique par bot
 struct BotListView: View {
     let model: BotsModel
     let profileLock: ProfileLock
-    /// Le bot et le fil ouverts dans la conversation, s'ils sont dans la liste
+    /// Le bot ouvert dans la conversation, s'il est dans la liste
     let selectedBot: String?
-    let selectedSession: String?
     let activity: (String) -> ConversationMachine.Activity
-    /// Un clic sur un bot le choisit pour la conversation, en plus de le déplier
+    /// Un clic sur un bot ouvre son fil unique
     let select: (String) -> Void
-    /// Un clic sur un fil passé l'ouvre : le fil, puis son bot
-    let open: (String, String) -> Void
 
     var body: some View {
         List {
@@ -19,12 +16,8 @@ struct BotListView: View {
                 BotChangeNotice(change: change, apply: model.validateChange)
             }
             ForEach(model.list.shown ?? []) { bot in
-                BotRow(bot: bot, isExpanded: model.expanded.contains(bot.id), isSelected: bot.id == selectedBot, activity: activity(bot.id), lockReason: profileLock.reason(bot.id)) {
-                    if profileLock.state(bot.id) == .free { model.toggle(bot.id) }
+                BotRow(bot: bot, isSelected: bot.id == selectedBot, activity: activity(bot.id), lockReason: profileLock.reason(bot.id)) {
                     select(bot.id)
-                }
-                if model.expanded.contains(bot.id) {
-                    ThreadsView(botID: bot.id, tint: Palette.colors(bot)[0], state: model.threads[bot.id], selected: selectedSession) { open($0, bot.id) }
                 }
             }
         }
@@ -56,11 +49,10 @@ struct BotListView: View {
     }
 }
 
-/// Une ligne de bot : son avatar, son nom et son modèle ; un clic la déplie ; un nom ou un modèle trop long est coupé en fin de ligne, le nom entier reste dans l'infobulle
+/// Une ligne de bot : son avatar, son nom et son modèle ; un clic ouvre le fil unique ; un nom ou un modèle trop long est coupé en fin de ligne, le nom entier reste dans l'infobulle
 /// Pas de `Button` : un bouton fusionne ses enfants et `.name` et `.model` perdraient leur identifiant ; l'action par défaut garde la ligne utilisable au clavier d'accessibilité
 struct BotRow: View {
     let bot: Bot
-    let isExpanded: Bool
     let isSelected: Bool
     let activity: ConversationMachine.Activity
     let lockReason: String?
@@ -95,12 +87,6 @@ struct BotRow: View {
                     .accessibilityIdentifier(AccessibilityID.botLock(bot.id))
             }
             Spacer(minLength: 0)
-            Image(systemName: "chevron.right")
-                .font(.caption.weight(.semibold))
-                .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                .foregroundStyle(.tertiary)
-                .opacity(isExpanded || hovered ? 1 : 0)
-                .accessibilityHidden(true)
         }
         .padding(.vertical, 4)
         .padding(.horizontal, 6)
@@ -111,7 +97,6 @@ struct BotRow: View {
                 RoundedRectangle(cornerRadius: 10).fill(.primary.opacity(0.05))
             }
         }
-        .animation(.easeOut(duration: 0.2), value: isExpanded)
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
         .onTapGesture(perform: toggle)

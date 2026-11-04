@@ -1769,6 +1769,38 @@ final class ConversationModelTests: XCTestCase {
         XCTAssertEqual(model.conversation.end, .completed)
         XCTAssertNil(model.approval)
     }
+
+    func testActivateOpensTheLatestSessionAsTheUniqueChat() async throws {
+        let model = makeModel()
+        model.activate(bot: bot)
+        XCTAssertTrue(model.isOpening)
+        XCTAssertNil(model.openError)
+        try await held(0, "GET", "/api/sessions").reply(#"{"data":[{"id":"s-past-1","title":"Fil passé 1"}],"pagination":{"has_more":false}}"#)
+        try await held(1, "GET", "/api/sessions/s-past-1/messages").reply(transcript((1, "user", "Bonjour"), (2, "assistant", "**Réponse**")))
+        await eventually("fil unique ouvert") { model.sessionID == "s-past-1" && !model.isOpening && !model.isLoading && model.conversation.entries.count == 2 }
+        XCTAssertEqual(model.conversation.entries.map(\.text), ["Bonjour", "**Réponse**"])
+        XCTAssertNil(model.openError)
+        let rendered = MarkdownDocument.parse(model.conversation.entries.last?.text ?? "")
+        XCTAssertFalse(rendered.visibleText.contains("**"))
+        XCTAssertEqual(rendered.visibleText, "Réponse")
+    }
+
+    func testActivateRetriesUnauthorizedListSessionsThenShowsTheError() async throws {
+        let model = makeModel()
+        model.activate(bot: bot)
+        for attempt in 0..<ProfileOpenRetry.attemptCount {
+            try await held(attempt, "GET", "/api/sessions").reply(#"{"error":"Invalid gateway API key"}"#, status: 401)
+        }
+        await eventually("erreur après tentatives", timeout: 8) { model.openError != nil && !model.isOpening }
+        XCTAssertTrue(model.openError?.contains("3 essais") == true, model.openError ?? "")
+        XCTAssertFalse(model.canSend)
+    }
+
+    func testAShortTranscriptIsNotMarkedCompacted() async throws {
+        let model = makeModel()
+        try await openEmptyThread(model, session: "t")
+        XCTAssertFalse(model.compaction.isCompacted)
+    }
 }
 
 /// Une lecture de `hermes profile list` qui attend que le test lui donne sa réponse

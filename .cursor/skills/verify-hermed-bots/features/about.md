@@ -9,10 +9,9 @@ Une valeur absente ou vide s'affiche `inconnue`, sans erreur.
 | Contrôle | Identifiant | Source |
 | --- | --- | --- |
 | Version de l'app | `hd.about.app-version` | `CFBundleShortVersionString` |
-| Build | `hd.about.app-build` | `CFBundleVersion` |
 | Hermes CLI | `hd.about.hermes` | version détectée pour la connexion active |
 | macOS | `hd.about.macos` | version du système |
-| Canal de mise à jour | `hd.about.channel` | version marketing du bundle, celle que le flux de mise à jour compare |
+| Compatibilité | `hd.about.compat` | version testée / non testée, fonctions disponibles |
 
 ## Action
 

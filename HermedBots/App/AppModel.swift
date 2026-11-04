@@ -516,6 +516,7 @@ final class AppModel {
     }
 
     /// `profile` est celui de la requête refusée, pas forcément celui qui est à l'écran
+    /// L'erreur rouge n'apparaît qu'après les tentatives (0 → 400 ms → 1,2 s) et la relecture de clé
     func handleAPIError(_ error: Error, profile: String) async {
         if let failure = error as? APIKeyReadFailure { return showUnreadableKey(failure, profile: profile) }
         guard Self.isUnauthorized(error) else {
@@ -526,19 +527,50 @@ final class AppModel {
     }
 
     private func recoverKey(of profile: String) async {
+        isCheckingAPI = true
+        apiError = nil
+        let hadKey = (try? environment.secrets.resolvedAPIKey(profile: profile)) != nil
         do {
-            if try await fetchRemoteAPIKey(profile) != nil {
-                apiError = nil
-                await recheckAPI()
-                return
+            if !hadKey {
+                let obtained = try await ProfileOpenRetry.run { [self] in
+                    do {
+                        return try await fetchRemoteAPIKey(profile) != nil
+                    } catch let failure as APIKeyReadFailure {
+                        showUnreadableKey(failure, profile: profile)
+                        return true
+                    } catch SSHFailure.remoteToolNotFound {
+                        apiError = SSHFailure.remoteToolNotFound.message
+                        return true
+                    } catch {
+                        return false
+                    }
+                }
+                isCheckingAPI = false
+                if apiError != nil { return }
+                if obtained {
+                    apiError = nil
+                    await recheckAPI()
+                    return
+                }
+            } else {
+                isCheckingAPI = false
+                if try await fetchRemoteAPIKey(profile) != nil {
+                    apiError = nil
+                    await recheckAPI()
+                    return
+                }
             }
         } catch let failure as APIKeyReadFailure {
+            isCheckingAPI = false
             showUnreadableKey(failure, profile: profile)
             return
         } catch {
+            isCheckingAPI = false
             apiError = Self.apiMessage(error)
             return
         }
+        isCheckingAPI = false
+        if apiError != nil { return }
         let holdsKey = (try? environment.secrets.resolvedAPIKey(profile: profile)) != nil
         let message = HermesAPIKey.unauthorizedMessage(profile: profile, holdsKey: holdsKey)
         refusal = (profile, message)

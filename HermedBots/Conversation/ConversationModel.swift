@@ -171,9 +171,16 @@ final class ConversationModel {
     var conversation: Conversation { machine.shown.conversation }
     /// Le transcript du fil à l'écran est en cours de lecture
     var isLoading: Bool { machine.shown.step == .loading }
-    /// L'écran dit « Le bot répond… » tant qu'un tour tourne dans le fil à l'écran
+    /// L'écran dit « Le bot réfléchit… » tant qu'un tour tourne dans le fil à l'écran
     var isBusy: Bool { profileLockReason == nil && pauseCause == nil && machine.shown.step == .sending }
-    var canSend: Bool { !stopInProgress && profileLockReason == nil && pauseCause == nil && machine.canSend(draft) }
+    var canSend: Bool { !stopInProgress && !isOpening && openError == nil && profileLockReason == nil && pauseCause == nil && machine.canSend(draft) }
+    /// Ouverture du fil unique : pastille « Connexion… », pas d'erreur rouge
+    private(set) var isOpening = false
+    /// Erreur d'ouverture après les tentatives ; nil pendant les essais
+    private(set) var openError: String?
+    var compaction: ContextCompaction {
+        ContextCompaction.of(transcript: conversation.entries.map(\.text).joined(separator: "\n"))
+    }
 
     var profileLockReason: String? { botID.flatMap { profileLock?.reason($0) } }
 
@@ -240,6 +247,65 @@ final class ConversationModel {
         apply(.select(bot: id), on: connection())
         let host = connection()
         Task { await restore(bot: id, on: host) }
+    }
+
+    /// Ouvre le chat unique du bot : reprend le fil le plus récent, sans lister les sessions
+    func activate(bot id: String) {
+        select(bot: id)
+        let host = connection()
+        Task { await attachUniqueSession(bot: id, on: host) }
+    }
+
+    func retryOpen() {
+        guard let botID else { return }
+        Task { await attachUniqueSession(bot: botID, on: connection()) }
+    }
+
+    private func attachUniqueSession(bot: String, on host: String) async {
+        isOpening = true
+        openError = nil
+        defer {
+            if host == connection(), botID == bot { isOpening = false }
+        }
+        do {
+            let opened = try await ProfileOpenRetry.run {
+                guard host == connection(), botID == bot else { return true }
+                guard let client = client(host) else { return false }
+                do {
+                    switch try await client.listSessions(profile: bot) {
+                    case .disabled:
+                        return true
+                    case .sessions(let sessions):
+                        if let latest = sessions.first {
+                            apply(.open(session: latest.id, bot: bot, model: latest.model, read: 0), on: host)
+                        }
+                        return true
+                    }
+                } catch {
+                    if Self.isUnauthorized(error) {
+                        onAPIError(error, bot)
+                        return false
+                    }
+                    throw error
+                }
+            }
+            guard host == connection(), botID == bot else { return }
+            if !opened {
+                openError = String(localized: "Impossible d'ouvrir \(bot). Après \(ProfileOpenRetry.attemptCount) essais : la clé API du profil est refusée.")
+            }
+        } catch {
+            guard host == connection(), botID == bot else { return }
+            if Self.isUnauthorized(error) {
+                onAPIError(error, bot)
+            }
+            openError = Self.message(error)
+        }
+    }
+
+    private static func isUnauthorized(_ error: Error) -> Bool {
+        if case HermesError.apiKeyMissing = error { return true }
+        if case HermesError.http(_, let status, _) = error, status == 401 || status == 403 { return true }
+        return false
     }
 
     /// Rouvre un fil passé avec son transcript ; le fil prend le modèle que la liste des fils lui donne quand la lecture est partie après la confirmation de son dernier choix
@@ -605,9 +671,7 @@ final class ConversationModel {
     /// `bot` est le profil dont la requête a échoué, pas celui qui est à l'écran
     private func reportAPIError(_ error: Error, bot: String) {
         if Self.isLinkFailure(error) { return onAPIError(error, bot) }
-        if case HermesError.http(_, let status, _) = error, status == 401 || status == 403 {
-            onAPIError(error, bot)
-        }
+        if Self.isUnauthorized(error) { onAPIError(error, bot) }
     }
 
     /// Une panne de transport, ou un serveur qui n'a pas pu traiter la requête (502, 503, 504) : la décision n'a pas été prise

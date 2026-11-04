@@ -212,10 +212,9 @@ final class SixActions: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 20))
         XCTAssertEqual(text(of: element(AccessibilityID.botName("hv-bot-a"), in: app)), "hv-bot-a")
         row.click()
-        let thread = element(AccessibilityID.threadRow("s-past-1"), in: app)
-        XCTAssertTrue(thread.waitForExistence(timeout: 10), "hd.threads.row.s-past-1 absent")
-        XCTAssertEqual(text(of: thread), "s-past-1", "un fil sans titre doit montrer son identifiant")
-        print("HV-FIELDS bot-name=hv-bot-a thread-label=\(text(of: thread))")
+        XCTAssertFalse(element(AccessibilityID.threadRow("s-past-1"), in: app).exists, "la barre latérale ne liste plus les fils")
+        XCTAssertTrue(element(.conversationView, in: app).waitForExistence(timeout: 10))
+        print("HV-FIELDS bot-name=hv-bot-a unique-chat")
         HVShot.capture("hd08-fields", app)
     }
 
@@ -288,7 +287,7 @@ final class SixActions: XCTestCase {
 
     // MARK: les fils
 
-    /// Lane 3 : déplier un bot lit ses fils, une seule fois, sans rien envoyer
+    /// Lane 3 : un clic ouvre le chat unique, list_sessions une fois, sans rien envoyer ni lister les fils
     func testExpandingABotListsItsPastThreadsWithOneRequest() throws {
         try XCTSkipIf(apiURL == nil, "HV_API_URL absent : pas de journal du serveur à lire")
         try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
@@ -298,27 +297,19 @@ final class SixActions: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 20))
         usleep(1_000_000)
         let listing = "/p/hv-bot-a/api/sessions"
-        XCTAssertEqual(serverLog(since: start).filter { $0.path == listing && !$0.isCapabilityProbe }.count, 0, "les fils sont lus avant le dépli")
+        XCTAssertEqual(serverLog(since: start).filter { $0.path == listing && !$0.isCapabilityProbe }.count, 0, "le fil unique n'est pas lu avant le clic")
         XCTAssertFalse(element(AccessibilityID.botThreads("hv-bot-a"), in: app).exists)
         row.click()
-        let group = element(AccessibilityID.botThreads("hv-bot-a"), in: app)
-        XCTAssertTrue(group.waitForExistence(timeout: 10), "hd.bots.row.hv-bot-a.threads absent")
-        // le fil est dans son groupe, sous le bot
-        let thread = element(AccessibilityID.threadRow("s-past-1"), in: group.descendants(matching: .any))
-        XCTAssertTrue(thread.waitForExistence(timeout: 10), "hd.threads.row.s-past-1 absent du groupe")
-        XCTAssertEqual(count(AccessibilityID.threadRow("s-past-1"), in: app), 1)
-        XCTAssertEqual(text(of: thread), "Fil passé 1")
-        XCTAssertEqual(count(AccessibilityID.botThreads("hv-bot-a"), in: app), 1)
+        XCTAssertTrue(element(.conversationView, in: app).waitForExistence(timeout: 10))
+        XCTAssertFalse(element(AccessibilityID.botThreads("hv-bot-a"), in: app).exists, "la barre latérale ne liste plus les fils")
+        XCTAssertEqual(count(AccessibilityID.threadRow("s-past-1"), in: app), 0)
         let log = serverLog(since: start)
         let lists = log.filter { $0.method == "GET" && $0.path == listing && !$0.isCapabilityProbe }.count
         let posts = sendingPosts(log).count
         print("HV-THREADS list_sessions=\(lists) send_message-or-any-POST=\(posts) log=\(log.map { "\($0.method) \($0.path)" })")
-        XCTAssertEqual(lists, 1, "list_sessions doit être lu une fois")
+        XCTAssertEqual(lists, 1, "list_sessions doit être lu une fois pour le fil unique")
         XCTAssertEqual(posts, 0, "aucun POST ne doit partir (send_message compris)")
         HVShot.capture("hd08-threads", app)
-        // replier ne relit rien
-        row.click()
-        XCTAssertTrue(element(AccessibilityID.botThreads("hv-bot-a"), in: app).waitForNonExistence(timeout: 5), "le groupe reste après le repli")
     }
 
     /// Lane 9 : `HV_FAKE_MODE=drop-route HV_DROP=list_sessions` désactive les fils seuls
@@ -329,12 +320,9 @@ final class SixActions: XCTestCase {
         XCTAssertTrue(row.waitForExistence(timeout: 20), "la liste des bots doit marcher")
         XCTAssertTrue(element(AccessibilityID.botRow("hv-bot-b"), in: app).exists)
         row.click()
-        let message = element(AccessibilityID.threadsDisabled("hv-bot-a"), in: app)
-        XCTAssertTrue(message.waitForExistence(timeout: 10), "hd.threads.disabled.hv-bot-a absent")
-        XCTAssertTrue(text(of: message).contains("la liste des fils passés"), text(of: message))
-        // le message passe à la ligne : une ligne de 220 points ne le contient pas en entier
-        XCTAssertGreaterThan(message.frame.height, 20, "le message est coupé à une ligne")
-        // les autres bots restent utilisables
+        XCTAssertTrue(element(.conversationView, in: app).waitForExistence(timeout: 10), "le chat unique s'ouvre même sans list_sessions")
+        XCTAssertFalse(element(AccessibilityID.botThreads("hv-bot-a"), in: app).exists)
+        XCTAssertFalse(element(AccessibilityID.threadsDisabled("hv-bot-a"), in: app).exists)
         XCTAssertTrue(element(AccessibilityID.botRow("hv-bot-b"), in: app).isHittable)
         XCTAssertEqual(app.state, .runningForeground)
         print("HV-DROP message=\(text(of: message)) height=\(Int(message.frame.height))")
@@ -361,15 +349,11 @@ final class SixActions: XCTestCase {
         return Set(rows.allElementsBoundByIndex.map { String($0.identifier.dropFirst(prefix.count)) })
     }
 
-    /// Choisit le bot : la ligne se déplie et la conversation s'ouvre sur ce bot
-    /// Clique un fil sous le bot ouvert : la ligne existe avant d'avoir sa place à l'écran, comme celle d'un bot, et un clic trop tôt ne rouvre rien
+    /// Le chat unique reprend le fil le plus récent : plus de ligne de session à cliquer
     private func openThread(_ id: String, in app: XCUIApplication) {
-        let row = element(AccessibilityID.threadRow(id), in: app)
-        XCTAssertTrue(row.waitForExistence(timeout: 10), "hd.threads.row.\(id) absent")
-        let hittable = Date().addingTimeInterval(10)
-        while !row.isHittable, Date() < hittable { usleep(50_000) }
-        print("HV-THREAD-CLICK id=\(id) hittable=\(row.isHittable) frame=\(row.frame) listed=\(threadIDs(in: app).count)")
-        row.click()
+        XCTAssertFalse(element(AccessibilityID.threadRow(id), in: app).exists, "hd.threads.row.\(id) ne doit plus apparaître")
+        XCTAssertTrue(element(.conversationView, in: app).waitForExistence(timeout: 10))
+        print("HV-THREAD-CLICK unique id=\(id) listed=\(threadIDs(in: app).count)")
     }
 
     private func openBot(_ id: String = "hv-bot-a", in app: XCUIApplication) throws {
@@ -388,6 +372,8 @@ final class SixActions: XCTestCase {
         while !row.isHittable, Date() < hittable { usleep(50_000) }
         row.click()
         XCTAssertTrue(element(.composerInput, in: app).waitForExistence(timeout: 10), "hd.composer.input absent")
+        _ = element(.conversationOpening, in: app).waitForNonExistence(timeout: 15)
+        _ = element(.bannerWaiting, in: app).waitForNonExistence(timeout: 15)
     }
 
     /// Tape le message dans le champ, sans l'envoyer
@@ -464,7 +450,6 @@ final class SixActions: XCTestCase {
         try openBot(in: app)
         XCTAssertFalse(element(.composerSend, in: app).isEnabled, "Envoyer doit être grisé tant que le champ est vide")
         XCTAssertTrue(element(.conversationView, in: app).exists)
-        XCTAssertTrue(element(.conversationEmpty, in: app).exists, "une conversation neuve montre son message d'accueil")
         XCTAssertFalse(element(.conversationState, in: app).exists, "aucun état avant le premier tour")
         type("Bonjour hv", in: app)
         XCTAssertTrue(element(.composerSend, in: app).isEnabled)
@@ -478,13 +463,12 @@ final class SixActions: XCTestCase {
         XCTAssertEqual(text(of: element(.composerInput, in: app)), "", "le champ est vidé à l'envoi")
         // Hermes a numéroté les deux lignes : l'identifiant porte son numéro, pas un rang local
         let identifiers = messages(in: app).allElementsBoundByIndex.map(\.identifier)
-        XCTAssertEqual(identifiers.count, 2, "\(identifiers)")
+        XCTAssertGreaterThanOrEqual(identifiers.count, 2, "\(identifiers)")
         XCTAssertTrue(identifiers.allSatisfy { $0.dropFirst(messagePrefix.count).allSatisfy(\.isNumber) }, "\(identifiers)")
         // un tour : un fil créé, un run lancé dans ce fil, aucun chat de session
         let log = serverLog(since: start)
         let chats = sendingPosts(log).filter { $0.method == "POST" && $0.path.hasSuffix("/chat") }.count
         print("HV-CONVERSATION sessions=\(posts(sessions, since: start)) runs=\(posts(runs, since: start)) chats=\(chats) ids=\(identifiers) log=\(log.map { "\($0.method) \($0.path)" })")
-        XCTAssertEqual(posts(sessions, since: start), 1)
         XCTAssertEqual(posts(runs, since: start), 1, "un seul envoi")
         XCTAssertEqual(chats, 0)
         let sent = try XCTUnwrap(postBodies(on: runs, since: start).first)
@@ -669,7 +653,7 @@ final class SixActions: XCTestCase {
         XCTAssertEqual(posts(runs, since: start), 1)
     }
 
-    /// Lane 10 : « Nouvelle session » vide la conversation, l'ancien fil devient un fil passé, rouvrir un fil montre ses messages
+    /// Lane 10 : « Nouvelle session » vide la conversation ; l'ancien fil n'apparaît pas dans la barre latérale
     func testNewSessionEmptiesTheConversationAndTheOldOneBecomesAThread() throws {
         try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
         let start = Date()
@@ -678,38 +662,20 @@ final class SixActions: XCTestCase {
         let button = element(.sessionNew, in: app)
         XCTAssertTrue(button.waitForExistence(timeout: 10), "hd.session.new absent")
         XCTAssertEqual(button.label, "Nouvelle session")
-        XCTAssertTrue(element(AccessibilityID.threadRow("s-past-1"), in: app).waitForExistence(timeout: 10), "les fils du bot ne sont pas listés")
-        let before = threadIDs(in: app)
+        XCTAssertEqual(threadIDs(in: app).count, 0, "la barre latérale ne liste plus les fils")
         send("avant la nouvelle session", in: app)
         XCTAssertTrue(waitForState("completed", in: app))
-        // le faux serveur garde les fils des tests précédents : le fil du premier envoi est celui qui s'ajoute aux fils déjà listés
-        let deadline = Date().addingTimeInterval(10)
-        var after = threadIDs(in: app)
-        while after.subtracting(before).isEmpty, Date() < deadline { usleep(100_000); after = threadIDs(in: app) }
-        let created = after.subtracting(before)
-        XCTAssertEqual(created.count, 1, "le fil du premier envoi n'est pas listé : \(created)")
-        let oldID = try XCTUnwrap(created.first)
         button.click()
         XCTAssertTrue(element(.conversationEmpty, in: app).waitForExistence(timeout: 10), "la conversation doit être vide")
         XCTAssertEqual(messages(in: app).count, 0)
         XCTAssertFalse(element(.conversationState, in: app).exists)
-        let rowsAfter = Date().addingTimeInterval(10)
-        var final = threadIDs(in: app)
-        while final.subtracting(after).isEmpty, Date() < rowsAfter { usleep(100_000); final = threadIDs(in: app) }
-        XCTAssertTrue(final.contains(oldID), "l'ancien fil doit rester listé")
-        // une liste plus longue que la fenêtre ne montre pas ses dernières lignes : on compte ce qui s'ajoute, pas le total
-        XCTAssertEqual(final.subtracting(after).count, 1, "le fil vide de « Nouvelle session » doit s'ajouter à la liste : \(final.subtracting(after))")
+        XCTAssertEqual(threadIDs(in: app).count, 0, "l'ancien fil n'est pas listé")
         let log = serverLog(since: start)
-        print("HV-NEW posts=\(log.filter { $0.method == "POST" }.map(\.path)) old=\(oldID)")
-        XCTAssertEqual(posts(sessions, since: start), 2, "un fil créé au premier envoi, un par « Nouvelle session »")
+        print("HV-NEW posts=\(log.filter { $0.method == "POST" }.map(\.path))")
+        XCTAssertEqual(posts(sessions, since: start), 1, "« Nouvelle session » crée un fil vide")
         XCTAssertFalse(log.contains { $0.path.contains("reset") }, "jamais /reset")
         XCTAssertEqual(posts(runs, since: start), 1, "« Nouvelle session » n'envoie aucun message")
         HVShot.capture("hd09-new", app)
-        // rouvrir un fil passé montre ses messages
-        openThread("s-past-1", in: app)
-        XCTAssertTrue(waitForMessage(containing: "Réponse de test", in: app), "le transcript du fil n'arrive pas : \(shownMessages(in: app))")
-        XCTAssertEqual(shownMessages(in: app), ["Bonjour", "Réponse de test"])
-        HVShot.capture("hd09-reopen-past", app)
     }
 
     // MARK: le modèle de la session (HD-10)
@@ -944,10 +910,7 @@ final class SixActions: XCTestCase {
         try configureFake(mode: "slow")
         let app = launchWithTwoModels()
         try openBot(in: app)
-        // la liste des fils et le transcript attendent 8 s chacun
-        let row = element(AccessibilityID.threadRow("s-past-1"), in: app)
-        XCTAssertTrue(row.waitForExistence(timeout: 40), "hd.threads.row.s-past-1 absent")
-        row.click()
+        XCTAssertTrue(element(.conversationView, in: app).waitForExistence(timeout: 40))
         pickModel("model-y", in: app)
         let waiting = element(.modelWaiting, in: app)
         XCTAssertTrue(waiting.waitForExistence(timeout: 5), "hd.model.waiting absent : le sélecteur doit montrer l'attente")
@@ -968,9 +931,8 @@ final class SixActions: XCTestCase {
         let start = Date()
         let app = launchWithTwoModels()
         try openBot(in: app)
-        XCTAssertEqual(text(of: element(.modelPicker, in: app)), "hv-fake-1", "un fil neuf suit le modèle du profil")
         openThread("s-past-1", in: app)
-        XCTAssertTrue(waitForModel("model-y", in: app), "le fil rouvert doit montrer le modèle de sa session")
+        XCTAssertTrue(waitForModel("model-y", in: app), "le fil unique reprend le modèle de sa session")
         XCTAssertEqual(setModelRequests(since: start).count, 0, "rouvrir un fil n'écrit aucun modèle")
         HVShot.capture("hd10-thread-model", app)
         send("avec le modèle de la session", in: app)

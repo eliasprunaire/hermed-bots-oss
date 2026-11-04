@@ -29,8 +29,8 @@ struct ContentView: View {
         NavigationSplitView {
             // pied sous la liste, pas en safeAreaInset : une ligne glissée sous un pied opaque reste « atteignable » pour XCUITest mais le clic tombe sur le pied
             VStack(spacing: 0) {
-                BotListView(model: model.bots, profileLock: model.profileLock, selectedBot: model.conversation.botID, selectedSession: model.conversation.sessionID,
-                            activity: model.conversation.activity(of:), select: model.conversation.select(bot:), open: model.conversation.open(session:of:))
+                BotListView(model: model.bots, profileLock: model.profileLock, selectedBot: model.conversation.botID,
+                            activity: model.conversation.activity(of:), select: model.conversation.activate(bot:))
                 SidebarFooter(model: model)
             }
             .navigationSplitViewColumnWidth(min: 220, ideal: 260)
@@ -115,14 +115,13 @@ extension ContentView {
         }
     }
 
-    /// Une carte de l'accueil fait ce que fait un clic sur la ligne du bot, sans replier ses fils déjà dépliés
+    /// Une carte de l'accueil ouvre le fil unique du bot
     private func open(bot id: String) {
-        if model.profileLock.state(id) == .free, !model.bots.expanded.contains(id) { model.bots.toggle(id) }
-        model.conversation.select(bot: id)
+        model.conversation.activate(bot: id)
     }
 }
 
-/// Le pied de la barre latérale : le statut du kill switch, puis l'état de la liaison, la version de Hermes, le port et les réglages
+/// Le pied de la barre latérale : pastille de santé, mention discrète de compatibilité, version pour les tests, réglages
 private struct SidebarFooter: View {
     let model: AppModel
 
@@ -135,7 +134,8 @@ private struct SidebarFooter: View {
                     .frame(width: 7, height: 7)
                     .shadow(color: health.opacity(0.7), radius: 3)
                     .accessibilityHidden(true)
-                Text("Version de Hermes")
+                Text(footerLabel)
+                    .accessibilityID(.statusCompat)
                 model.version.text.accessibilityID(.statusVersion)
                 if let port = model.displayedPort {
                     Text(verbatim: port.statusText).accessibilityID(.statusPort)
@@ -156,12 +156,33 @@ private struct SidebarFooter: View {
         .background(.bar)
     }
 
-    /// Vert : version lue sans erreur ; rouge : tunnel ou API en échec ; orange : lecture en cours ou version inconnue
+    private var status: CompatibilityStatus {
+        CompatibilityStatus.of(
+            map: model.capabilities,
+            checking: model.isCheckingAPI || model.conversation.isOpening,
+            hasError: model.apiError != nil || model.conversation.openError != nil || {
+                if case .failed = model.tunnel.state { return true }
+                return false
+            }()
+        )
+    }
+
+    private var footerLabel: String {
+        var label = status.footerLabel
+        if status == .ready, model.conversation.compaction.percent > 0 {
+            label += " · contexte \(model.conversation.compaction.percent) %"
+        }
+        return label
+    }
+
+    /// Vert : prêt ; bleu info : version non testée ; rouge : échec ; orange : connexion
     private var health: Color {
-        if model.apiError != nil { return .red }
-        if case .failed = model.tunnel.state { return .red }
-        if case .known = model.version, !model.isCheckingAPI { return .green }
-        return .orange
+        switch status {
+        case .ready: .green
+        case .untested: .blue
+        case .failed: .red
+        case .connecting: .orange
+        }
     }
 }
 

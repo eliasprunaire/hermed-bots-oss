@@ -9,10 +9,11 @@ struct ComposerView: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            TextField("Écrire à \(bot.name)…", text: $model.draft, axis: .vertical)
+            TextField(model.openError == nil ? "Écrire à \(bot.name)…" : "Indisponible tant que la clé échoue", text: $model.draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...8)
                 .focused($focused)
+                .disabled(model.isOpening || model.openError != nil)
                 .padding(.vertical, 7)
                 .onSubmit(model.send)
                 .accessibilityID(.composerInput)

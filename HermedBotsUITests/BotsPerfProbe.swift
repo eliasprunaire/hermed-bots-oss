@@ -75,14 +75,14 @@ final class BotsPerfProbe: XCTestCase {
             // une requête typée : la requête `.any` fait lire tout l'arbre d'accessibilité au clic, ce qui coûte plus que l'action
             let row = app.buttons[AccessibilityID.botRow(bot)]
             XCTAssertTrue(row.waitForExistence(timeout: 30), "dépli \(run) : \(bot) absent")
-            let target = app.staticTexts[AccessibilityID.threadRow(last)]
+            let target = app.descendants(matching: .any).matching(identifier: AccessibilityID.conversationView.rawValue).firstMatch
             let start = ContinuousClock.now
             let clickedAt = Date()
             row.click()
             let deadline = Date().addingTimeInterval(30)
             while !target.exists, Date() < deadline { usleep(5_000) }
             let ms = milliseconds(since: start)
-            XCTAssertTrue(target.exists, "dépli \(run) : \(last) n'apparaît pas")
+            XCTAssertTrue(target.exists, "ouverture \(run) : la conversation unique n'apparaît pas")
             // la requête part 2 ms après le tap : elle date le tap reçu par l'app
             let requestedAt = try XCTUnwrap(requestTime(of: "/p/\(bot)/api/sessions", after: clickedAt), "dépli \(run) : le serveur n'a reçu aucune requête de fils")
             let delivery = Int(requestedAt.timeIntervalSince(clickedAt) * 1000)
