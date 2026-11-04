@@ -74,14 +74,118 @@ function yamlCommentCanStart(prev) {
   return prev === "" || /[ \t\n]/.test(prev);
 }
 
+function countIndent(text, start) {
+  let n = 0;
+  while (
+    start + n < text.length &&
+    (text[start + n] === " " || text[start + n] === "\t")
+  ) {
+    n += 1;
+  }
+  return n;
+}
+
+function lineIsBlank(text, start) {
+  let j = start;
+  while (
+    j < text.length &&
+    (text[j] === " " || text[j] === "\t" || text[j] === "\r")
+  ) {
+    j += 1;
+  }
+  return j === text.length || text[j] === "\n";
+}
+
+function blockHeaderEnd(text, colonIndex) {
+  let j = colonIndex + 1;
+  while (j < text.length && (text[j] === " " || text[j] === "\t")) {
+    j += 1;
+  }
+  if (text[j] !== "|" && text[j] !== ">") {
+    return -1;
+  }
+  j += 1;
+  if (text[j] === "+" || text[j] === "-") {
+    j += 1;
+  }
+  while (j < text.length && text[j] >= "0" && text[j] <= "9") {
+    j += 1;
+  }
+  if (text[j] === "+" || text[j] === "-") {
+    j += 1;
+  }
+  while (j < text.length && (text[j] === " " || text[j] === "\t")) {
+    j += 1;
+  }
+  if (j < text.length && text[j] === "#") {
+    while (j < text.length && text[j] !== "\n") {
+      j += 1;
+    }
+  }
+  if (j !== text.length && text[j] !== "\n") {
+    return -1;
+  }
+  return j;
+}
+
+function copyThroughEol(text, start) {
+  let j = start;
+  while (j < text.length && text[j] !== "\n") {
+    j += 1;
+  }
+  if (j < text.length) {
+    j += 1;
+  }
+  return j;
+}
+
 function stripYamlComments(text) {
   let out = "";
   let quote = null;
+  let lineStart = 0;
+  let blockKeyIndent = null;
+  let blockContentIndent = null;
   for (let i = 0; i < text.length; i++) {
+    if (blockKeyIndent != null && i === lineStart) {
+      const indent = countIndent(text, i);
+      if (lineIsBlank(text, i)) {
+        const next = copyThroughEol(text, i);
+        out += text.slice(i, next);
+        i = next - 1;
+        if (next < text.length || text[next - 1] === "\n") {
+          lineStart = next;
+        }
+        continue;
+      }
+      if (blockContentIndent == null) {
+        if (indent > blockKeyIndent) {
+          blockContentIndent = indent;
+          const next = copyThroughEol(text, i);
+          out += text.slice(i, next);
+          i = next - 1;
+          lineStart = next;
+          continue;
+        }
+        blockKeyIndent = null;
+      } else if (indent >= blockContentIndent) {
+        const next = copyThroughEol(text, i);
+        out += text.slice(i, next);
+        i = next - 1;
+        lineStart = next;
+        continue;
+      } else {
+        blockKeyIndent = null;
+        blockContentIndent = null;
+      }
+    }
+
     const c = text[i];
     const prev = i === 0 ? "" : text[i - 1];
     if (quote === '"') {
       out += c;
+      if (c === "\n") {
+        lineStart = i + 1;
+      }
       if (c === "\\" && i + 1 < text.length) {
         out += text[i + 1];
         i += 1;
@@ -94,6 +198,9 @@ function stripYamlComments(text) {
     }
     if (quote === "'") {
       out += c;
+      if (c === "\n") {
+        lineStart = i + 1;
+      }
       if (c === "'" && text[i + 1] === "'") {
         out += text[i + 1];
         i += 1;
@@ -103,6 +210,31 @@ function stripYamlComments(text) {
         quote = null;
       }
       continue;
+    }
+    if (c === ":") {
+      const headerEnd = blockHeaderEnd(text, i);
+      if (headerEnd >= 0) {
+        out += c;
+        let j = i + 1;
+        while (j < headerEnd && text[j] !== "#") {
+          out += text[j];
+          j += 1;
+        }
+        if (headerEnd < text.length && text[headerEnd] === "\n") {
+          out += "\n";
+          let headerStart = i;
+          while (headerStart > 0 && text[headerStart - 1] !== "\n") {
+            headerStart -= 1;
+          }
+          blockKeyIndent = countIndent(text, headerStart);
+          blockContentIndent = null;
+          lineStart = headerEnd + 1;
+          i = headerEnd;
+          continue;
+        }
+        i = headerEnd - 1;
+        continue;
+      }
     }
     if ((c === '"' || c === "'") && yamlQuoteCanStart(prev)) {
       quote = c;
@@ -115,10 +247,14 @@ function stripYamlComments(text) {
       }
       if (i < text.length) {
         out += "\n";
+        lineStart = i + 1;
       }
       continue;
     }
     out += c;
+    if (c === "\n") {
+      lineStart = i + 1;
+    }
   }
   return out;
 }
