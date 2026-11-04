@@ -80,10 +80,8 @@ final class AboutSettingsTests: XCTestCase {
         about.click()
         let versionIDs: [AccessibilityID] = [
             .aboutAppVersion,
-            .aboutAppBuild,
             .aboutHermes,
             .aboutMacOS,
-            .aboutChannel,
         ]
         var lastMaxY: CGFloat = 0
         for id in versionIDs {

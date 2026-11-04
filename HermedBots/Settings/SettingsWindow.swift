@@ -12,23 +12,26 @@ struct SettingsWindow: View {
         // under XCTest. Use an explicit pane strip so hd.settings.* stay
         // findable and clickable while still listing one control per SettingsPane.
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                ForEach(SettingsPane.allCases, id: \.self) { item in
-                    Button {
-                        pane = item
-                    } label: {
-                        Label(item.title, systemImage: item.systemImage)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background {
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(pane == item ? Color.accentColor.opacity(0.18) : Color.clear)
-                            }
+            HStack {
+                Spacer(minLength: 0)
+                HStack(spacing: 8) {
+                    ForEach(SettingsPane.allCases, id: \.self) { item in
+                        Button {
+                            pane = item
+                        } label: {
+                            Label(item.title, systemImage: item.systemImage)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .background {
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(pane == item ? Color.accentColor.opacity(0.18) : Color.clear)
+                                }
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(item.title)
+                        .accessibilityIdentifier(item.accessibilityID)
+                        .accessibilityAddTraits(pane == item ? [.isSelected] : [])
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(item.title)
-                    .accessibilityIdentifier(item.accessibilityID)
-                    .accessibilityAddTraits(pane == item ? [.isSelected] : [])
                 }
                 Spacer(minLength: 0)
             }

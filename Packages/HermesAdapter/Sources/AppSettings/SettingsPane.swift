@@ -28,6 +28,7 @@ public enum SettingsPane: String, CaseIterable, Sendable {
 
 public enum SettingsCopy {
     public static let checkForUpdates = "Rechercher les mises à jour…"
+    public static let installUpdate = "Mettre à jour"
 }
 
 public enum SettingsLayout {
@@ -38,5 +39,9 @@ public enum SettingsLayout {
 public enum UpdatesSettingsAction {
     public static func perform(_ updates: UpdateCheck) {
         updates.checkForUpdates()
+    }
+
+    public static func install(_ updates: UpdateCheck) {
+        updates.installUpdate()
     }
 }
