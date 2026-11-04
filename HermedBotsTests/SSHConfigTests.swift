@@ -1722,15 +1722,16 @@ final class AppModelConnectTests: XCTestCase {
     }
 
     func testRetryReadsTheKeyOfTheRefusedProfileAndNotOfTheOneOnScreen() async {
-        let reads = KeyReads { count, _ in count == 1 ? nil : "key-a" }
+        // Un fetch lit jusqu'à 3 fois (0 → 400 ms → 1,2 s) ; les 3 premiers essais échouent, « Réessayer » rouvre un vol
+        let reads = KeyReads { count, _ in count <= APIKeyFetches.retryCount ? nil : "key-a" }
         let model = keyModel(keys: ["hv-bot-b": "key-b"], profiles: ["hv-bot-b", "hv-bot-a"], reads: reads) { _ in 200 }
         await model.bots.refresh()
         XCTAssertEqual(model.versionProfile, "hv-bot-b")
         await model.handleAPIError(refusal(), profile: "hv-bot-a")
-        XCTAssertEqual(reads.profiles, ["hv-bot-a"])
+        XCTAssertEqual(reads.profiles, Array(repeating: "hv-bot-a", count: APIKeyFetches.retryCount))
         XCTAssertEqual(model.apiError, HermesAPIKey.missingMessage(profile: "hv-bot-a"))
         await model.retryAPI()
-        XCTAssertEqual(reads.profiles, ["hv-bot-a", "hv-bot-a"])
+        XCTAssertEqual(reads.profiles, Array(repeating: "hv-bot-a", count: APIKeyFetches.retryCount + 1))
         XCTAssertNil(model.apiError)
     }
 
@@ -1739,8 +1740,10 @@ final class AppModelConnectTests: XCTestCase {
         let model = keyModel(keys: ["hv-bot-b": "key-b"], profiles: ["hv-bot-b", "hv-bot-a"], reads: reads) { _ in 200 }
         await model.bots.refresh()
         await model.handleAPIError(refusal(), profile: "hv-bot-a")
+        XCTAssertEqual(reads.profiles, Array(repeating: "hv-bot-a", count: APIKeyFetches.retryCount))
+        XCTAssertEqual(model.apiError, HermesAPIKey.missingMessage(profile: "hv-bot-a"))
         await model.retryAPI()
-        XCTAssertEqual(reads.profiles, ["hv-bot-a", "hv-bot-a"])
+        XCTAssertEqual(reads.profiles, Array(repeating: "hv-bot-a", count: APIKeyFetches.retryCount * 2))
         XCTAssertEqual(model.apiError, HermesAPIKey.missingMessage(profile: "hv-bot-a"))
     }
 

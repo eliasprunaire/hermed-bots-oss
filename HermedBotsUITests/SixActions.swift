@@ -348,10 +348,11 @@ final class SixActions: XCTestCase {
         return Set(rows.allElementsBoundByIndex.map { String($0.identifier.dropFirst(prefix.count)) })
     }
 
-    /// Le chat unique reprend le fil le plus récent : plus de ligne de session à cliquer
+    /// Le chat unique reprend le fil le plus récent : l'id demandé n'est plus cliquable (pas de ligne de session)
     private func openThread(_ id: String, in app: XCUIApplication) {
         XCTAssertFalse(element(AccessibilityID.threadRow(id), in: app).exists, "hd.threads.row.\(id) ne doit plus apparaître")
-        XCTAssertTrue(element(.conversationView, in: app).waitForExistence(timeout: 10))
+        XCTAssertTrue(element(.conversationView, in: app).waitForExistence(timeout: 10), "le chat unique doit être ouvert (fil le plus récent, id demandé ignoré)")
+        _ = element(.conversationOpening, in: app).waitForNonExistence(timeout: 15)
         print("HV-THREAD-CLICK unique id=\(id) listed=\(threadIDs(in: app).count)")
     }
 
@@ -578,7 +579,9 @@ final class SixActions: XCTestCase {
         usleep(500_000)
         XCTAssertEqual(posts(runs, since: start), 0)
         XCTAssertEqual(posts(sessions, since: start), 0, "un message refusé ne crée pas de fil")
-        XCTAssertTrue(element(.conversationEmpty, in: app).exists)
+        // Chat unique : le fil le plus récent est déjà ouvert, pas d'écran d'accueil vide
+        XCTAssertTrue(element(.conversationView, in: app).exists)
+        XCTAssertFalse(element(.composerSend, in: app).isEnabled)
         type("\n\t ", in: app)
         XCTAssertFalse(element(.composerSend, in: app).isEnabled)
         HVShot.capture("hd09-blank", app)
@@ -614,15 +617,26 @@ final class SixActions: XCTestCase {
     /// Lane 8 : un double clic sur Envoyer ne lance qu'un tour
     func testADoubleClickOnSendSendsOnce() throws {
         try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
-        let start = Date()
         let app = launch()
         try openBot(in: app)
+        // Chat unique : repartir d'un fil vide (comme l'ancienne session neuve) pour isoler le double clic
+        let start = Date()
+        let neuve = element(.sessionNew, in: app)
+        XCTAssertTrue(neuve.waitForExistence(timeout: 10), "hd.session.new absent")
+        neuve.click()
+        XCTAssertTrue(element(.conversationEmpty, in: app).waitForExistence(timeout: 10), "la nouvelle session doit vider le chat")
         type("double clic", in: app)
-        element(.composerSend, in: app).doubleClick()
+        let send = element(.composerSend, in: app)
+        let ready = Date().addingTimeInterval(10)
+        while !send.isEnabled, Date() < ready { usleep(50_000) }
+        XCTAssertTrue(send.isEnabled, "Envoyer doit être actif")
+        send.doubleClick()
+        // Le faux serveur peut terminer le tour trop vite pour attraper hd.conversation.busy
+        XCTAssertTrue(waitForMessage(containing: "double clic", in: app), "le message double-cliqué doit apparaître")
         XCTAssertTrue(waitForState("completed", in: app))
         usleep(500_000)
         XCTAssertEqual(posts(runs, since: start), 1, "un double clic doit lancer un seul tour")
-        XCTAssertEqual(posts(sessions, since: start), 1)
+        XCTAssertEqual(posts(sessions, since: start), 1, "Nouvelle session crée un fil ; le double clic n'en crée pas un second")
         XCTAssertEqual(shownMessages(in: app).filter { $0 == "double clic" }.count, 1)
         HVShot.capture("hd09-double", app)
     }
@@ -781,20 +795,23 @@ final class SixActions: XCTestCase {
         try requireFakeServer()
         let app = launchWithTwoModels()
         try openBot(in: app)
+        // Chat unique : s-past-1 est déjà le fil ouvert ; le choix se verrouille tout de suite sur ce fil
+        openThread("s-past-1", in: app)
         let start = Date()
         pickModel("model-y", in: app)
-        XCTAssertTrue(waitForModel("model-y", in: app), "le choix doit s'afficher avant que le fil existe")
-        XCTAssertEqual(setModelRequests(since: start).count, 0, "aucune session où verrouiller")
+        XCTAssertTrue(waitForModel("model-y", in: app), "le choix doit s'afficher sur le fil unique")
+        let locked = setModelRequests(since: start)
+        XCTAssertEqual(locked.count, 1, "\(locked)")
+        XCTAssertEqual(locked.first?.path, "/p/hv-bot-a/api/sessions/s-past-1/model")
+        XCTAssertEqual(locked.first?.model, "model-y")
         send("premier message", in: app)
         XCTAssertTrue(waitForState("completed", in: app))
         let sent = try XCTUnwrap(postBodies(on: runs, since: start).last)
-        let session = try XCTUnwrap(sent["session_id"] as? String)
-        XCTAssertEqual(sent["model"] as? String, "model-y", "le premier tour part avec le modèle confirmé")
+        XCTAssertEqual(sent["session_id"] as? String, "s-past-1")
+        XCTAssertEqual(sent["model"] as? String, "model-y", "le tour part avec le modèle confirmé")
         let requests = setModelRequests(since: start)
         print("HV-MODEL first-turn requests=\(requests.map { "\($0.path) \($0.model)" })")
-        XCTAssertEqual(requests.count, 1, "\(requests)")
-        XCTAssertEqual(requests.first?.path, "/p/hv-bot-a/api/sessions/\(session)/model")
-        XCTAssertEqual(requests.first?.model, "model-y")
+        XCTAssertEqual(requests.count, 1, "aucun set_model supplémentaire à l'envoi : \(requests)")
         XCTAssertTrue(waitForModel("model-y", in: app))
     }
 
@@ -812,9 +829,9 @@ final class SixActions: XCTestCase {
         XCTAssertTrue(element(.conversationEmpty, in: app).waitForExistence(timeout: 10), "la conversation doit être vide")
         XCTAssertTrue(waitForModel("hv-fake-1", in: app), "la nouvelle session montre le modèle du profil")
         HVShot.capture("hd10-persist", app)
-        openThread("s-past-1", in: app)
-        XCTAssertTrue(waitForModel("model-y", in: app), "la session d'origine garde son choix")
-        XCTAssertEqual(setModelRequests(since: start).count, 1, "ni la nouvelle session ni la réouverture n'écrivent un modèle")
+        // Plus de réouverture de s-past-1 : le chat unique ne liste plus les fils passés
+        XCTAssertEqual(threadIDs(in: app).count, 0, "la barre latérale ne liste plus les fils")
+        XCTAssertEqual(setModelRequests(since: start).count, 1, "la nouvelle session n'écrit pas de modèle")
     }
 
     /// Lane 3 : un nom que l'app ne connaît pas s'affiche tel que Hermes l'envoie, et reste un choix du menu

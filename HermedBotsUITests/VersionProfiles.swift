@@ -89,7 +89,8 @@ final class VersionProfiles: HD12Harness {
         XCTAssertFalse(text(banner.identifier).contains("Enregistrez"))
         waitForVersion("inconnue")
         HVShot.capture("issue58-version-missing-key", app)
-        XCTAssertTrue(request("/_hv/log").contains { $0["p"] as? String == "/p/\(b)/health" && $0["s"] as? Int == 401 && ($0["t"] as? Double ?? 0) >= started })
+        // Clé absente : refus local (apiKeyMissing) sans requête /health 401
+        XCTAssertFalse(request("/_hv/log").contains { $0["p"] as? String == "/p/\(b)/health" && $0["s"] as? Int == 401 && ($0["t"] as? Double ?? 0) >= started })
         click(AccessibilityID.botRow(a))
         waitForVersion("profile-a")
         XCTAssertFalse(banner.exists)
