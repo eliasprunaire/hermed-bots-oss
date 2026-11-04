@@ -106,7 +106,9 @@ function collectFromValue(value, swiftFound, xcodeFound, key, seen) {
     return;
   }
   if (typeof value === "string") {
-    collectSwiftFromImage(value, swiftFound);
+    if (key !== "version") {
+      collectSwiftFromImage(value, swiftFound);
+    }
     if (key === "xcode-version") {
       collectXcodeVersion(value, xcodeFound);
     }
@@ -131,14 +133,18 @@ function collectFromValue(value, swiftFound, xcodeFound, key, seen) {
     return;
   }
   seen.add(value);
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      collectFromValue(item, swiftFound, xcodeFound, key, seen);
+  try {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        collectFromValue(item, swiftFound, xcodeFound, key, seen);
+      }
+      return;
     }
-    return;
-  }
-  for (const [childKey, child] of Object.entries(value)) {
-    collectFromValue(child, swiftFound, xcodeFound, childKey, seen);
+    for (const [childKey, child] of Object.entries(value)) {
+      collectFromValue(child, swiftFound, xcodeFound, childKey, seen);
+    }
+  } finally {
+    seen.delete(value);
   }
 }
 

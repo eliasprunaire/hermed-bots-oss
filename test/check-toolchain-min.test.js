@@ -558,6 +558,49 @@ test("a self-referencing alias ends without looping", { timeout: 5000 }, () => {
   }
 });
 
+test("an older xcode-version matrix shared by alias fails when first reached under another key", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      "strategy:\n",
+      "  matrix:\n",
+      '    version: &versions ["27.0"]\n',
+      "    xcode-version: *versions\n",
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /\.github\/workflows\/ci\.yml/);
+    assert.match(result.stderr, /27\.0/);
+    assert.match(result.stderr, /27\.1/);
+    assert.doesNotMatch(result.stdout, /aucune version Xcode fixée/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an older Swift image matrix shared by alias fails when first reached under another key", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      "strategy:\n",
+      "  matrix:\n",
+      '    version: &images ["swift:6.3"]\n',
+      "    image: *images\n",
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /\.github\/workflows\/ci\.yml/);
+    assert.match(result.stderr, /6\.3/);
+    assert.match(result.stderr, /6\.4/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("ci.yml runs the checker on ubuntu-latest", () => {
   const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
   const job = ci.slice(ci.indexOf("  toolchain-min:"));
