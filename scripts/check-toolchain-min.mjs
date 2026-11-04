@@ -2,18 +2,14 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  isMap,
-  isScalar,
-  parseAllDocuments,
-  visit,
-} from "yaml";
+import { parseAllDocuments } from "yaml";
 
 const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MIN_FILE = ".github/toolchain-min.txt";
 const WORKFLOWS_DIR = ".github/workflows";
 const KEYS = ["swift", "xcode"];
 const VERSION = /^(\d+\.\d+(?:\.\d+)?)$/;
+const INTEGER_VERSION = /^\d+$/;
 const SWIFT_IMAGE = /\bswift:(\d+\.\d+(?:\.\d+)?)/g;
 const XCODE_APP = /Xcode_(\d+\.\d+(?:\.\d+)?)\.app/g;
 const XCODE_IN_RUN = /DEVELOPER_DIR|xcode-select/;
@@ -79,38 +75,6 @@ function matches(re, text) {
   return found;
 }
 
-function scalarString(node) {
-  if (!isScalar(node) || node.value == null) {
-    return null;
-  }
-  if (typeof node.value === "string") {
-    return node.value;
-  }
-  if (typeof node.value === "number" && Number.isFinite(node.value)) {
-    return String(node.value);
-  }
-  if (typeof node.value === "boolean" || typeof node.value === "bigint") {
-    return String(node.value);
-  }
-  return null;
-}
-
-function pairKey(pair) {
-  return scalarString(pair.key);
-}
-
-function mapValue(map, name) {
-  if (!isMap(map)) {
-    return null;
-  }
-  for (const item of map.items) {
-    if (pairKey(item) === name) {
-      return item.value;
-    }
-  }
-  return null;
-}
-
 function collectSwiftFromImage(text, into) {
   if (text == null) {
     return;
@@ -125,60 +89,61 @@ function collectXcodeFromText(text, into) {
   into.push(...matches(XCODE_APP, text));
 }
 
+function collectXcodeVersion(text, into) {
+  if (text == null) {
+    return;
+  }
+  const trimmed = String(text).trim();
+  if (VERSION.test(trimmed) || INTEGER_VERSION.test(trimmed)) {
+    into.push(trimmed);
+    return;
+  }
+  into.push(...matches(/(\d+\.\d+(?:\.\d+)?)/g, trimmed));
+}
+
+function collectFromValue(value, swiftFound, xcodeFound, key, seen) {
+  if (value == null) {
+    return;
+  }
+  if (typeof value === "string") {
+    collectSwiftFromImage(value, swiftFound);
+    if (key === "xcode-version") {
+      collectXcodeVersion(value, xcodeFound);
+    }
+    if (key === "DEVELOPER_DIR") {
+      collectXcodeFromText(value, xcodeFound);
+    }
+    if (XCODE_IN_RUN.test(value)) {
+      collectXcodeFromText(value, xcodeFound);
+    }
+    return;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) {
+    if (key === "xcode-version") {
+      collectXcodeVersion(String(value), xcodeFound);
+    }
+    return;
+  }
+  if (typeof value !== "object") {
+    return;
+  }
+  if (seen.has(value)) {
+    return;
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectFromValue(item, swiftFound, xcodeFound, key, seen);
+    }
+    return;
+  }
+  for (const [childKey, child] of Object.entries(value)) {
+    collectFromValue(child, swiftFound, xcodeFound, childKey, seen);
+  }
+}
+
 function collectFromDocument(doc, swiftFound, xcodeFound) {
-  visit(doc, {
-    Pair(_key, pair) {
-      const key = pairKey(pair);
-      if (key == null) {
-        return;
-      }
-      if (key === "container") {
-        const text = scalarString(pair.value);
-        if (text != null) {
-          collectSwiftFromImage(text, swiftFound);
-        } else {
-          collectSwiftFromImage(scalarString(mapValue(pair.value, "image")), swiftFound);
-        }
-      }
-      if (key === "services" && isMap(pair.value)) {
-        for (const service of pair.value.items) {
-          const image = isMap(service.value)
-            ? mapValue(service.value, "image")
-            : service.value;
-          collectSwiftFromImage(scalarString(image), swiftFound);
-        }
-      }
-      if (key === "uses") {
-        const uses = scalarString(pair.value);
-        if (uses != null && uses.startsWith("docker://")) {
-          collectSwiftFromImage(uses.slice("docker://".length), swiftFound);
-        }
-      }
-      if (key === "run") {
-        const run = scalarString(pair.value);
-        if (run != null) {
-          collectSwiftFromImage(run, swiftFound);
-          if (XCODE_IN_RUN.test(run)) {
-            collectXcodeFromText(run, xcodeFound);
-          }
-        }
-      }
-      if (key === "xcode-version") {
-        const pin = scalarString(pair.value);
-        if (pin != null) {
-          const trimmed = pin.trim();
-          if (VERSION.test(trimmed)) {
-            xcodeFound.push(trimmed);
-          } else {
-            xcodeFound.push(...matches(/(\d+\.\d+(?:\.\d+)?)/g, trimmed));
-          }
-        }
-      }
-      if (key === "DEVELOPER_DIR") {
-        collectXcodeFromText(scalarString(pair.value), xcodeFound);
-      }
-    },
-  });
+  collectFromValue(doc.toJS(), swiftFound, xcodeFound, null, new WeakSet());
 }
 
 function workflowFiles(root) {
@@ -255,8 +220,19 @@ function main(argv = process.argv.slice(2)) {
 
     const swiftFound = [];
     const xcodeFound = [];
+    let jsFailed = false;
     for (const doc of docs) {
-      collectFromDocument(doc, swiftFound, xcodeFound);
+      try {
+        collectFromDocument(doc, swiftFound, xcodeFound);
+      } catch (err) {
+        process.stderr.write(yamlErrorLine(rel, err));
+        failed = true;
+        jsFailed = true;
+        break;
+      }
+    }
+    if (jsFailed) {
+      continue;
     }
 
     for (const found of unique(swiftFound)) {
