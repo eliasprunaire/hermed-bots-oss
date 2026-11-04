@@ -47,8 +47,9 @@ final class CompatibilityStatusTests: XCTestCase {
         XCTAssertEqual(CompatibilityStatus.untested.footerLabel, "Compatibilité · voir Réglages")
     }
 
-    func testCheckingHidesErrorsAndConnectingLabelIsUsed() {
-        XCTAssertEqual(CompatibilityStatus.of(map: nil, checking: true, hasError: true), .connecting)
+    func testADefinitiveErrorWinsOverAConnectingCheck() {
+        XCTAssertEqual(CompatibilityStatus.of(map: nil, checking: true, hasError: true), .failed)
+        XCTAssertEqual(CompatibilityStatus.of(map: nil, checking: true, hasError: false), .connecting)
         XCTAssertEqual(CompatibilityStatus.connecting.footerLabel, "Connexion…")
         XCTAssertEqual(CompatibilityStatus.failed.footerLabel, "Clé refusée")
         XCTAssertEqual(CompatibilityStatus.footerLabel(status: .failed, tunnelFailed: false), "Clé refusée")

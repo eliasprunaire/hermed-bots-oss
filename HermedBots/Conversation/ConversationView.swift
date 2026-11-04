@@ -7,6 +7,8 @@ struct ConversationView: View {
     let model: ConversationModel
     let killSwitch: KillSwitch
     let bot: Bot
+    /// La bannière d'API a déjà tranché : la pastille d'ouverture ne reste pas sur un échec définitif
+    let apiFailed: Bool
     @Environment(\.motion) private var motion
 
     private var colors: [Color] { Palette.colors(bot) }
@@ -23,7 +25,7 @@ struct ConversationView: View {
                 .padding(.bottom, 8)
             }
             LoopPauseBanner(model: model)
-            if model.isOpening {
+            if model.isOpening, !apiFailed {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)
                     Text("Connexion à Hermes… préparation de la clé du profil")
@@ -141,7 +143,7 @@ struct ConversationView: View {
     }
 
     @ViewBuilder private var placeholder: some View {
-        if model.isLoading || model.isOpening {
+        if model.isLoading || (model.isOpening && !apiFailed) {
             ProgressView().controlSize(.small)
         } else if model.conversation.entries.isEmpty, !model.isBusy {
             VStack(spacing: 14) {

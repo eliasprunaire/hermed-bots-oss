@@ -51,6 +51,12 @@ final class ProfileKeys: HD12Harness {
         click(AccessibilityID.botRow("cyber"))
         XCTAssertTrue(element(AccessibilityID.bannerError.rawValue).waitForExistence(timeout: 20))
         XCTAssertTrue(text(AccessibilityID.bannerError.rawValue).contains("clé API"))
+        XCTAssertTrue(
+            element(AccessibilityID.conversationOpening.rawValue).waitForNonExistence(timeout: 20),
+            "hd.conversation.opening reste après l'échec définitif de la clé"
+        )
+        XCTAssertTrue(element(AccessibilityID.bannerWaiting.rawValue).waitForNonExistence(timeout: 10))
+        XCTAssertNotEqual(text(AccessibilityID.statusCompat.rawValue), "Connexion…")
         let entries = request("/_hv/log")
         XCTAssertTrue(entries.contains { ($0["p"] as? String)?.hasPrefix("/p/cyber/") == true && $0["s"] as? Int == 401 })
         HVShot.capture("hd17-crossed-key", app)
