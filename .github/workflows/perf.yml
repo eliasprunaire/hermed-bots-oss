@@ -14,7 +14,8 @@ jobs:
   swift-perf:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    container: swift:6.0
+    # Même image Swift que ci.yml (swift-test).
+    container: swift:6.4.2
     steps:
       - uses: actions/checkout@v4
         with:
