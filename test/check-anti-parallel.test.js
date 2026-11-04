@@ -10,9 +10,9 @@ const {
   decideExecutor,
   decideVerifier,
   main,
+  MARKER,
+  FORCED_RECHECK_MARKER,
 } = require("../scripts/check-anti-parallel.js");
-
-const MARKER = "<!-- dev-lead-verifier -->";
 const HEAD = "a".repeat(40);
 const OTHER = "b".repeat(40);
 const AGENT_A = "bc-4fa94a52-04cd-579c-817b-27ae10b9c21c";
@@ -70,6 +70,56 @@ test("two verdicts for the same sha fail", () => {
     decision.description,
     `multiple marked VERDICT comments for ${HEAD}`,
   );
+});
+
+test("a last approved verdict with the forced-recheck marker keeps that comment", () => {
+  const decision = decideV({
+    headSha: HEAD,
+    comments: [
+      comment("1", marked("PASS", HEAD)),
+      comment(
+        "2",
+        `${marked("PASS+NOTES", HEAD)}\n${FORCED_RECHECK_MARKER}`,
+      ),
+    ],
+  });
+  assert.equal(decision.kind, "pass");
+  assert.equal(decision.description, `one verifier for ${HEAD}`);
+});
+
+test("an older forced-recheck marker does not waive parallel verdicts", () => {
+  const decision = decideV({
+    headSha: HEAD,
+    comments: [
+      comment(
+        "1",
+        `${marked("PASS", HEAD)}\n${FORCED_RECHECK_MARKER}`,
+      ),
+      comment("2", marked("PASS+NOTES", HEAD)),
+    ],
+  });
+  assert.equal(decision.kind, "fail");
+  assert.equal(decision.reason.code, "parallel-verdicts");
+  assert.equal(decision.reason.count, 2);
+});
+
+test("a forced-recheck marker from a non-approved author does not waive parallel verdicts", () => {
+  const decision = decideV({
+    headSha: HEAD,
+    comments: [
+      comment("1", marked("PASS", HEAD)),
+      comment("2", marked("PASS+NOTES", HEAD)),
+      comment(
+        "3",
+        `${marked("FAIL", HEAD)}\n${FORCED_RECHECK_MARKER}`,
+        "spoof",
+        "User",
+      ),
+    ],
+  });
+  assert.equal(decision.kind, "fail");
+  assert.equal(decision.reason.code, "parallel-verdicts");
+  assert.equal(decision.reason.count, 2);
 });
 
 test("verdicts on old shas are ignored", () => {
