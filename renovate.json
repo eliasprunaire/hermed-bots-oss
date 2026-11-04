@@ -5,5 +5,31 @@
   "automerge": false,
   "labels": ["dependencies"],
   "prConcurrentLimit": 2,
-  "prHourlyLimit": 1
+  "prHourlyLimit": 1,
+  "semanticCommits": "enabled",
+  "commitMessageAction": "mettre à jour",
+  "commitMessageExtra": "vers {{#if prettyNewVersion}}{{prettyNewVersion}}{{else}}{{newValue}}{{/if}}",
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "commitMessageTopic": "l'action {{depName}}"
+    },
+    {
+      "matchManagers": ["npm"],
+      "commitMessageTopic": "la dépendance {{depName}}"
+    },
+    {
+      "matchManagers": ["swift"],
+      "commitMessageTopic": "le paquet Swift {{depName}}"
+    }
+  ],
+  "prFooter": "Cette pull request a été générée par Renovate. Fusionnez-la manuellement après revue.",
+  "prBodyColumns": ["Paquet", "Type", "Mise à jour", "Changement"],
+  "prBodyDefinitions": {
+    "Paquet": "{{{depNameLinked}}}",
+    "Type": "{{{depType}}}",
+    "Mise à jour": "{{{updateType}}}",
+    "Changement": "`{{{displayFrom}}}` → `{{{displayTo}}}`"
+  },
+  "prBodyTemplate": "## Pourquoi\n\nMise à jour des dépendances par Renovate. Fusionnez manuellement après revue.\n\n## Ce qui change\n\n{{{table}}}\n\n## Périmètre\n\nManagers github-actions, npm et swift. Pas de fusion automatique.\n\n## Impact possible\n\nLes versions listées dans le tableau.\n\n## Vérification\n\nLa CI de cette pull request.\n\n{{{warnings}}}{{{notes}}}{{{changelogs}}}{{{configDescription}}}{{{controls}}}{{{footer}}}"
 }
