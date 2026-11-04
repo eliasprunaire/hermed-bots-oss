@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isAlias, isMap, isPair, isScalar, isSeq, parseAllDocuments } from "yaml";
+import { isMap, isPair, isScalar, isSeq, LineCounter, parseAllDocuments, visit } from "yaml";
 
 const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MIN_FILE = ".github/toolchain-min.txt";
@@ -123,12 +123,8 @@ function pairKey(pair) {
   return null;
 }
 
-function collectFromNode(node, swiftFound, xcodeFound, key, seen, doc) {
+function collectFromNode(node, swiftFound, xcodeFound, key, seen) {
   if (node == null) {
-    return;
-  }
-  if (isAlias(node)) {
-    collectFromNode(node.resolve(doc), swiftFound, xcodeFound, key, seen, doc);
     return;
   }
   if (isScalar(node)) {
@@ -154,12 +150,12 @@ function collectFromNode(node, swiftFound, xcodeFound, key, seen, doc) {
   seen.add(node);
   try {
     if (isPair(node)) {
-      collectFromNode(node.value, swiftFound, xcodeFound, pairKey(node) ?? key, seen, doc);
+      collectFromNode(node.value, swiftFound, xcodeFound, pairKey(node) ?? key, seen);
       return;
     }
     if (isMap(node) || isSeq(node)) {
       for (const item of node.items) {
-        collectFromNode(item, swiftFound, xcodeFound, key, seen, doc);
+        collectFromNode(item, swiftFound, xcodeFound, key, seen);
       }
     }
   } finally {
@@ -168,8 +164,58 @@ function collectFromNode(node, swiftFound, xcodeFound, key, seen, doc) {
 }
 
 function collectFromDocument(doc, swiftFound, xcodeFound) {
-  doc.toJS();
-  collectFromNode(doc.contents, swiftFound, xcodeFound, null, new WeakSet(), doc);
+  collectFromNode(doc.contents, swiftFound, xcodeFound, null, new WeakSet());
+}
+
+function nodeLine(node, lineCounter) {
+  if (!node || !Array.isArray(node.range) || typeof node.range[0] !== "number") {
+    return 1;
+  }
+  const pos = lineCounter.linePos(node.range[0]);
+  return pos.line > 0 ? pos.line : 1;
+}
+
+function aliasName(node) {
+  const raw = typeof node.source === "string" ? node.source : "";
+  return raw.replace(/:$/, "");
+}
+
+function firstAnchorOrAlias(doc, lineCounter) {
+  let hit = null;
+  visit(doc, {
+    Alias(_key, node) {
+      if (hit) {
+        return visit.BREAK;
+      }
+      hit = {
+        kind: "alias",
+        name: aliasName(node),
+        line: nodeLine(node, lineCounter),
+      };
+      return visit.BREAK;
+    },
+    Node(_key, node) {
+      if (hit) {
+        return visit.BREAK;
+      }
+      if (node && typeof node.anchor === "string" && node.anchor !== "") {
+        hit = {
+          kind: "ancre",
+          name: node.anchor,
+          line: nodeLine(node, lineCounter),
+        };
+        return visit.BREAK;
+      }
+    },
+  });
+  return hit;
+}
+
+function refuseAnchorOrAliasLine(file, hit) {
+  if (hit.kind === "ancre") {
+    return `${file}:${hit.line}: ancre YAML &${hit.name} refusée\n`;
+  }
+  return `${file}:${hit.line}: alias YAML *${hit.name} refusé\n`;
 }
 
 function workflowFiles(root) {
@@ -224,19 +270,29 @@ function main(argv = process.argv.slice(2)) {
 
   for (const rel of files) {
     const text = fs.readFileSync(path.join(root, rel), "utf8");
+    const lineCounter = new LineCounter();
     let docs;
     try {
-      docs = parseAllDocuments(text, { prettyErrors: true });
+      docs = parseAllDocuments(text, { prettyErrors: true, lineCounter });
     } catch (err) {
       process.stderr.write(yamlErrorLine(rel, err));
       failed = true;
       continue;
     }
+    let refused = null;
     const parseErrors = [];
     for (const doc of docs) {
+      if (refused == null) {
+        refused = firstAnchorOrAlias(doc, lineCounter);
+      }
       if (doc.errors && doc.errors.length > 0) {
         parseErrors.push(...doc.errors);
       }
+    }
+    if (refused) {
+      process.stderr.write(refuseAnchorOrAliasLine(rel, refused));
+      failed = true;
+      continue;
     }
     if (parseErrors.length > 0) {
       process.stderr.write(yamlErrorLine(rel, parseErrors[0]));
@@ -246,19 +302,8 @@ function main(argv = process.argv.slice(2)) {
 
     const swiftFound = [];
     const xcodeFound = [];
-    let jsFailed = false;
     for (const doc of docs) {
-      try {
-        collectFromDocument(doc, swiftFound, xcodeFound);
-      } catch (err) {
-        process.stderr.write(yamlErrorLine(rel, err));
-        failed = true;
-        jsFailed = true;
-        break;
-      }
-    }
-    if (jsFailed) {
-      continue;
+      collectFromDocument(doc, swiftFound, xcodeFound);
     }
 
     for (const found of unique(swiftFound)) {

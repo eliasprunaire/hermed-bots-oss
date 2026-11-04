@@ -450,39 +450,102 @@ test("an up to date Swift image in strategy.matrix passes", () => {
   }
 });
 
-test("an older Swift image reached through a YAML alias fails", () => {
+test("a YAML alias used as a value is refused with the file and line", () => {
   const dir = tree({
     ".github/toolchain-min.txt": MIN,
-    ".github/workflows/ci.yml": [
-      "SWIFT_IMAGE: &swift_image swift:6.3\n",
-      "container: *swift_image\n",
-    ].join(""),
+    ".github/workflows/ci.yml": "container: *swift_image\n",
   });
   try {
     const result = run(dir);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /\.github\/workflows\/ci\.yml/);
-    assert.match(result.stderr, /6\.3/);
-    assert.match(result.stderr, /6\.4/);
+    assert.match(result.stderr, /\.github\/workflows\/ci\.yml:1:/);
+    assert.match(result.stderr, /alias YAML \*swift_image refusé/);
+    assert.doesNotMatch(result.stderr, /YAML invalide/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("an older Xcode path reached through a YAML alias fails", () => {
+test("a YAML alias used as a key is refused with the file and line", () => {
   const dir = tree({
     ".github/toolchain-min.txt": MIN,
-    ".github/workflows/ci.yml": [
-      "XCODE: &xcode_dir /Applications/Xcode_27.0.app/Contents/Developer\n",
-      "DEVELOPER_DIR: *xcode_dir\n",
-    ].join(""),
+    ".github/workflows/ci.yml": "*k: bar\ncontainer: swift:6.4\n",
   });
   try {
     const result = run(dir);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /\.github\/workflows\/ci\.yml/);
-    assert.match(result.stderr, /27\.0/);
-    assert.match(result.stderr, /27\.1/);
+    assert.match(result.stderr, /\.github\/workflows\/ci\.yml:1:/);
+    assert.match(result.stderr, /alias YAML \*k refusé/);
+    assert.doesNotMatch(result.stderr, /YAML invalide/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a YAML merge key alias is refused with the file and line", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": "job:\n  <<: *defaults\n",
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /\.github\/workflows\/ci\.yml:2:/);
+    assert.match(result.stderr, /alias YAML \*defaults refusé/);
+    assert.doesNotMatch(result.stderr, /YAML invalide/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a YAML anchor alone is refused with the file and line", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": "container: &img swift:6.4\n",
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /\.github\/workflows\/ci\.yml:1:/);
+    assert.match(result.stderr, /ancre YAML &img refusée/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("quoted stars, comments and run globs are not YAML aliases", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      'name: "star *name and &anchor"\n',
+      "paths: ['**/*.swift']\n",
+      "# leftover *swift_image &xcode\n",
+      "container: swift:6.4\n",
+      "run: echo **/*.yml && true\n",
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stderr, /ancre YAML|alias YAML/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a run block with globs and && is not a YAML alias", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      "run: |\n",
+      "  git add ** && git status\n",
+      "container: swift:6.4\n",
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 0, result.stderr);
+    assert.doesNotMatch(result.stderr, /ancre YAML|alias YAML/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -530,71 +593,6 @@ test("an integer xcode-version is compared with the minimum", () => {
   }
 });
 
-test("more aliases than the library limit fail as invalid YAML", () => {
-  const aliases = Array.from({ length: 101 }, () => "*a").join(", ");
-  const dir = tree({
-    ".github/toolchain-min.txt": MIN,
-    ".github/workflows/ci.yml": `x: &a foo\nseq: [${aliases}]\n`,
-  });
-  try {
-    const result = run(dir);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /\.github\/workflows\/ci\.yml/);
-    assert.match(result.stderr, /YAML invalide/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("an alias without an anchor fails as invalid YAML", () => {
-  const dir = tree({
-    ".github/toolchain-min.txt": MIN,
-    ".github/workflows/ci.yml": "container: *missing\n",
-  });
-  try {
-    const result = run(dir);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /\.github\/workflows\/ci\.yml/);
-    assert.match(result.stderr, /YAML invalide/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("a self-referencing alias ends without looping", { timeout: 5000 }, () => {
-  const dir = tree({
-    ".github/toolchain-min.txt": MIN,
-    ".github/workflows/ci.yml": ["a: &a\n", "  b: *a\n", "container: swift:6.4\n"].join(""),
-  });
-  try {
-    const result = run(dir);
-    assert.equal(result.status, 0, result.stderr);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("an older xcode-version matrix shared by alias fails when first reached under another key", () => {
-  const dir = tree({
-    ".github/toolchain-min.txt": MIN,
-    ".github/workflows/ci.yml": [
-      "strategy:\n",
-      "  matrix:\n",
-      '    version: &versions ["27.0"]\n',
-      "    xcode-version: *versions\n",
-    ].join(""),
-  });
-  try {
-    const result = run(dir);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /\.github\/workflows\/ci\.yml/);
-    assert.match(result.stderr, /27\.0/);
-    assert.match(result.stderr, /27\.1/);
-    assert.doesNotMatch(result.stdout, /aucune version Xcode fixée/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
 
 test("an older Swift image in a matrix version column fails", () => {
   const dir = tree({
@@ -602,27 +600,6 @@ test("an older Swift image in a matrix version column fails", () => {
     ".github/workflows/ci.yml": [
       "strategy: { matrix: { version: ['swift:6.3'] } }\n",
       "container: ${{ matrix.version }}\n",
-    ].join(""),
-  });
-  try {
-    const result = run(dir);
-    assert.equal(result.status, 1);
-    assert.match(result.stderr, /\.github\/workflows\/ci\.yml/);
-    assert.match(result.stderr, /6\.3/);
-    assert.match(result.stderr, /6\.4/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("an older Swift image matrix shared by alias fails when first reached under another key", () => {
-  const dir = tree({
-    ".github/toolchain-min.txt": MIN,
-    ".github/workflows/ci.yml": [
-      "strategy:\n",
-      "  matrix:\n",
-      '    version: &images ["swift:6.3"]\n',
-      "    image: *images\n",
     ].join(""),
   });
   try {
