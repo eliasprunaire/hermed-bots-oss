@@ -73,4 +73,20 @@ final class MarkdownVisibleTextTests: XCTestCase {
         XCTAssertEqual(MarkdownVisibleText.of(""), "")
         XCTAssertEqual(MarkdownVisibleText.prepared(""), "")
     }
+
+    func testARemoteMarkdownImageBecomesAltTextAndLeavesNoURL() {
+        let source = "Voir ![schéma](https://cdn.example.invalid/plot.png \"titre\") et ![autre][ref] ici."
+        let prepared = MarkdownVisibleText.prepared(source)
+        XCTAssertFalse(prepared.contains("https://"))
+        XCTAssertFalse(prepared.contains("cdn.example.invalid"))
+        XCTAssertFalse(prepared.contains("plot.png"))
+        XCTAssertFalse(prepared.contains("[ref]"))
+        XCTAssertTrue(prepared.contains("schéma"))
+        XCTAssertTrue(prepared.contains("autre"))
+        XCTAssertEqual(MarkdownVisibleText.of(source), "Voir schéma et autre ici.")
+        let fenced = MarkdownVisibleText.prepared("```\n![secret](https://cdn.example.invalid/x.png)\n```")
+        XCTAssertTrue(fenced.contains("https://cdn.example.invalid/x.png"))
+        let inline = MarkdownVisibleText.prepared("`![secret](https://cdn.example.invalid/x.png)`")
+        XCTAssertTrue(inline.contains("https://cdn.example.invalid/x.png"))
+    }
 }

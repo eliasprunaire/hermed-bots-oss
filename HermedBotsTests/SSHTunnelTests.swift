@@ -155,12 +155,15 @@ final class SSHTunnelConfigTests: XCTestCase {
             reads += 1
             throw SSHFailure.unreachable("coupure")
         }
-        XCTAssertNil(try await fetches.fetch(profile: "cyber", into: &store, read: read))
+        let first = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(first)
         XCTAssertEqual(reads, APIKeyFetches.retryCount)
-        XCTAssertNil(try await fetches.fetch(profile: "cyber", into: &store, read: read))
+        let locked = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(locked)
         XCTAssertEqual(reads, APIKeyFetches.retryCount)
         fetches.reset()
-        XCTAssertNil(try await fetches.fetch(profile: "cyber", into: &store, read: read))
+        let afterReset = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(afterReset)
         XCTAssertEqual(reads, APIKeyFetches.retryCount * 2)
     }
 

@@ -4,7 +4,7 @@ import Foundation
 /// Le texte brut n'est un secours que si le rendu échoue. Les tests lisent `of`, sans étoile restante.
 public enum MarkdownVisibleText: Sendable {
     public static func prepared(_ source: String) -> String {
-        Walker(source: source).prepared()
+        Walker(source: Walker(source: source).withoutRemoteImages()).prepared()
     }
 
     public static func of(_ source: String) -> String {
@@ -154,6 +154,79 @@ private struct Walker {
             index = source.index(after: index)
         }
         return result
+    }
+
+    /// Remplace `![alt](url)` et `![alt][ref]` par `alt`, hors code, pour qu'aucun chargeur ne voie d'URL.
+    func withoutRemoteImages() -> String {
+        var result = ""
+        var inlineCode = false
+        var fence = false
+        var lineStart = true
+        var index = source.startIndex
+        while index < source.endIndex {
+            let character = source[index]
+            if character == "\n" {
+                result.append("\n")
+                lineStart = true
+                index = source.index(after: index)
+                continue
+            }
+            if fence {
+                if source[index...].hasPrefix("```") {
+                    fence = false
+                    result.append("```")
+                    index = source.index(index, offsetBy: 3)
+                    lineStart = false
+                    continue
+                }
+                result.append(character)
+                lineStart = false
+                index = source.index(after: index)
+                continue
+            }
+            if lineStart, source[index...].hasPrefix("```") {
+                fence = true
+                result.append("```")
+                index = source.index(index, offsetBy: 3)
+                lineStart = false
+                continue
+            }
+            lineStart = false
+            if character == "`" {
+                inlineCode.toggle()
+                result.append("`")
+                index = source.index(after: index)
+                continue
+            }
+            if inlineCode {
+                result.append(character)
+                index = source.index(after: index)
+                continue
+            }
+            if let image = imageReplacement(at: index) {
+                result.append(image.alt)
+                index = image.end
+                continue
+            }
+            result.append(character)
+            index = source.index(after: index)
+        }
+        return result
+    }
+
+    func imageReplacement(at index: String.Index) -> (alt: String, end: String.Index)? {
+        guard source[index...].hasPrefix("![") else { return nil }
+        let altStart = source.index(index, offsetBy: 2)
+        guard let altEnd = source[altStart...].firstIndex(of: "]") else { return nil }
+        let alt = String(source[altStart..<altEnd])
+        let afterAlt = source.index(after: altEnd)
+        guard afterAlt < source.endIndex else { return nil }
+        let opener = source[afterAlt]
+        guard opener == "(" || opener == "[" else { return nil }
+        let closer: Character = opener == "(" ? ")" : "]"
+        let targetStart = source.index(after: afterAlt)
+        guard let targetEnd = source[targetStart...].firstIndex(of: closer) else { return nil }
+        return (alt, source.index(after: targetEnd))
     }
 
     func isListMarker(at index: String.Index) -> Bool {

@@ -2,6 +2,7 @@ import AppKit
 import AppSettings
 import Darwin
 import Foundation
+import HermesAdapter
 import Observation
 import os
 

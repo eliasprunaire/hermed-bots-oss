@@ -15,6 +15,8 @@ struct MessageMarkdownView: View {
                 EmptyView()
             } else {
                 StructuredText(markdown: prepared)
+                    .textual.imageAttachmentLoader(InertMarkdownAttachmentLoader())
+                    .textual.emojiAttachmentLoader(InertMarkdownAttachmentLoader())
                     .textual.textSelection(selectable ? .enabled : .disabled)
             }
             if streaming {
@@ -23,5 +25,36 @@ struct MessageMarkdownView: View {
                     .accessibilityHidden(true)
             }
         }
+    }
+}
+
+/// Textual charge par défaut les images Markdown via `URLAttachmentLoader` / `ImageLoader` (hors tunnel).
+/// Ce chargeur n'ouvre aucune URL : il rend le texte alternatif.
+struct InertMarkdownAttachmentLoader: AttachmentLoader {
+    func attachment(
+        for url: URL,
+        text: String,
+        environment: ColorEnvironmentValues
+    ) async throws -> AltTextAttachment {
+        _ = url
+        _ = environment
+        return AltTextAttachment(text: text)
+    }
+}
+
+struct AltTextAttachment: Attachment {
+    let text: String
+
+    var description: String { text }
+
+    var body: some View {
+        Text(text)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, in environment: TextEnvironmentValues) -> CGSize {
+        _ = environment
+        let width = max(1, proposal.width ?? 80)
+        let height = text.isEmpty ? 1 : 18
+        return CGSize(width: width, height: height)
     }
 }
