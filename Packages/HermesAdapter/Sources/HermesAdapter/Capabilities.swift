@@ -15,6 +15,11 @@ public struct CapabilityMap: Equatable, Sendable {
     public let version: String?
     let states: [Contract: CapabilityState]
 
+    public init(version: String?, states: [Contract: CapabilityState] = [:]) {
+        self.version = version
+        self.states = states
+    }
+
     // ponytail: les versions des deux fixtures ; une version de plus se déclare ici après le test quotidien
     static let knownVersions: Set<String> = ["0.22.1", "0.22.2"]
 
@@ -29,8 +34,11 @@ public struct CapabilityMap: Equatable, Sendable {
         return Self.knownVersions.contains { Self.minor(of: $0) == minor }
     }
 
+    /// Au moins une fonction Hermes est réellement absente ou a changé de forme
+    public var hasDisabledFeature: Bool { states.values.contains { $0 != .available } }
+
     /// Mode dégradé : version d'une autre mineure que les versions testées, ou au moins une fonction désactivée. Il ne refuse jamais la connexion
-    public var isDegraded: Bool { !isVersionSupported || states.values.contains { $0 != .available } }
+    public var isDegraded: Bool { !isVersionSupported || hasDisabledFeature }
 
     /// Ce que la bannière dit de la version ; nil quand elle est testée
     /// Une version lue mais non testée est nommée, une version absente reste « inconnue »
@@ -39,8 +47,8 @@ public struct CapabilityMap: Equatable, Sendable {
         return isVersionKnown ? nil : "Hermes \(version) non testée"
     }
 
-    /// Le bandeau se montre pour un mode dégradé ou pour une version non testée, même quand tous les contrats répondent
-    public var showsBanner: Bool { isDegraded || versionNotice != nil }
+    /// Le bandeau ne se montre que pour une fonction réellement perdue. Une version non testée dont tout répond reste dans le pied et les Réglages
+    public var showsBanner: Bool { hasDisabledFeature }
 
     /// `majeure.mineure` d'un numéro `majeure.mineure.correctif` fait de chiffres seulement ; nil pour toute autre forme
     private static func minor(of version: String) -> String? {
@@ -84,9 +92,13 @@ extension HermesClient {
     public func capabilities(profile: String) async throws -> CapabilityMap {
         let version = try await readVersion(profile: profile)
         var states: [Contract: CapabilityState] = [:]
-        // ponytail: une requête après l'autre, un TaskGroup si la latence du tunnel pèse
-        for contract in Contract.features {
-            states[contract] = try await capability(contract, profile: profile)
+        try await withThrowingTaskGroup(of: (Contract, CapabilityState).self) { group in
+            for contract in Contract.features {
+                group.addTask { (contract, try await self.capability(contract, profile: profile)) }
+            }
+            for try await (contract, state) in group {
+                states[contract] = state
+            }
         }
         return CapabilityMap(version: version, states: states)
     }

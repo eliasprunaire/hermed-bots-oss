@@ -13,6 +13,7 @@ L'onglet n'affiche ni le build (`CFBundleVersion`) ni un canal de mise à jour.
 | Version de l'app | `hd.about.app-version` | `CFBundleShortVersionString` |
 | Hermes CLI | `hd.about.hermes` | version détectée pour la connexion active |
 | macOS | `hd.about.macos` | version du système |
+| Compatibilité | `hd.about.compat` | version testée / non testée, fonctions disponibles |
 
 ## Action
 

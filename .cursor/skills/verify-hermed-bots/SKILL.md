@@ -165,8 +165,12 @@ Identifiants que l'app **doit** exposer (la PR qui ajoute l'écran sans eux est 
 | `hd.bots.list` | liste des bots (barre latérale) |
 | `hd.bots.row.<profileId>` | ligne d'un bot |
 | `hd.bots.row.<profileId>.name` / `.model` | nom et modèle affichés |
-| `hd.bots.row.<profileId>.threads` | groupe des fils passés du bot |
-| `hd.threads.row.<sessionId>` | un fil passé |
+| `hd.bots.row.<profileId>.threads` | identifiant conservé ; plus de groupe de fils dans la barre latérale |
+| `hd.threads.row.<sessionId>` | identifiant conservé ; plus de ligne de session dans la barre latérale |
+| `hd.status.compat` | mention discrète de compatibilité dans le pied |
+| `hd.conversation.opening` | pastille « Connexion… » à l'ouverture d'un bot |
+| `hd.conversation.compacted` | bandeau de compaction du contexte |
+| `hd.about.compat` | détail de compatibilité dans Réglages → À propos |
 | `hd.conversation.view` | zone de conversation |
 | `hd.conversation.message.<index-serveur>` | message (index fourni par Hermes, pas d'affichage) |
 | `hd.conversation.state` | état terminal du tour (terminé, échoué, annulé, interrompu) |
@@ -203,7 +207,7 @@ Modèle : aucun.
 
 | Test | Feature map | Comment |
 |---|---|---|
-| `SixActions.testListBots` | `features/bot-list.md` | liste = profils actifs ; `hv-old` absent |
+| `SixActions.testListBots` | `features/bot-list.md` | liste = profils actifs ; `hv-old` absent ; pas de fils sous le bot |
 | `SixActions.testConversation` | `features/conversation.md` | envoi, réponse, état terminal |
 | `SixActions.testModelSwitch` | `features/model-switch.md` | `/model` sur la session ouverte |
 | `SixActions.testApprovalYes` / `testApprovalNo` | `features/approval.md` | outil et paramètres visibles avant réponse |

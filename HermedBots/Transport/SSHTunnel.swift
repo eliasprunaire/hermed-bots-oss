@@ -2,6 +2,7 @@ import AppKit
 import AppSettings
 import Darwin
 import Foundation
+import HermesAdapter
 import Observation
 import os
 
@@ -687,6 +688,7 @@ enum APIKeyRecovery {
 /// Une lecture SSH par profil et par refus ; un nouvel essai explicite de l'utilisateur la rouvre
 @MainActor
 final class APIKeyFetches {
+    static let retryCount = ProfileOpenRetry.attemptCount
     private var attempted: Set<String> = []
     /// La panne qui a une cause à dire : l'outil absent de l'hôte ou la sortie d'erreur d'Hermes
     private var failures: [String: Error] = [:]
@@ -695,22 +697,32 @@ final class APIKeyFetches {
 
     /// nil si la garde est fermée pour ce profil, si la lecture échoue sans cause à dire ou si la clé est introuvable ; la valeur n'est pas journalisée
     /// Deux pannes remontent : l'outil absent de l'hôte et une sortie d'erreur d'Hermes ; leur message vaut mieux que « Clé API introuvable »
+    /// Une coupure temporaire est relue jusqu'à `retryCount` fois dans cet appel ; un second appel sans `reset` ni `settle` ne relit plus
     func fetch(profile: String, into secrets: inout some SecretStore, read: (String) async throws -> String?) async throws -> String? {
         guard attempted.insert(profile).inserted else {
             if let failure = failures[profile] { throw failure }
             return nil
         }
-        do {
-            return try await APIKeyRecovery.refresh(profile: profile, into: &secrets, fetch: read)
-        } catch SSHFailure.remoteToolNotFound {
-            failures[profile] = SSHFailure.remoteToolNotFound
-            throw SSHFailure.remoteToolNotFound
-        } catch let failure as APIKeyReadFailure {
-            failures[profile] = failure
-            throw failure
-        } catch {
-            return nil
+        let started = generation
+        for attempt in 0..<Self.retryCount {
+            if generation != started { return nil }
+            if attempt > 0 {
+                try await Task.sleep(for: ProfileOpenRetry.delay(beforeAttempt: attempt))
+                if generation != started { return nil }
+            }
+            do {
+                return try await APIKeyRecovery.refresh(profile: profile, into: &secrets, fetch: read)
+            } catch SSHFailure.remoteToolNotFound {
+                failures[profile] = SSHFailure.remoteToolNotFound
+                throw SSHFailure.remoteToolNotFound
+            } catch let failure as APIKeyReadFailure {
+                failures[profile] = failure
+                throw failure
+            } catch {
+                if attempt == Self.retryCount - 1 { return nil }
+            }
         }
+        return nil
     }
 
     /// Le profil a répondu : le prochain refus peut relire

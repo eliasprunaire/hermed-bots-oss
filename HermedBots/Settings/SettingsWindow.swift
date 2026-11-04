@@ -35,6 +35,7 @@ struct SettingsWindow: View {
                 }
                 Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
 

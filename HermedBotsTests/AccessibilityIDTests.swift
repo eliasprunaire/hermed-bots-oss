@@ -16,7 +16,11 @@ final class AccessibilityIDTests: XCTestCase {
     func testTheShellIdsAreTheOnesTheVerifySkillNames() {
         XCTAssertEqual(AccessibilityID.botsList.rawValue, "hd.bots.list")
         XCTAssertEqual(AccessibilityID.statusVersion.rawValue, "hd.status.version")
+        XCTAssertEqual(AccessibilityID.statusCompat.rawValue, "hd.status.compat")
         XCTAssertEqual(AccessibilityID.statusPort.rawValue, "hd.status.port")
+        XCTAssertEqual(AccessibilityID.conversationCompacted.rawValue, "hd.conversation.compacted")
+        XCTAssertEqual(AccessibilityID.conversationOpening.rawValue, "hd.conversation.opening")
+        XCTAssertEqual(AccessibilityID.aboutCompat.rawValue, "hd.about.compat")
     }
 
     func testTheConnectionViewIdsAreStable() {

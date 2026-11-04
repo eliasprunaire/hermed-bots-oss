@@ -189,8 +189,14 @@ public struct HermesClient: @unchecked Sendable {
         request.httpMethod = contract.method
         request.timeoutInterval = timeout
         let key: String?
-        if let profile = variables["profile"], let apiKeyForProfile { key = try apiKeyForProfile(profile) }
-        else { key = apiKey }
+        if let profile = variables["profile"], let apiKeyForProfile {
+            guard let resolved = try apiKeyForProfile(profile), !resolved.isEmpty else {
+                throw HermesError.apiKeyMissing(profile)
+            }
+            key = resolved
+        } else {
+            key = apiKey
+        }
         if let key { request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization") }
         if contract == .runEvents { request.setValue("text/event-stream", forHTTPHeaderField: "Accept") }
         if let body {

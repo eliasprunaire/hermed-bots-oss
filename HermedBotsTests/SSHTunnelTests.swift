@@ -125,25 +125,66 @@ final class SSHTunnelConfigTests: XCTestCase {
             return secret
         }
 
-        let failed = try await fetches.fetch(profile: "cyber", into: &store, read: read)
-        XCTAssertNil(failed)
-        // le même refus ne relit pas
+        let recovered = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertEqual(recovered, secret)
+        XCTAssertEqual(reads, ["cyber", "cyber"])
+        XCTAssertEqual(try store.apiKey(profile: "cyber"), secret)
+        // le succès reste verrouillé jusqu'à settle ou reset
         let sameRefusal = try await fetches.fetch(profile: "cyber", into: &store, read: read)
         XCTAssertNil(sameRefusal)
-        XCTAssertEqual(reads, ["cyber"])
+        XCTAssertEqual(reads, ["cyber", "cyber"])
 
         fetches.reset()
         let retried = try await fetches.fetch(profile: "cyber", into: &store, read: read)
         XCTAssertEqual(retried, secret)
-        XCTAssertEqual(reads, ["cyber", "cyber"])
-        XCTAssertEqual(try store.apiKey(profile: "cyber"), secret)
+        XCTAssertEqual(reads, ["cyber", "cyber", "cyber"])
 
-        // un profil qui a répondu rouvre sa lecture sans toucher aux autres
         _ = try await fetches.fetch(profile: "sport", into: &store, read: read)
         fetches.settle("cyber")
         _ = try await fetches.fetch(profile: "cyber", into: &store, read: read)
         _ = try await fetches.fetch(profile: "sport", into: &store, read: read)
-        XCTAssertEqual(reads, ["cyber", "cyber", "sport", "cyber"])
+        XCTAssertEqual(reads, ["cyber", "cyber", "cyber", "sport", "cyber"])
+    }
+
+    @MainActor
+    func testAGenericFailureIsRereadUpToThreeTimesThenLocksUntilReset() async throws {
+        var store = InMemorySecretStore(apiKey: nil)
+        let fetches = APIKeyFetches()
+        var reads = 0
+        func read(_ name: String) async throws -> String? {
+            reads += 1
+            throw SSHFailure.unreachable("coupure")
+        }
+        let first = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(first)
+        XCTAssertEqual(reads, APIKeyFetches.retryCount)
+        let locked = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(locked)
+        XCTAssertEqual(reads, APIKeyFetches.retryCount)
+        fetches.reset()
+        let reopened = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(reopened)
+        XCTAssertEqual(reads, APIKeyFetches.retryCount * 2)
+    }
+
+    @MainActor
+    func testASecondConcurrentFetchDoesNotStartAnotherRead() async throws {
+        let secret = "fetched-profile-key-VALUE"
+        var store = InMemorySecretStore(apiKey: nil)
+        let fetches = APIKeyFetches()
+        var reads = 0
+        var skipped: String? = secret
+        func read(_ name: String) async throws -> String? {
+            reads += 1
+            // la seconde demande arrive pendant la lecture de la première
+            var other = InMemorySecretStore(apiKey: nil)
+            skipped = try await fetches.fetch(profile: "cyber", into: &other, read: read)
+            return secret
+        }
+        let obtained = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertEqual(obtained, secret)
+        XCTAssertNil(skipped)
+        XCTAssertEqual(reads, 1)
     }
 
     func testAHeldKeyThatHermesRefusesIsNotReportedAsMissing() {

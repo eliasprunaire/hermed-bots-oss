@@ -27,17 +27,17 @@ final class ProfileKeyTests: XCTestCase {
     }
 
     func testVersionWithoutAProfileKeySendsNoBearerAndPropagates401() async {
-        StubProtocol.reset { request in
-            XCTAssertNil(request.authorization)
+        StubProtocol.reset { _ in
+            XCTFail("aucune requête ne part tant que la clé du profil manque")
             return .http(401, Data(#"{"error":"Invalid gateway API key"}"#.utf8))
         }
         do {
             _ = try await versionClient(keys: [:]).readVersion(profile: "hv-bot-a")
-            XCTFail("Sans clé, Hermes doit répondre 401")
+            XCTFail("Sans clé, la requête ne part pas")
         } catch let error as HermesError {
-            guard case .http(contract: "version", status: 401, detail: _) = error else { return XCTFail("Erreur inattendue") }
+            guard case .apiKeyMissing("hv-bot-a") = error else { return XCTFail("Erreur inattendue \(error)") }
         } catch { XCTFail("Erreur inattendue") }
-        XCTAssertEqual(StubProtocol.seen.map(\.path), ["/p/hv-bot-a/health"])
+        XCTAssertEqual(StubProtocol.seen.map(\.path), [])
     }
 
     func testVersionPropagates401WithoutRetryOrFallback() async {
@@ -63,9 +63,12 @@ final class ProfileKeyTests: XCTestCase {
     }
 
     func testMissingProfileNeverUsesTheDefaultKey() throws {
-        let client = HermesClient(baseURL: URL(string: "http://127.0.0.1:18642")!, apiKey: "default-test-key", apiKeyForProfile: { _ in nil })
-        let request = try client.makeRequest(.listSessions, ["profile": "missing"], body: nil)
-        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+        let client = HermesClient(baseURL: URL(string: "http://hermes.invalid")!, apiKey: "default-test-key", apiKeyForProfile: { _ in nil })
+        XCTAssertThrowsError(try client.makeRequest(.listSessions, ["profile": "missing"], body: nil)) { error in
+            guard case HermesError.apiKeyMissing("missing") = error else {
+                return XCTFail("Erreur inattendue \(error)")
+            }
+        }
     }
 
     func testUnreadableKeyStopsTheRequest() {

@@ -4,7 +4,7 @@ Source de vérité de la vérification. Chaque fichier : ce que voit l'utilisate
 
 | Fonction | Fichier | Tests | Modèle |
 |---|---|---|---|
-| Liste des bots et fils passés | [bot-list.md](bot-list.md) | `SixActions.testListBots`, fils passés | aucun |
+| Liste des bots et chat unique | [bot-list.md](bot-list.md) | `SixActions.testListBots`, chat unique | aucun |
 | Conversation et nouvelle session | [conversation.md](conversation.md) | `SixActions.testConversation` | aucun |
 | Changement de modèle (`set_model`) | [model-switch.md](model-switch.md) | `SixActions.testModelSwitch` | aucun |
 | Approbation et outil en cours | [approval.md](approval.md) | `testApprovalYes/No`, `testCurrentTool` | aucun |

@@ -101,6 +101,10 @@ final class AppModel {
     var isTestMode: Bool { environment.isTestMode }
     var testDarkAppearance: Bool { environment.testDarkAppearance }
     var testWindowSize: CGSize? { environment.testWindowSize }
+    var isShotPreview: Bool { environment.testShotScene != nil }
+    #if DEBUG
+    private(set) var testTunnelFailed = false
+    #endif
     // de quoi lire la liste des profils par un second ssh : le même alias que le tunnel
     private var sshBackend: SystemSSHBackend?
     private var sshConfig: SSHTunnelConfig?
@@ -184,6 +188,11 @@ final class AppModel {
         }
         #endif
         ProcessGroups.installTerminationHooks()
+        #if DEBUG
+        if let name = environment.testShotScene, let scene = ShotScene(rawValue: name) {
+            applyShot(scene)
+        }
+        #endif
         updates.onChange = { [weak self] in
             Task { @MainActor in self?.updateRender += 1 }
         }
@@ -516,6 +525,7 @@ final class AppModel {
     }
 
     /// `profile` est celui de la requête refusée, pas forcément celui qui est à l'écran
+    /// L'erreur rouge n'apparaît qu'après les tentatives (0 → 400 ms → 1,2 s) et la relecture de clé
     func handleAPIError(_ error: Error, profile: String) async {
         if let failure = error as? APIKeyReadFailure { return showUnreadableKey(failure, profile: profile) }
         guard Self.isUnauthorized(error) else {
@@ -526,19 +536,50 @@ final class AppModel {
     }
 
     private func recoverKey(of profile: String) async {
+        isCheckingAPI = true
+        apiError = nil
+        let hadKey = (try? environment.secrets.resolvedAPIKey(profile: profile)) != nil
         do {
-            if try await fetchRemoteAPIKey(profile) != nil {
-                apiError = nil
-                await recheckAPI()
-                return
+            if !hadKey {
+                let obtained = try await ProfileOpenRetry.run { [self] in
+                    do {
+                        return try await fetchRemoteAPIKey(profile) != nil
+                    } catch let failure as APIKeyReadFailure {
+                        showUnreadableKey(failure, profile: profile)
+                        return true
+                    } catch SSHFailure.remoteToolNotFound {
+                        apiError = SSHFailure.remoteToolNotFound.message
+                        return true
+                    } catch {
+                        return false
+                    }
+                }
+                isCheckingAPI = false
+                if apiError != nil { return }
+                if obtained {
+                    apiError = nil
+                    await recheckAPI()
+                    return
+                }
+            } else {
+                isCheckingAPI = false
+                if try await fetchRemoteAPIKey(profile) != nil {
+                    apiError = nil
+                    await recheckAPI()
+                    return
+                }
             }
         } catch let failure as APIKeyReadFailure {
+            isCheckingAPI = false
             showUnreadableKey(failure, profile: profile)
             return
         } catch {
+            isCheckingAPI = false
             apiError = Self.apiMessage(error)
             return
         }
+        isCheckingAPI = false
+        if apiError != nil { return }
         let holdsKey = (try? environment.secrets.resolvedAPIKey(profile: profile)) != nil
         let message = HermesAPIKey.unauthorizedMessage(profile: profile, holdsKey: holdsKey)
         refusal = (profile, message)
@@ -622,6 +663,74 @@ final class AppModel {
         }
         return String(localized: "Hermes ne répond pas. Vérifiez la liaison puis réessayez.")
     }
+
+    #if DEBUG
+    func applyShot(_ scene: ShotScene) {
+        let bot = Bot(id: "shot-bot", name: "Bot de capture", model: "demo")
+        let markdown: [ConversationMachine.Line] = [
+            (1, .user, "Montre **gras**, une liste et un tableau."),
+            (2, .assistant, """
+            Le profil **default** produit plus de structure ; *tiny* reste plat.
+            - Gras et listes rendus
+            | Profil | Style |
+            | --- | --- |
+            | default | titres |
+            ```
+            func render()
+            ```
+            """),
+        ]
+        func showConversation(lines: [ConversationMachine.Line] = markdown, streaming: String? = nil, opening: Bool = false, error: String? = nil, tokens: Int? = nil) {
+            bots.seedShown([bot])
+            conversation.seedShot(bot: bot.id, session: "s-shot", lines: lines, streaming: streaming, isOpening: opening, openError: error, serverTokens: tokens)
+        }
+        switch scene {
+        case .footerReady, .aboutReady:
+            bots.seedShown([bot])
+            capabilities = CapabilityMap(version: "0.22.2")
+            version = .known("0.22.2")
+            isCheckingAPI = false
+        case .footerConnecting, .aboutConnecting:
+            bots.seedShown([bot])
+            isCheckingAPI = true
+            version = .loading
+        case .footerUntested, .aboutUntested:
+            bots.seedShown([bot])
+            capabilities = CapabilityMap(version: "0.99.0")
+            version = .known("0.99.0")
+        case .footerFailed, .aboutFailed:
+            bots.seedShown([bot])
+            apiError = HermesAPIKey.unauthorizedMessage(profile: bot.id, holdsKey: true)
+            version = .unknown
+        case .footerTunnel:
+            bots.seedShown([bot])
+            testTunnelFailed = true
+            apiError = String(localized: "Hermes ne répond pas. Vérifiez la liaison puis réessayez.")
+            version = .unknown
+        case .bannerDegraded:
+            bots.seedShown([bot])
+            capabilities = CapabilityMap(version: "0.22.2", states: [.listSessions: .disabled(message: "Fonction désactivée (la liste des fils passés) : capture.")])
+            version = .known("0.22.2")
+        case .connection:
+            bots.seedShown([])
+        case .error:
+            testTunnelFailed = true
+            bots.seedShown([bot])
+            conversation.seedShot(bot: bot.id, session: nil, isOpening: false, openError: "Impossible d'ouvrir shot-bot. Après 3 essais : la clé API du profil est refusée.")
+            apiError = String(localized: "La clé API est refusée.")
+        case .emptyHome:
+            bots.seedShown([])
+        case .emptyConversation:
+            showConversation(lines: [])
+        case .markdown:
+            showConversation()
+        case .markdownStreaming:
+            showConversation(streaming: "Début **gras encore ouvert")
+        case .compacted:
+            showConversation(tokens: 70_000)
+        }
+    }
+    #endif
 }
 
 enum ManualAPIKeyError: Error, Equatable {

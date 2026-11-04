@@ -44,7 +44,7 @@ Section **Clé API d'un profil** sur l'onglet Connexion. La saisie enregistre la
 | Enregistrer la clé | `hd.connection.api-key-save` | Inactif si la clé ou le profil est vide. |
 | Statut | `hd.connection.api-key-status` | Enregistrement, clé invalide, profil invalide, ou refus du Trousseau. |
 
-- Un HTTP 401 ou 403 déclenche aussi une lecture SSH du même alias. Le dump de cette commande doit viser le même hostname, utilisateur et port que le tunnel ouvert. Un écart refuse la lecture avant le spawn. `APIKeyFetches.fetch` avale cette erreur : le bandeau 401 reste, la clé n'est pas stockée.
+- Un HTTP 401 ou 403 déclenche aussi une lecture SSH du même alias, jusqu'à trois essais (0 → 400 ms → 1,2 s). Le dump de cette commande doit viser le même hostname, utilisateur et port que le tunnel ouvert. Un écart refuse la lecture avant le spawn. `APIKeyFetches.fetch` avale cette erreur : le bandeau 401 n'apparaît qu'après les essais, la clé n'est pas stockée. Pendant les essais : « Connexion… ».
 - Commande distante figée : `hermes -p <profil> config get API_SERVER_KEY --raw`. Le profil passe une liste blanche.
 - Uniquement la clé du profil demandé (`hermes -p <profil> …`). Pas de repli sur `default`. Cache Trousseau `WhenUnlockedThisDeviceOnly`. Jamais affichée ni journalisée.
 - Échec sans clé détenue : bandeau `Clé API introuvable sur l'hôte pour le profil <id>`. Un profil nommé sans clé n'envoie jamais la clé de `default`.

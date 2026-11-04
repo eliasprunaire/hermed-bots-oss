@@ -16,6 +16,8 @@ struct AppEnvironment {
     var testDarkAppearance = false
     /// Mode test seulement : `HV_WINDOW_SIZE=<largeur>x<hauteur>`, la taille du contenu de la fenêtre au lancement ; nil pour une valeur absente ou invalide
     var testWindowSize: CGSize?
+    /// Mode test seulement : scène figée pour les captures XCUITest, sans réseau
+    var testShotScene: String?
 
     /// Le mode test refuse l'hôte factice `example-host`. Hors mode test, aucun hôte n'est refusé.
     var refuseTestHost: Bool { isTestMode }
@@ -42,7 +44,8 @@ struct AppEnvironment {
                 testResumeScope: environment["HV_RESUME_SCOPE"],
                 testProfileTable: environment["HV_TEST_PROFILE_TABLE"],
                 testDarkAppearance: environment["HV_APPEARANCE"] == "dark",
-                testWindowSize: environment["HV_WINDOW_SIZE"].flatMap(windowSize)
+                testWindowSize: environment["HV_WINDOW_SIZE"].flatMap(windowSize),
+                testShotScene: environment["HV_SHOT_SCENE"]
             )
         }
         #endif
