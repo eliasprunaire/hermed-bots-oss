@@ -186,6 +186,42 @@ test("an apostrophe in an unquoted name does not keep a Swift comment", () => {
   }
 });
 
+test("a Swift image in a literal block scalar still fails when too old", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      "run: |\n",
+      '  echo build" #1"; docker run --rm swift:6.3 swift --version\n',
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /6\.3/);
+    assert.match(result.stderr, /6\.4/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an Xcode pin in a folded block scalar still fails when too old", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      "run: >-\n",
+      '  echo build" #1"; echo xcode-version: "27.0"\n',
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /27\.0/);
+    assert.match(result.stderr, /27\.1/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a Swift comment below the minimum is ignored when the image meets it", () => {
   const dir = tree({
     ".github/toolchain-min.txt": MIN,
