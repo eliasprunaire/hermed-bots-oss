@@ -64,4 +64,6 @@ jobs:
           git log --format=%B "$BASE_SHA"..HEAD > /tmp/pr-commits.txt
           node scripts/check-pr-attribution.js --print-squash-body > /tmp/squash-body.txt
       - name: Fail on attribution trailers and agent footers
-        run: node scripts/check-pr-attribution.js --body-file /tmp/pr-body.txt --commits-file /tmp/pr-commits.txt --squash-body-file /tmp/squash-body.txt
+        env:
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: node scripts/check-pr-attribution.js --body-file /tmp/pr-body.txt --commits-file /tmp/pr-commits.txt --squash-body-file /tmp/squash-body.txt --author "$PR_AUTHOR"
