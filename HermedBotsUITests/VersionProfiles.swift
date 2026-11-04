@@ -4,6 +4,8 @@ import XCTest
 final class VersionProfiles: HD12Harness {
     private let a = "hv-bot-a"
     private let b = "hv-bot-b"
+    // id du premier message seed du faux serveur (SEED_MSG_DATA), repris tel quel par l'adaptateur
+    private let firstMessage = 13
 
     private func configureVersion(_ version: String, rejectKey: Bool = false) {
         request("/_hv/config", body: ["mode": "normal", "version": version, "reject_key": rejectKey, "profiles": [a, b]])
@@ -42,7 +44,7 @@ final class VersionProfiles: HD12Harness {
 
     private func waitForMessage() {
         XCTAssertTrue(
-            element(AccessibilityID.conversationMessage(1)).waitForExistence(timeout: 15),
+            element(AccessibilityID.conversationMessage(firstMessage)).waitForExistence(timeout: 15),
             "le fil unique n'a pas repris le premier message"
         )
     }
@@ -114,7 +116,7 @@ final class VersionProfiles: HD12Harness {
         XCTAssertEqual(text(AccessibilityID.statusVersion.rawValue), "profile-a-return", "la version tardive du profil quitté ne doit pas remplacer le profil affiché")
         XCTAssertTrue(element(AccessibilityID.botName(a)).exists)
         XCTAssertFalse(element(AccessibilityID.bannerError.rawValue).exists)
-        XCTAssertTrue(element(AccessibilityID.conversationMessage(1)).exists)
+        XCTAssertTrue(element(AccessibilityID.conversationMessage(firstMessage)).exists)
         HVShot.capture("issue58-version-late-response", app)
     }
 
