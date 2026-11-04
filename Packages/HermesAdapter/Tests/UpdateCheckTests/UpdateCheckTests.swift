@@ -124,7 +124,7 @@ final class UpdateCheckTests: XCTestCase {
         let updates = UpdateCheck(driver: driver)
         updates.checkForUpdates()
         updates.noteAvailable(version: "0.1.9")
-        XCTAssertEqual(updates.state, .checking)
+        XCTAssertEqual(updates.state, .available(version: "0.1.9"))
         updates.noteSessionEnded()
         XCTAssertEqual(updates.state, .available(version: "0.1.9"))
         XCTAssertEqual(updates.state.statusText, "Mise à jour disponible : 0.1.9")
@@ -134,6 +134,22 @@ final class UpdateCheckTests: XCTestCase {
         XCTAssertEqual(driver.installs, 1)
         XCTAssertEqual(driver.starts, 1)
         XCTAssertEqual(updates.state, .available(version: "0.1.9"))
+    }
+
+    func testAFoundUpdateShowsInstallBeforeTheSessionEnds() {
+        let driver = FakeUpdateDriver()
+        let updates = UpdateCheck(driver: driver)
+        updates.checkForUpdates()
+        updates.noteAvailable(version: "0.1.9")
+        XCTAssertEqual(updates.state, .available(version: "0.1.9"))
+        XCTAssertTrue(updates.state.showsInstall)
+        XCTAssertFalse(updates.canCheck)
+        updates.checkForUpdates()
+        XCTAssertEqual(driver.starts, 1)
+        updates.noteSessionEnded()
+        XCTAssertEqual(updates.state, .available(version: "0.1.9"))
+        XCTAssertTrue(updates.state.showsInstall)
+        XCTAssertTrue(updates.canCheck)
     }
 
     func testAFailedCheckShowsTheErrorAndHidesInstall() {

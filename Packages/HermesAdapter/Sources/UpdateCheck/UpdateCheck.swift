@@ -63,20 +63,23 @@ public final class UpdateCheck {
     public var onChange: (() -> Void)?
     private let driver: any UpdateDriver
     private var settled: UpdateCheckState = .upToDate
+    private var sessionActive = false
 
     public init(driver: any UpdateDriver) {
         self.driver = driver
     }
 
-    public var isChecking: Bool { state == .checking }
+    public var isChecking: Bool { sessionActive }
 
-    public var canCheck: Bool { driver.canStartCheck && !isChecking }
+    public var canCheck: Bool { driver.canStartCheck && !sessionActive }
 
     public func checkForUpdates() {
         guard canCheck else { return }
+        sessionActive = true
         state = .checking
         onChange?()
         if !driver.startCheck() {
+            sessionActive = false
             state = settled
             onChange?()
         }
@@ -89,7 +92,8 @@ public final class UpdateCheck {
 
     public func noteAvailable(version: String) {
         settled = .available(version: version)
-        publishSettledIfIdle()
+        state = settled
+        onChange?()
     }
 
     public func noteUpToDate() {
@@ -103,13 +107,14 @@ public final class UpdateCheck {
     }
 
     public func noteSessionEnded() {
-        guard isChecking else { return }
+        guard sessionActive else { return }
+        sessionActive = false
         state = settled
         onChange?()
     }
 
     private func publishSettledIfIdle() {
-        guard !isChecking else { return }
+        guard !sessionActive else { return }
         state = settled
         onChange?()
     }
