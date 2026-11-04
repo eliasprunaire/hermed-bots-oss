@@ -445,9 +445,14 @@ final class SixActions: XCTestCase {
     /// Le tour part par `start_run` avec le `session_id` du fil : le chat de session ne rend aucun événement (S1) et répond HTTP 200 à un échec du fournisseur
     func testConversation() throws {
         try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
-        let start = Date()
         let app = launch()
         try openBot(in: app)
+        // Chat unique : openBot ouvre le fil le plus récent ; une session neuve isole le tour de ce test
+        let neuve = element(.sessionNew, in: app)
+        XCTAssertTrue(neuve.waitForExistence(timeout: 10), "hd.session.new absent")
+        neuve.click()
+        XCTAssertTrue(element(.conversationEmpty, in: app).waitForExistence(timeout: 10), "la nouvelle session doit vider le chat")
+        let start = Date()
         XCTAssertFalse(element(.composerSend, in: app).isEnabled, "Envoyer doit être grisé tant que le champ est vide")
         XCTAssertTrue(element(.conversationView, in: app).exists)
         XCTAssertFalse(element(.conversationState, in: app).exists, "aucun état avant le premier tour")
