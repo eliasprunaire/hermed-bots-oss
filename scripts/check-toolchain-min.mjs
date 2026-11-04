@@ -2,7 +2,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseAllDocuments } from "yaml";
+import { isAlias, isMap, isPair, isScalar, isSeq, parseAllDocuments } from "yaml";
 
 const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MIN_FILE = ".github/toolchain-min.txt";
@@ -101,55 +101,75 @@ function collectXcodeVersion(text, into) {
   into.push(...matches(/(\d+\.\d+(?:\.\d+)?)/g, trimmed));
 }
 
-function collectFromValue(value, swiftFound, xcodeFound, key, seen) {
-  if (value == null) {
+function scalarText(node) {
+  if (typeof node.value === "number" || typeof node.value === "bigint") {
+    if (typeof node.source === "string" && node.source !== "") {
+      return node.source;
+    }
+  }
+  if (node.value == null) {
+    return "";
+  }
+  return String(node.value);
+}
+
+function pairKey(pair) {
+  if (!isPair(pair) || pair.key == null) {
+    return null;
+  }
+  if (isScalar(pair.key)) {
+    return pair.key.value == null ? null : String(pair.key.value);
+  }
+  return null;
+}
+
+function collectFromNode(node, swiftFound, xcodeFound, key, seen, doc) {
+  if (node == null) {
     return;
   }
-  if (typeof value === "string") {
-    if (key !== "version") {
-      collectSwiftFromImage(value, swiftFound);
-    }
+  if (isAlias(node)) {
+    collectFromNode(node.resolve(doc), swiftFound, xcodeFound, key, seen, doc);
+    return;
+  }
+  if (isScalar(node)) {
+    const text = scalarText(node);
+    collectSwiftFromImage(text, swiftFound);
     if (key === "xcode-version") {
-      collectXcodeVersion(value, xcodeFound);
+      collectXcodeVersion(text, xcodeFound);
     }
     if (key === "DEVELOPER_DIR") {
-      collectXcodeFromText(value, xcodeFound);
+      collectXcodeFromText(text, xcodeFound);
     }
-    if (XCODE_IN_RUN.test(value)) {
-      collectXcodeFromText(value, xcodeFound);
-    }
-    return;
-  }
-  if (typeof value === "number" && Number.isFinite(value)) {
-    if (key === "xcode-version") {
-      collectXcodeVersion(String(value), xcodeFound);
+    if (XCODE_IN_RUN.test(text)) {
+      collectXcodeFromText(text, xcodeFound);
     }
     return;
   }
-  if (typeof value !== "object") {
+  if (typeof node !== "object") {
     return;
   }
-  if (seen.has(value)) {
+  if (seen.has(node)) {
     return;
   }
-  seen.add(value);
+  seen.add(node);
   try {
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        collectFromValue(item, swiftFound, xcodeFound, key, seen);
-      }
+    if (isPair(node)) {
+      collectFromNode(node.value, swiftFound, xcodeFound, pairKey(node) ?? key, seen, doc);
       return;
     }
-    for (const [childKey, child] of Object.entries(value)) {
-      collectFromValue(child, swiftFound, xcodeFound, childKey, seen);
+    if (isMap(node) || isSeq(node)) {
+      for (const item of node.items) {
+        collectFromNode(item, swiftFound, xcodeFound, key, seen, doc);
+      }
     }
   } finally {
-    seen.delete(value);
+    seen.delete(node);
   }
 }
 
 function collectFromDocument(doc, swiftFound, xcodeFound) {
-  collectFromValue(doc.toJS(), swiftFound, xcodeFound, null, new WeakSet());
+  doc.toJS();
+  collectFromNode(doc.contents, swiftFound, xcodeFound, null, new WeakSet(), doc);
 }
 
 function workflowFiles(root) {

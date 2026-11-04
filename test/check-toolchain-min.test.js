@@ -222,6 +222,22 @@ test("an Xcode pin in a folded block scalar still fails when too old", () => {
   }
 });
 
+test("a French leftover Swift comment does not fail a current image", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      "container: swift:6.4.2\n",
+      "# Ancienne image : swift:6.3\n",
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a Swift comment below the minimum is ignored when the image meets it", () => {
   const dir = tree({
     ".github/toolchain-min.txt": MIN,
@@ -481,7 +497,7 @@ test("an unquoted float xcode-version below the minimum fails and counts as a pi
     const result = run(dir);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /\.github\/workflows\/ci\.yml/);
-    assert.match(result.stderr, /\b16(\.0)?\b/);
+    assert.match(result.stderr, /version xcode 16\.0 /);
     assert.match(result.stderr, /27\.1/);
     assert.doesNotMatch(result.stdout, /aucune version Xcode fixée/);
   } finally {
@@ -575,6 +591,25 @@ test("an older xcode-version matrix shared by alias fails when first reached und
     assert.match(result.stderr, /27\.0/);
     assert.match(result.stderr, /27\.1/);
     assert.doesNotMatch(result.stdout, /aucune version Xcode fixée/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an older Swift image in a matrix version column fails", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      "strategy: { matrix: { version: ['swift:6.3'] } }\n",
+      "container: ${{ matrix.version }}\n",
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /\.github\/workflows\/ci\.yml/);
+    assert.match(result.stderr, /6\.3/);
+    assert.match(result.stderr, /6\.4/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
