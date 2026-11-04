@@ -700,15 +700,55 @@ function bumpInput(overrides = {}) {
     authorLogin: "renovate[bot]",
     commitLogins: ["renovate[bot]"],
     hits: [WORKFLOW],
-    lineChanges: [
+    fileChanges: [
       {
         file: WORKFLOW,
-        removed: ["        uses: actions/checkout@v4"],
-        added: ["        uses: actions/checkout@v5"],
+        before: "        uses: actions/checkout@v4\n",
+        after: "        uses: actions/checkout@v5\n",
       },
     ],
     ...overrides,
   };
+}
+
+function twoJobUses(first, second) {
+  return [
+    "jobs:",
+    "  one:",
+    "    steps:",
+    `      - ${first}`,
+    "  two:",
+    "    steps:",
+    `      - ${second}`,
+    "",
+  ].join("\n");
+}
+
+function twoJobContainer(firstHasContainer) {
+  if (firstHasContainer) {
+    return [
+      "jobs:",
+      "  one:",
+      "    container: swift:6.4.2",
+      "    steps:",
+      "      - run: echo one",
+      "  two:",
+      "    steps:",
+      "      - run: echo two",
+      "",
+    ].join("\n");
+  }
+  return [
+    "jobs:",
+    "  one:",
+    "    steps:",
+    "      - run: echo one",
+    "  two:",
+    "    container: swift:6.4.2",
+    "    steps:",
+    "      - run: echo two",
+    "",
+  ].join("\n");
 }
 
 test("a Renovate tag bump of actions/checkout@v4 to @v5 is exempted", () => {
@@ -719,19 +759,21 @@ test("a Renovate tag bump of actions/checkout@v4 to @v5 is exempted", () => {
 test("a Renovate digest and container image bump is exempted", () => {
   const decision = renovateWorkflowBumpExemption(
     bumpInput({
-      lineChanges: [
+      fileChanges: [
         {
           file: WORKFLOW,
-          removed: [
+          before: [
             `        uses: actions/checkout@${SHA_OLD} # v4`,
             "    container: swift:6.4.2",
             `        image: swift@${DIGEST_OLD}`,
-          ],
-          added: [
+            "",
+          ].join("\n"),
+          after: [
             `        uses: actions/checkout@${SHA_NEW} # v5`,
             "    container: swift:6.4.3",
             `        image: swift@${DIGEST_NEW}`,
-          ],
+            "",
+          ].join("\n"),
         },
       ],
     }),
@@ -748,11 +790,11 @@ test("the same version bump by another author is blocked", () => {
 test("Renovate adding a run step or changing permissions is blocked", () => {
   const withRun = renovateWorkflowBumpExemption(
     bumpInput({
-      lineChanges: [
+      fileChanges: [
         {
           file: WORKFLOW,
-          removed: ["        uses: actions/checkout@v4"],
-          added: ["        uses: actions/checkout@v5", "        run: echo hi"],
+          before: "        uses: actions/checkout@v4\n",
+          after: "        uses: actions/checkout@v5\n        run: echo hi\n",
         },
       ],
     }),
@@ -761,11 +803,11 @@ test("Renovate adding a run step or changing permissions is blocked", () => {
   assert.equal(withRun.reason, "diff");
   const withPermissions = renovateWorkflowBumpExemption(
     bumpInput({
-      lineChanges: [
+      fileChanges: [
         {
           file: WORKFLOW,
-          removed: ["    permissions: contents: read"],
-          added: ["    permissions: contents: write"],
+          before: "    permissions: contents: read\n",
+          after: "    permissions: contents: write\n",
         },
       ],
     }),
@@ -778,11 +820,11 @@ test("Renovate adding a run step or changing permissions is blocked", () => {
 test("Renovate replacing the action name is blocked", () => {
   const decision = renovateWorkflowBumpExemption(
     bumpInput({
-      lineChanges: [
+      fileChanges: [
         {
           file: WORKFLOW,
-          removed: ["        uses: actions/checkout@v4"],
-          added: ["        uses: evil/checkout@v5"],
+          before: "        uses: actions/checkout@v4\n",
+          after: "        uses: evil/checkout@v5\n",
         },
       ],
     }),
@@ -799,11 +841,11 @@ test("Renovate changing a protected path that is not a workflow is blocked", () 
   const decision = renovateWorkflowBumpExemption(
     bumpInput({
       hits: ["scripts/check-protected-paths.js"],
-      lineChanges: [
+      fileChanges: [
         {
           file: "scripts/check-protected-paths.js",
-          removed: ["        uses: actions/checkout@v4"],
-          added: ["        uses: actions/checkout@v5"],
+          before: "        uses: actions/checkout@v4\n",
+          after: "        uses: actions/checkout@v5\n",
         },
       ],
     }),
@@ -818,6 +860,38 @@ test("a non-Renovate commit in a Renovate pull is blocked", () => {
   );
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "commits");
+});
+
+test("moving a uses: line between jobs is not a Renovate version bump", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: twoJobUses("uses: actions/checkout@v4", "run: echo"),
+          after: twoJobUses("run: echo", "uses: actions/checkout@v4"),
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+});
+
+test("moving a container: line between jobs is not a Renovate version bump", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: twoJobContainer(true),
+          after: twoJobContainer(false),
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
 });
 
 async function withStdout(run) {
@@ -935,5 +1009,33 @@ test("main exempts a Renovate container tag bump", async () => {
       assert.equal(stdout.trim(), RENOVATE_EXEMPTION_MESSAGE);
     },
     "    container: swift:6.4.2\n",
+  );
+});
+
+test("main blocks a Renovate pull that moves a uses: line to another job", async () => {
+  await withWorkflowHead(
+    twoJobUses("run: echo", "uses: actions/checkout@v4"),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    twoJobUses("uses: actions/checkout@v4", "run: echo"),
+  );
+});
+
+test("main blocks a Renovate pull that moves a container: line to another job", async () => {
+  await withWorkflowHead(
+    twoJobContainer(false),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    twoJobContainer(true),
   );
 });

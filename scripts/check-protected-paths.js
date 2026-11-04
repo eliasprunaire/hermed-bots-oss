@@ -94,38 +94,53 @@ function parsePin(line) {
   return null;
 }
 
+function pinSignature(line) {
+  const text = String(line ?? "").replace(/\r$/, "");
+  const uses = USES_PIN.exec(text);
+  if (uses) {
+    return `${uses[1]}${uses[2]}@${uses[4] ? " # v" : ""}`;
+  }
+  const image = IMAGE_LINE.exec(text);
+  if (image) {
+    const parsed = parseImageRef(image[2]);
+    if (parsed) {
+      return `${image[1]}${parsed.name}`;
+    }
+  }
+  return null;
+}
+
+function neutralizePinLine(line) {
+  const text = String(line ?? "").replace(/\r$/, "");
+  return pinSignature(text) ?? text;
+}
+
+function neutralizeVersionRefs(text) {
+  return String(text ?? "")
+    .split("\n")
+    .map((line) => neutralizePinLine(line))
+    .join("\n");
+}
+
 function isVersionBumpPair(removed, added) {
-  const left = parsePin(removed);
-  const right = parsePin(added);
-  if (left == null || right == null) {
+  if (String(removed ?? "") === String(added ?? "")) {
     return false;
   }
-  return left.kind === right.kind && left.prefix === right.prefix && left.name === right.name;
+  const left = pinSignature(removed);
+  return left != null && left === pinSignature(added);
 }
 
-function parseUnifiedChangedLines(diff) {
-  const removed = [];
-  const added = [];
-  for (const raw of String(diff ?? "").split("\n")) {
-    if (
-      raw.startsWith("+++") ||
-      raw.startsWith("---") ||
-      raw.startsWith("diff ") ||
-      raw.startsWith("index ") ||
-      raw.startsWith("@@")
-    ) {
-      continue;
-    }
-    if (raw.startsWith("+")) {
-      added.push(raw.slice(1));
-    } else if (raw.startsWith("-")) {
-      removed.push(raw.slice(1));
-    }
+function isVersionOnlyWorkflowChange(before, after) {
+  if (typeof before !== "string" || typeof after !== "string") {
+    return false;
   }
-  return { removed, added };
+  if (before === after) {
+    return false;
+  }
+  return neutralizeVersionRefs(before) === neutralizeVersionRefs(after);
 }
 
-function renovateWorkflowBumpExemption({ authorLogin, commitLogins, hits, lineChanges } = {}) {
+function renovateWorkflowBumpExemption({ authorLogin, commitLogins, hits, fileChanges } = {}) {
   if (!isRenovateLogin(authorLogin)) {
     return { ok: false, reason: "author" };
   }
@@ -144,11 +159,11 @@ function renovateWorkflowBumpExemption({ authorLogin, commitLogins, hits, lineCh
   if (!hits.every((hit) => isProtectedWorkflowPath(hit))) {
     return { ok: false, reason: "path" };
   }
-  if (!Array.isArray(lineChanges)) {
+  if (!Array.isArray(fileChanges)) {
     return { ok: false, reason: "diff" };
   }
   const byFile = new Map();
-  for (const change of lineChanges) {
+  for (const change of fileChanges) {
     if (change == null || typeof change !== "object") {
       return { ok: false, reason: "diff" };
     }
@@ -159,16 +174,8 @@ function renovateWorkflowBumpExemption({ authorLogin, commitLogins, hits, lineCh
   }
   for (const hit of hits) {
     const change = byFile.get(posix(hit));
-    if (change == null || !Array.isArray(change.removed) || !Array.isArray(change.added)) {
+    if (change == null || !isVersionOnlyWorkflowChange(change.before, change.after)) {
       return { ok: false, reason: "diff" };
-    }
-    if (change.removed.length !== change.added.length || change.removed.length === 0) {
-      return { ok: false, reason: "diff" };
-    }
-    for (let i = 0; i < change.removed.length; i += 1) {
-      if (!isVersionBumpPair(change.removed[i], change.added[i])) {
-        return { ok: false, reason: "diff" };
-      }
     }
   }
   return { ok: true };
@@ -486,21 +493,25 @@ async function ownerApproval(io, headSha) {
   return gateApprovalFromEvents(events, { verdict: verdictGateStatus(payload) });
 }
 
-function lineChangesFor(base, head, files) {
-  return files.map((file) => {
-    const diff = git([
-      "diff",
-      "--no-ext-diff",
-      "--unified=0",
-      "--no-color",
-      "--no-renames",
-      `${base}...${head}`,
-      "--",
-      file,
-    ]).toString("utf8");
-    const { removed, added } = parseUnifiedChangedLines(diff);
-    return { file, removed, added };
+function blobText(commit, file) {
+  const spec = `${commit}:${file}`;
+  const probe = spawnSync("git", ["cat-file", "-e", spec], {
+    encoding: "buffer",
+    maxBuffer: 64 * 1024 * 1024,
   });
+  if (probe.status !== 0) {
+    return null;
+  }
+  return git(["cat-file", "blob", spec]).toString("utf8");
+}
+
+function fileChangesFor(base, head, files) {
+  const ancestor = git(["merge-base", base, head]).toString("utf8").trim();
+  return files.map((file) => ({
+    file,
+    before: blobText(ancestor, file),
+    after: blobText(head, file),
+  }));
 }
 
 function commitLogin(raw) {
@@ -593,19 +604,19 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
   if (hits.length > 0 && isRenovateLogin(io.env.PR_AUTHOR_LOGIN)) {
     const commitLogins = await loadPullCommitLogins(io);
     const workflowHits = hits.filter((hit) => isProtectedWorkflowPath(hit));
-    let lineChanges = [];
+    let fileChanges = [];
     if (workflowHits.length > 0) {
       try {
-        lineChanges = lineChangesFor(args.base, args.head, workflowHits);
+        fileChanges = fileChangesFor(args.base, args.head, workflowHits);
       } catch {
-        lineChanges = [];
+        fileChanges = [];
       }
     }
     const exemption = renovateWorkflowBumpExemption({
       authorLogin: io.env.PR_AUTHOR_LOGIN,
       commitLogins,
       hits,
-      lineChanges,
+      fileChanges,
     });
     if (exemption.ok) {
       process.stdout.write(`${RENOVATE_EXEMPTION_MESSAGE}\n`);
@@ -643,6 +654,7 @@ module.exports = {
   classifyHits,
   gateApprovalFromEvents,
   isVersionBumpPair,
+  neutralizeVersionRefs,
   renovateWorkflowBumpExemption,
   GATE_FILES,
   GATE_LABEL,
