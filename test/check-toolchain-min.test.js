@@ -153,6 +153,39 @@ test("a quoted xcode-version key below the minimum fails", () => {
   }
 });
 
+test("a hash inside an unquoted value still fails an older Swift image", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml":
+      "run: echo build#1; docker run --rm swift:6.3 swift --version\n",
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /6\.3/);
+    assert.match(result.stderr, /6\.4/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an apostrophe in an unquoted name does not keep a Swift comment", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      "name: Swift's CI\n",
+      "container: swift:6.4.2\n",
+      "# leftover image swift:6.3\n",
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("a Swift comment below the minimum is ignored when the image meets it", () => {
   const dir = tree({
     ".github/toolchain-min.txt": MIN,
