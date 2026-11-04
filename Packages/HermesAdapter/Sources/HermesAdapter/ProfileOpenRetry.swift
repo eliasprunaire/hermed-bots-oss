@@ -12,7 +12,7 @@ public enum ProfileOpenRetry: Sendable {
     }
 
     /// Exécute `work` jusqu'à trois fois. `work` rend `true` pour s'arrêter (succès).
-    public static func run(_ work: () async throws -> Bool) async throws -> Bool {
+    public nonisolated(nonsending) static func run(_ work: () async throws -> Bool) async throws -> Bool {
         for attempt in 0..<attemptCount {
             let wait = delay(beforeAttempt: attempt)
             if wait != .zero { try await Task.sleep(for: wait) }

@@ -14,10 +14,14 @@ struct MessageMarkdownView: View {
             if prepared.isEmpty {
                 EmptyView()
             } else {
-                StructuredText(markdown: prepared)
+                let text = StructuredText(markdown: prepared)
                     .textual.imageAttachmentLoader(InertMarkdownAttachmentLoader())
                     .textual.emojiAttachmentLoader(InertMarkdownAttachmentLoader())
-                    .textual.textSelection(selectable ? .enabled : .disabled)
+                if selectable {
+                    text.textual.textSelection(.enabled)
+                } else {
+                    text.textual.textSelection(.disabled)
+                }
             }
             if streaming {
                 Text("▍")
@@ -54,7 +58,7 @@ struct AltTextAttachment: Attachment {
     func sizeThatFits(_ proposal: ProposedViewSize, in environment: TextEnvironmentValues) -> CGSize {
         _ = environment
         let width = max(1, proposal.width ?? 80)
-        let height = text.isEmpty ? 1 : 18
+        let height: CGFloat = text.isEmpty ? 1 : 18
         return CGSize(width: width, height: height)
     }
 }

@@ -162,8 +162,8 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertNil(locked)
         XCTAssertEqual(reads, APIKeyFetches.retryCount)
         fetches.reset()
-        let afterReset = try await fetches.fetch(profile: "cyber", into: &store, read: read)
-        XCTAssertNil(afterReset)
+        let reopened = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(reopened)
         XCTAssertEqual(reads, APIKeyFetches.retryCount * 2)
     }
 
@@ -173,16 +173,15 @@ final class SSHTunnelConfigTests: XCTestCase {
         var store = InMemorySecretStore(apiKey: nil)
         let fetches = APIKeyFetches()
         var reads = 0
+        var skipped: String? = secret
         func read(_ name: String) async throws -> String? {
             reads += 1
-            try await Task.sleep(for: .milliseconds(80))
+            // la seconde demande arrive pendant la lecture de la première
+            var other = InMemorySecretStore(apiKey: nil)
+            skipped = try await fetches.fetch(profile: "cyber", into: &other, read: read)
             return secret
         }
-        async let first = fetches.fetch(profile: "cyber", into: &store, read: read)
-        try await Task.sleep(for: .milliseconds(20))
-        async let second = fetches.fetch(profile: "cyber", into: &store, read: read)
-        let obtained = try await first
-        let skipped = try await second
+        let obtained = try await fetches.fetch(profile: "cyber", into: &store, read: read)
         XCTAssertEqual(obtained, secret)
         XCTAssertNil(skipped)
         XCTAssertEqual(reads, 1)
