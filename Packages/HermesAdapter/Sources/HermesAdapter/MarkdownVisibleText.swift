@@ -4,11 +4,11 @@ import Foundation
 /// Le texte brut n'est un secours que si le rendu échoue. Les tests lisent `of`, sans étoile restante.
 public enum MarkdownVisibleText: Sendable {
     public static func prepared(_ source: String) -> String {
-        Walker(source).prepared()
+        Walker(source: source).prepared()
     }
 
     public static func of(_ source: String) -> String {
-        Walker(prepared(source)).visible()
+        Walker(source: prepared(source)).visible()
     }
 }
 
