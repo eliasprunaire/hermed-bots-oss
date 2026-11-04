@@ -8,6 +8,7 @@ const {
   checkSources,
   explicitSquashBody,
   hitsIn,
+  skipsAgentsRequirement,
   stripCoAuthoredBy,
   main,
 } = require("../scripts/check-pr-attribution.js");
@@ -641,6 +642,78 @@ test("main exits 1 when the only bc- UUID sits in the host footer", () => {
   ]);
   assert.equal(code, 1);
   assert.match(err, /bc- UUID/);
+});
+
+test("renovate[bot] skips the Agents heading and still rejects a co-author trailer", () => {
+  assert.equal(skipsAgentsRequirement("renovate[bot]"), true);
+  assert.equal(skipsAgentsRequirement("app/renovate"), true);
+  assert.equal(skipsAgentsRequirement("eliasprunaire"), false);
+  assert.equal(skipsAgentsRequirement(""), false);
+  const dir = mkdtempSync(join(tmpdir(), "attr-"));
+  const body = join(dir, "body.txt");
+  const commits = join(dir, "commits.txt");
+  writeFileSync(
+    body,
+    "Cette pull request propose une mise à jour de dépendances.\n",
+  );
+  writeFileSync(commits, "chore(deps): mettre à jour l'action actions/checkout vers v7\n");
+  assert.equal(
+    main([
+      "--body-file",
+      body,
+      "--commits-file",
+      commits,
+      "--author",
+      "renovate[bot]",
+    ]),
+    0,
+  );
+  writeFileSync(
+    body,
+    "Co-authored-by: Bot <bot@example.com>\n",
+  );
+  const { code, err } = runMain([
+    "--body-file",
+    body,
+    "--commits-file",
+    commits,
+    "--author",
+    "renovate[bot]",
+  ]);
+  assert.equal(code, 1);
+  assert.match(err, /PR body contains Co-authored-by/);
+});
+
+test("a missing Agents heading still fails when the author is not Renovate", () => {
+  const dir = mkdtempSync(join(tmpdir(), "attr-"));
+  const body = join(dir, "body.txt");
+  const commits = join(dir, "commits.txt");
+  writeFileSync(body, "## Pourquoi\nMise à jour.\n");
+  writeFileSync(commits, "chore(deps): mettre à jour la dépendance foo vers 1.0.0\n");
+  const { code, err } = runMain([
+    "--body-file",
+    body,
+    "--commits-file",
+    commits,
+    "--author",
+    "someone-else",
+  ]);
+  assert.equal(code, 1);
+  assert.match(err, /## Agents/);
+});
+
+test("the CI job passes the pull request author login to the checker", () => {
+  const ci = readFileSync(join(__dirname, "../.github/workflows/ci.yml"), "utf8");
+  assert.equal(
+    ci.includes("PR_AUTHOR: ${{ github.event.pull_request.user.login }}"),
+    true,
+  );
+  assert.equal(
+    ci.includes(
+      'check-pr-attribution.js --body-file /tmp/pr-body.txt --commits-file /tmp/pr-commits.txt --squash-body-file /tmp/squash-body.txt --author "$PR_AUTHOR"',
+    ),
+    true,
+  );
 });
 
 test("main exits 0 when the squash body is empty", () => {

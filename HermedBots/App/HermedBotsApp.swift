@@ -39,7 +39,7 @@ struct ContentView: View {
                 ErrorBanner(model: model)
                 DegradedBanner(map: model.capabilities)
                 if let bot = shownBot {
-                    ConversationView(model: model.conversation, killSwitch: model.killSwitch, bot: bot)
+                    ConversationView(model: model.conversation, killSwitch: model.killSwitch, bot: bot, apiFailed: model.apiError != nil)
                 } else {
                     HomeView(bots: model.bots, profileLock: model.profileLock, activity: model.conversation.activity(of:), needsConnection: needsConnection,
                              open: open(bot:), configure: { openSettings() })
@@ -130,19 +130,31 @@ private struct SidebarFooter: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             StopAllStatus(model: model.killSwitch)
-            HStack(spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
                 Circle()
                     .fill(health)
                     .frame(width: 7, height: 7)
                     .shadow(color: health.opacity(0.7), radius: 3)
+                    .padding(.top, 3)
                     .accessibilityHidden(true)
-                Text(footerLabel)
-                    .accessibilityID(.statusCompat)
-                model.version.text.accessibilityID(.statusVersion)
-                if let port = model.displayedPort {
-                    Text(verbatim: port.statusText).accessibilityID(.statusPort)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(footerLabel)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(3)
+                        .help(footerLabel)
+                        .accessibilityID(.statusCompat)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        model.version.text
+                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(2)
+                            .accessibilityID(.statusVersion)
+                        if let port = model.displayedPort {
+                            Text(verbatim: port.statusText).accessibilityID(.statusPort)
+                        }
+                    }
                 }
-                Spacer()
+                .layoutPriority(1)
+                Spacer(minLength: 4)
                 SettingsLink {
                     Label("Réglages", systemImage: "gearshape").labelStyle(.iconOnly)
                 }
@@ -150,7 +162,6 @@ private struct SidebarFooter: View {
                 .help("Réglages")
                 .accessibilityID(.connectionOpen)
             }
-            .lineLimit(1)
             .font(.footnote)
             .foregroundStyle(.secondary)
         }

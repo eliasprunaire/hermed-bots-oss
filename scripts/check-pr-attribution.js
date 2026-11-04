@@ -151,6 +151,12 @@ function visibleLines(text) {
   return lines;
 }
 
+const AGENTS_OPTIONAL_LOGINS = Object.freeze(["renovate[bot]", "app/renovate"]);
+
+function skipsAgentsRequirement(login) {
+  return AGENTS_OPTIONAL_LOGINS.includes(String(login ?? ""));
+}
+
 function agentsFailures(text) {
   const lines = visibleLines(stripHtmlComments(text));
   const start = lines.findIndex((line) => AGENTS_HEADING.test(line));
@@ -208,9 +214,10 @@ function main(argv = process.argv.slice(2)) {
   const body = flagValue(argv, "--body-file");
   const commits = flagValue(argv, "--commits-file");
   const squash = flagValue(argv, "--squash-body-file");
-  if (body.missing || commits.missing || squash.empty) {
+  const author = flagValue(argv, "--author");
+  if (body.missing || commits.missing || squash.empty || author.empty) {
     console.error(
-      "usage: check-pr-attribution.js --body-file <path> --commits-file <path> [--squash-body-file <path>]",
+      "usage: check-pr-attribution.js --body-file <path> --commits-file <path> [--squash-body-file <path>] [--author <login>]",
     );
     return 1;
   }
@@ -234,7 +241,9 @@ function main(argv = process.argv.slice(2)) {
     { label: "commit messages", text: commitsFile.text },
     { label: "squash body", text: squashFile.text },
   ]);
-  failures.push(...agentsFailures(authoredPrBody(bodyFile.text)));
+  if (!skipsAgentsRequirement(author.missing ? "" : author.path)) {
+    failures.push(...agentsFailures(authoredPrBody(bodyFile.text)));
+  }
   if (failures.length > 0) {
     for (const line of failures) {
       console.error(line);
@@ -251,6 +260,7 @@ module.exports = {
   stripCoAuthoredBy,
   checkSources,
   explicitSquashBody,
+  skipsAgentsRequirement,
   main,
 };
 

@@ -36,8 +36,9 @@ public enum CompatibilityStatus: Equatable, Sendable {
     }
 
     public static func of(map: CapabilityMap?, checking: Bool, hasError: Bool) -> CompatibilityStatus {
-        if checking { return .connecting }
+        // un échec déjà affiché (clé refusée, tunnel) l'emporte sur une ouverture encore en cours
         if hasError { return .failed }
+        if checking { return .connecting }
         guard let map else { return .connecting }
         if map.versionNotice != nil { return .untested }
         return .ready
