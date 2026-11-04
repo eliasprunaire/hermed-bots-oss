@@ -781,6 +781,57 @@ test("a Renovate digest and container image bump is exempted", () => {
   assert.deepEqual(decision, { ok: true });
 });
 
+test("Renovate removing a container tag is blocked", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: "    container: swift:6.4.2\n",
+          after: "    container: swift\n",
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+  assert.equal(isVersionBumpPair("    container: swift:6.4.2", "    container: swift"), false);
+});
+
+test("Renovate removing an image digest is blocked", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: `        image: swift@${DIGEST_OLD}\n`,
+          after: "        image: swift\n",
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+  assert.equal(isVersionBumpPair(`        image: swift@${DIGEST_OLD}`, "        image: swift"), false);
+});
+
+test("Renovate removing a uses: pin is blocked", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: "        uses: actions/checkout@v4\n",
+          after: "        uses: actions/checkout\n",
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+  assert.equal(isVersionBumpPair("        uses: actions/checkout@v4", "        uses: actions/checkout"), false);
+});
+
 test("the same version bump by another author is blocked", () => {
   const decision = renovateWorkflowBumpExemption(bumpInput({ authorLogin: "pr-author" }));
   assert.equal(decision.ok, false);

@@ -110,18 +110,6 @@ function pinSignature(line) {
   return null;
 }
 
-function neutralizePinLine(line) {
-  const text = String(line ?? "").replace(/\r$/, "");
-  return pinSignature(text) ?? text;
-}
-
-function neutralizeVersionRefs(text) {
-  return String(text ?? "")
-    .split("\n")
-    .map((line) => neutralizePinLine(line))
-    .join("\n");
-}
-
 function isVersionBumpPair(removed, added) {
   if (String(removed ?? "") === String(added ?? "")) {
     return false;
@@ -137,7 +125,22 @@ function isVersionOnlyWorkflowChange(before, after) {
   if (before === after) {
     return false;
   }
-  return neutralizeVersionRefs(before) === neutralizeVersionRefs(after);
+  const leftLines = before.split("\n");
+  const rightLines = after.split("\n");
+  if (leftLines.length !== rightLines.length) {
+    return false;
+  }
+  for (let i = 0; i < leftLines.length; i++) {
+    const left = leftLines[i].replace(/\r$/, "");
+    const right = rightLines[i].replace(/\r$/, "");
+    if (left === right) {
+      continue;
+    }
+    if (!isVersionBumpPair(left, right)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 function renovateWorkflowBumpExemption({ authorLogin, commitLogins, hits, fileChanges } = {}) {
@@ -654,7 +657,6 @@ module.exports = {
   classifyHits,
   gateApprovalFromEvents,
   isVersionBumpPair,
-  neutralizeVersionRefs,
   renovateWorkflowBumpExemption,
   GATE_FILES,
   GATE_LABEL,
