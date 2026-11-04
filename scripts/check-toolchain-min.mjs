@@ -66,11 +66,20 @@ function unique(values) {
   return [...new Set(values)];
 }
 
+function yamlQuoteCanStart(prev) {
+  return prev === "" || /[\s:[{\n,]/.test(prev);
+}
+
+function yamlCommentCanStart(prev) {
+  return prev === "" || /[ \t\n]/.test(prev);
+}
+
 function stripYamlComments(text) {
   let out = "";
   let quote = null;
   for (let i = 0; i < text.length; i++) {
     const c = text[i];
+    const prev = i === 0 ? "" : text[i - 1];
     if (quote === '"') {
       out += c;
       if (c === "\\" && i + 1 < text.length) {
@@ -95,12 +104,12 @@ function stripYamlComments(text) {
       }
       continue;
     }
-    if (c === '"' || c === "'") {
+    if ((c === '"' || c === "'") && yamlQuoteCanStart(prev)) {
       quote = c;
       out += c;
       continue;
     }
-    if (c === "#") {
+    if (c === "#" && yamlCommentCanStart(prev)) {
       while (i < text.length && text[i] !== "\n") {
         i += 1;
       }
