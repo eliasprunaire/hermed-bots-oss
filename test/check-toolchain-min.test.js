@@ -121,13 +121,74 @@ test("a malformed minima file fails", () => {
   }
 });
 
+test("an older Swift image in a .yaml workflow fails", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yaml": "container: swift:6.3\n",
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /\.github\/workflows\/ci\.yaml/);
+    assert.match(result.stderr, /6\.3/);
+    assert.match(result.stderr, /6\.4/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a quoted xcode-version key below the minimum fails", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/macos.yml": '"xcode-version": "27.0"\n',
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /\.github\/workflows\/macos\.yml/);
+    assert.match(result.stderr, /27\.0/);
+    assert.match(result.stderr, /27\.1/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a Swift comment below the minimum is ignored when the image meets it", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      "container: swift:6.4.2\n",
+      "# leftover image swift:6.3\n",
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a tree with no Xcode pin reports that none is set", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": "container: swift:6.4.2\n",
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, /aucune version Xcode fixée/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the live tree meets the recorded minima", () => {
   const result = spawnSync(process.execPath, [script], {
     cwd: root,
     encoding: "utf8",
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /aucune version Xcode fixée/);
 });
 
 test("ci.yml runs the checker on ubuntu-latest", () => {
