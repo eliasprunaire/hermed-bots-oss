@@ -265,6 +265,7 @@
 				F12300000000000000000003 /* UpdateCheck */,
 				F12500000000000000000003 /* AppSettings */,
 				F16400000000000000000003 /* Sparkle */,
+				F16500000000000000000003 /* Textual */,
 			);
 			productName = HermedBots;
 			productReference = B937F7C524E0D41815DE05AF /* HermedBots.app */;
@@ -354,6 +355,7 @@
 			packageReferences = (
 				D6523A7F77704CD899E96FDD /* XCLocalSwiftPackageReference "Packages/HermesAdapter" */,
 				F16400000000000000000004 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				F16500000000000000000004 /* XCRemoteSwiftPackageReference "textual" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 5DDAEA05A35453A231E01D1F /* Products */;
@@ -448,6 +450,11 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
 			requirement = {kind = exactVersion; version = 2.10.0; };
+		};
+		F16500000000000000000004 /* XCRemoteSwiftPackageReference "textual" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/gonzalezreal/textual";
+			requirement = {kind = exactVersion; version = 0.5.0; };
 		};
 /* End XCRemoteSwiftPackageReference section */
 
@@ -742,6 +749,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F16400000000000000000004 /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		F16500000000000000000003 /* Textual */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = F16500000000000000000004 /* XCRemoteSwiftPackageReference "textual" */;
+			productName = Textual;
 		};
 		DA4C1C94CD32735911D411BC /* HermesAdapter */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -252,6 +252,8 @@ final class ConversationModel {
     /// Ouvre le chat unique du bot : reprend le fil le plus récent, sans lister les sessions
     func activate(bot id: String) {
         select(bot: id)
+        isOpening = true
+        openError = nil
         let host = connection()
         Task { await attachUniqueSession(bot: id, on: host) }
     }
@@ -262,8 +264,10 @@ final class ConversationModel {
     }
 
     private func attachUniqueSession(bot: String, on host: String) async {
-        isOpening = true
-        openError = nil
+        if host == connection(), botID == bot {
+            isOpening = true
+            openError = nil
+        }
         defer {
             if host == connection(), botID == bot { isOpening = false }
         }
@@ -276,8 +280,9 @@ final class ConversationModel {
                     case .disabled:
                         return true
                     case .sessions(let sessions):
+                        guard host == connection(), botID == bot else { return true }
                         if let latest = sessions.first {
-                            apply(.open(session: latest.id, bot: bot, model: latest.model, read: 0), on: host)
+                            apply(.open(session: latest.id, bot: bot, model: latest.model, read: startedReads() + 1), on: host)
                         }
                         return true
                     }

@@ -15,6 +15,11 @@ public struct CapabilityMap: Equatable, Sendable {
     public let version: String?
     let states: [Contract: CapabilityState]
 
+    public init(version: String?, states: [Contract: CapabilityState] = [:]) {
+        self.version = version
+        self.states = states
+    }
+
     // ponytail: les versions des deux fixtures ; une version de plus se déclare ici après le test quotidien
     static let knownVersions: Set<String> = ["0.22.1", "0.22.2"]
 

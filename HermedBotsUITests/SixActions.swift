@@ -325,7 +325,6 @@ final class SixActions: XCTestCase {
         XCTAssertFalse(element(AccessibilityID.threadsDisabled("hv-bot-a"), in: app).exists)
         XCTAssertTrue(element(AccessibilityID.botRow("hv-bot-b"), in: app).isHittable)
         XCTAssertEqual(app.state, .runningForeground)
-        print("HV-DROP message=\(text(of: message)) height=\(Int(message.frame.height))")
         HVShot.capture("hd08-drop-sessions", app)
     }
 

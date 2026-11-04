@@ -84,17 +84,17 @@ struct ContentView: View {
         .task(id: "\(model.apiURL?.absoluteString ?? "")#\((model.bots.list.shown ?? []).map(\.id).joined(separator: ","))") {
             await model.conversation.restoreAvailable()
         }
-        .task { await model.start() }
+        .task { if !model.isShotPreview { await model.start() } }
         .task(id: model.apiURL) {
             guard model.apiURL != nil else { return }
             await model.profileLock.run()
         }
         .task(id: "\(model.tunnel.state)#\(model.versionProfile ?? "")#\(model.bots.phase)") {
-            await model.refreshVersion()
+            if !model.isShotPreview { await model.refreshVersion() }
         }
         // la liste se relit tant qu'une adresse d'API existe ; une nouvelle adresse (tunnel rouvert) relance la lecture
         .task(id: model.apiURL) {
-            guard model.apiURL != nil else { return }
+            guard !model.isShotPreview, model.apiURL != nil else { return }
             await model.bots.run()
         }
     }
@@ -168,11 +168,20 @@ private struct SidebarFooter: View {
     }
 
     private var footerLabel: String {
-        var label = status.footerLabel
+        var label = CompatibilityStatus.footerLabel(status: status, tunnelFailed: tunnelFailed)
         if status == .ready, model.conversation.compaction.percent > 0 {
             label += " · contexte \(model.conversation.compaction.percent) %"
         }
         return label
+    }
+
+    private var tunnelFailed: Bool {
+        if case .failed = model.tunnel.state { return true }
+        #if DEBUG
+        return model.testTunnelFailed
+        #else
+        return false
+        #endif
     }
 
     /// Vert : prêt ; bleu info : version non testée ; rouge : échec ; orange : connexion

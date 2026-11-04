@@ -146,11 +146,11 @@ struct ConversationView: View {
             VStack(spacing: 14) {
                 BotAvatar(bot: bot, size: 64)
                     .background { Aurora(colors: colors + [colors[0].opacity(0.4)]).clipShape(.circle).frame(width: 130, height: 130).blur(radius: 28).opacity(0.55) }
-                Text(model.openError == nil ? CompatibilityStatus.uniqueChatTitle : "Conversation en attente")
+                Text(model.openError == nil ? CompatibilityStatus.uniqueChatTitle : CompatibilityStatus.waitingChatTitle)
                     .font(.system(.title2, design: .rounded, weight: .bold))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text(model.openError == nil ? CompatibilityStatus.uniqueChatBody : "L'erreur n'apparaît qu'après backoff et relecture de clé.")
+                Text(model.openError == nil ? CompatibilityStatus.uniqueChatBody : CompatibilityStatus.waitingChatBody)
                     .foregroundStyle(.secondary)
                     .accessibilityID(.conversationEmpty)
             }
@@ -247,7 +247,7 @@ private struct MessageRow: View {
     }
 
     @ViewBuilder private var text: some View {
-        if entry.role == .assistant, !isLong {
+        if entry.role == .assistant {
             MessageMarkdownView(source: entry.text, selectable: !isStreaming, streaming: isStreaming)
         } else if isStreaming {
             Text(entry.text).lineSpacing(isLong ? 0 : 3)

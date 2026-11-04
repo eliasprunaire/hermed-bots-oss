@@ -101,6 +101,10 @@ final class AppModel {
     var isTestMode: Bool { environment.isTestMode }
     var testDarkAppearance: Bool { environment.testDarkAppearance }
     var testWindowSize: CGSize? { environment.testWindowSize }
+    var isShotPreview: Bool { environment.testShotScene != nil }
+    #if DEBUG
+    private(set) var testTunnelFailed = false
+    #endif
     // de quoi lire la liste des profils par un second ssh : le même alias que le tunnel
     private var sshBackend: SystemSSHBackend?
     private var sshConfig: SSHTunnelConfig?
@@ -184,6 +188,11 @@ final class AppModel {
         }
         #endif
         ProcessGroups.installTerminationHooks()
+        #if DEBUG
+        if let name = environment.testShotScene, let scene = ShotScene(rawValue: name) {
+            applyShot(scene)
+        }
+        #endif
         updates.onChange = { [weak self] in
             Task { @MainActor in self?.updateRender += 1 }
         }
@@ -654,6 +663,15 @@ final class AppModel {
         }
         return String(localized: "Hermes ne répond pas. Vérifiez la liaison puis réessayez.")
     }
+
+    #if DEBUG
+    func applyShot(_ scene: ShotScene) {
+        switch scene {
+        case .footerTunnel, .error: testTunnelFailed = true
+        default: break
+        }
+    }
+    #endif
 }
 
 enum ManualAPIKeyError: Error, Equatable {

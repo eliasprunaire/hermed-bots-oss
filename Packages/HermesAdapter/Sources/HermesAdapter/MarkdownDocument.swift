@@ -25,7 +25,8 @@ public struct MarkdownDocument: Equatable, Sendable {
     }
 
     public static func parse(_ source: String) -> MarkdownDocument {
-        MarkdownDocument(blocks: Parser(source).parse())
+        var parser = Parser(source)
+        return MarkdownDocument(blocks: parser.parse())
     }
 
     /// Texte montré à l'écran, sans marqueurs Markdown.
