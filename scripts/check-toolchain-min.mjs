@@ -2,6 +2,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  isMap,
+  isScalar,
+  parseAllDocuments,
+  visit,
+} from "yaml";
 
 const defaultRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MIN_FILE = ".github/toolchain-min.txt";
@@ -9,11 +15,8 @@ const WORKFLOWS_DIR = ".github/workflows";
 const KEYS = ["swift", "xcode"];
 const VERSION = /^(\d+\.\d+(?:\.\d+)?)$/;
 const SWIFT_IMAGE = /\bswift:(\d+\.\d+(?:\.\d+)?)/g;
-const XCODE_VERSION_KEY =
-  /['"]?xcode-version['"]?\s*:\s*['"]?(\d+\.\d+(?:\.\d+)?)['"]?/g;
-const DEVELOPER_DIR_XCODE =
-  /DEVELOPER_DIR[^\n#]*Xcode_(\d+\.\d+(?:\.\d+)?)\.app/g;
 const XCODE_APP = /Xcode_(\d+\.\d+(?:\.\d+)?)\.app/g;
+const XCODE_IN_RUN = /DEVELOPER_DIR|xcode-select/;
 
 function compareVersions(found, min) {
   const a = found.split(".").map(Number);
@@ -66,199 +69,6 @@ function unique(values) {
   return [...new Set(values)];
 }
 
-function yamlQuoteCanStart(prev) {
-  return prev === "" || /[\s:[{\n,]/.test(prev);
-}
-
-function yamlCommentCanStart(prev) {
-  return prev === "" || /[ \t\n]/.test(prev);
-}
-
-function countIndent(text, start) {
-  let n = 0;
-  while (
-    start + n < text.length &&
-    (text[start + n] === " " || text[start + n] === "\t")
-  ) {
-    n += 1;
-  }
-  return n;
-}
-
-function lineIsBlank(text, start) {
-  let j = start;
-  while (
-    j < text.length &&
-    (text[j] === " " || text[j] === "\t" || text[j] === "\r")
-  ) {
-    j += 1;
-  }
-  return j === text.length || text[j] === "\n";
-}
-
-function blockHeaderEnd(text, colonIndex) {
-  let j = colonIndex + 1;
-  while (j < text.length && (text[j] === " " || text[j] === "\t")) {
-    j += 1;
-  }
-  if (text[j] !== "|" && text[j] !== ">") {
-    return -1;
-  }
-  j += 1;
-  if (text[j] === "+" || text[j] === "-") {
-    j += 1;
-  }
-  while (j < text.length && text[j] >= "0" && text[j] <= "9") {
-    j += 1;
-  }
-  if (text[j] === "+" || text[j] === "-") {
-    j += 1;
-  }
-  while (j < text.length && (text[j] === " " || text[j] === "\t")) {
-    j += 1;
-  }
-  if (j < text.length && text[j] === "#") {
-    while (j < text.length && text[j] !== "\n") {
-      j += 1;
-    }
-  }
-  if (j !== text.length && text[j] !== "\n") {
-    return -1;
-  }
-  return j;
-}
-
-function copyThroughEol(text, start) {
-  let j = start;
-  while (j < text.length && text[j] !== "\n") {
-    j += 1;
-  }
-  if (j < text.length) {
-    j += 1;
-  }
-  return j;
-}
-
-function stripYamlComments(text) {
-  let out = "";
-  let quote = null;
-  let lineStart = 0;
-  let blockKeyIndent = null;
-  let blockContentIndent = null;
-  for (let i = 0; i < text.length; i++) {
-    if (blockKeyIndent != null && i === lineStart) {
-      const indent = countIndent(text, i);
-      if (lineIsBlank(text, i)) {
-        const next = copyThroughEol(text, i);
-        out += text.slice(i, next);
-        i = next - 1;
-        if (next < text.length || text[next - 1] === "\n") {
-          lineStart = next;
-        }
-        continue;
-      }
-      if (blockContentIndent == null) {
-        if (indent > blockKeyIndent) {
-          blockContentIndent = indent;
-          const next = copyThroughEol(text, i);
-          out += text.slice(i, next);
-          i = next - 1;
-          lineStart = next;
-          continue;
-        }
-        blockKeyIndent = null;
-      } else if (indent >= blockContentIndent) {
-        const next = copyThroughEol(text, i);
-        out += text.slice(i, next);
-        i = next - 1;
-        lineStart = next;
-        continue;
-      } else {
-        blockKeyIndent = null;
-        blockContentIndent = null;
-      }
-    }
-
-    const c = text[i];
-    const prev = i === 0 ? "" : text[i - 1];
-    if (quote === '"') {
-      out += c;
-      if (c === "\n") {
-        lineStart = i + 1;
-      }
-      if (c === "\\" && i + 1 < text.length) {
-        out += text[i + 1];
-        i += 1;
-        continue;
-      }
-      if (c === '"') {
-        quote = null;
-      }
-      continue;
-    }
-    if (quote === "'") {
-      out += c;
-      if (c === "\n") {
-        lineStart = i + 1;
-      }
-      if (c === "'" && text[i + 1] === "'") {
-        out += text[i + 1];
-        i += 1;
-        continue;
-      }
-      if (c === "'") {
-        quote = null;
-      }
-      continue;
-    }
-    if (c === ":") {
-      const headerEnd = blockHeaderEnd(text, i);
-      if (headerEnd >= 0) {
-        out += c;
-        let j = i + 1;
-        while (j < headerEnd && text[j] !== "#") {
-          out += text[j];
-          j += 1;
-        }
-        if (headerEnd < text.length && text[headerEnd] === "\n") {
-          out += "\n";
-          let headerStart = i;
-          while (headerStart > 0 && text[headerStart - 1] !== "\n") {
-            headerStart -= 1;
-          }
-          blockKeyIndent = countIndent(text, headerStart);
-          blockContentIndent = null;
-          lineStart = headerEnd + 1;
-          i = headerEnd;
-          continue;
-        }
-        i = headerEnd - 1;
-        continue;
-      }
-    }
-    if ((c === '"' || c === "'") && yamlQuoteCanStart(prev)) {
-      quote = c;
-      out += c;
-      continue;
-    }
-    if (c === "#" && yamlCommentCanStart(prev)) {
-      while (i < text.length && text[i] !== "\n") {
-        i += 1;
-      }
-      if (i < text.length) {
-        out += "\n";
-        lineStart = i + 1;
-      }
-      continue;
-    }
-    out += c;
-    if (c === "\n") {
-      lineStart = i + 1;
-    }
-  }
-  return out;
-}
-
 function matches(re, text) {
   const found = [];
   re.lastIndex = 0;
@@ -267,6 +77,108 @@ function matches(re, text) {
     found.push(match[1]);
   }
   return found;
+}
+
+function scalarString(node) {
+  if (!isScalar(node) || node.value == null) {
+    return null;
+  }
+  if (typeof node.value === "string") {
+    return node.value;
+  }
+  if (typeof node.value === "number" && Number.isFinite(node.value)) {
+    return String(node.value);
+  }
+  if (typeof node.value === "boolean" || typeof node.value === "bigint") {
+    return String(node.value);
+  }
+  return null;
+}
+
+function pairKey(pair) {
+  return scalarString(pair.key);
+}
+
+function mapValue(map, name) {
+  if (!isMap(map)) {
+    return null;
+  }
+  for (const item of map.items) {
+    if (pairKey(item) === name) {
+      return item.value;
+    }
+  }
+  return null;
+}
+
+function collectSwiftFromImage(text, into) {
+  if (text == null) {
+    return;
+  }
+  into.push(...matches(SWIFT_IMAGE, text));
+}
+
+function collectXcodeFromText(text, into) {
+  if (text == null) {
+    return;
+  }
+  into.push(...matches(XCODE_APP, text));
+}
+
+function collectFromDocument(doc, swiftFound, xcodeFound) {
+  visit(doc, {
+    Pair(_key, pair) {
+      const key = pairKey(pair);
+      if (key == null) {
+        return;
+      }
+      if (key === "container") {
+        const text = scalarString(pair.value);
+        if (text != null) {
+          collectSwiftFromImage(text, swiftFound);
+        } else {
+          collectSwiftFromImage(scalarString(mapValue(pair.value, "image")), swiftFound);
+        }
+      }
+      if (key === "services" && isMap(pair.value)) {
+        for (const service of pair.value.items) {
+          const image = isMap(service.value)
+            ? mapValue(service.value, "image")
+            : service.value;
+          collectSwiftFromImage(scalarString(image), swiftFound);
+        }
+      }
+      if (key === "uses") {
+        const uses = scalarString(pair.value);
+        if (uses != null && uses.startsWith("docker://")) {
+          collectSwiftFromImage(uses.slice("docker://".length), swiftFound);
+        }
+      }
+      if (key === "run") {
+        const run = scalarString(pair.value);
+        if (run != null) {
+          collectSwiftFromImage(run, swiftFound);
+          if (XCODE_IN_RUN.test(run)) {
+            collectXcodeFromText(run, xcodeFound);
+          }
+        }
+      }
+      if (key === "xcode-version") {
+        const pin = scalarString(pair.value);
+        if (pin != null) {
+          const trimmed = pin.trim();
+          if (VERSION.test(trimmed)) {
+            xcodeFound.push(trimmed);
+          } else {
+            xcodeFound.push(...matches(/(\d+\.\d+(?:\.\d+)?)/g, trimmed));
+          }
+        }
+      }
+      if (key === "DEVELOPER_DIR") {
+        collectXcodeFromText(scalarString(pair.value), xcodeFound);
+      }
+    },
+  });
 }
 
 function workflowFiles(root) {
@@ -280,6 +192,14 @@ function workflowFiles(root) {
 
 function failLine(file, kind, found, min) {
   return `${file}: version ${kind} ${found} plus ancienne que le minimum ${min}\n`;
+}
+
+function yamlErrorLine(file, err) {
+  const detail = err && err.message ? String(err.message).replace(/\s+/g, " ").trim() : "";
+  if (detail === "") {
+    return `${file}: YAML invalide\n`;
+  }
+  return `${file}: YAML invalide : ${detail}\n`;
 }
 
 function main(argv = process.argv.slice(2)) {
@@ -312,20 +232,42 @@ function main(argv = process.argv.slice(2)) {
   }
 
   for (const rel of files) {
-    const text = stripYamlComments(fs.readFileSync(path.join(root, rel), "utf8"));
-    for (const found of unique(matches(SWIFT_IMAGE, text))) {
+    const text = fs.readFileSync(path.join(root, rel), "utf8");
+    let docs;
+    try {
+      docs = parseAllDocuments(text, { prettyErrors: true });
+    } catch (err) {
+      process.stderr.write(yamlErrorLine(rel, err));
+      failed = true;
+      continue;
+    }
+    const parseErrors = [];
+    for (const doc of docs) {
+      if (doc.errors && doc.errors.length > 0) {
+        parseErrors.push(...doc.errors);
+      }
+    }
+    if (parseErrors.length > 0) {
+      process.stderr.write(yamlErrorLine(rel, parseErrors[0]));
+      failed = true;
+      continue;
+    }
+
+    const swiftFound = [];
+    const xcodeFound = [];
+    for (const doc of docs) {
+      collectFromDocument(doc, swiftFound, xcodeFound);
+    }
+
+    for (const found of unique(swiftFound)) {
       if (compareVersions(found, mins.swift) < 0) {
         process.stderr.write(failLine(rel, "swift", found, mins.swift));
         failed = true;
       }
     }
-    const xcodeFound = unique([
-      ...matches(XCODE_VERSION_KEY, text),
-      ...matches(DEVELOPER_DIR_XCODE, text),
-      ...matches(XCODE_APP, text),
-    ]);
-    xcodePins += xcodeFound.length;
-    for (const found of xcodeFound) {
+    const xcodeUnique = unique(xcodeFound);
+    xcodePins += xcodeUnique.length;
+    for (const found of xcodeUnique) {
       if (compareVersions(found, mins.xcode) < 0) {
         process.stderr.write(failLine(rel, "xcode", found, mins.xcode));
         failed = true;

@@ -79,7 +79,7 @@ test("an older Xcode pin fails and names the file, found version, and minimum", 
     ".github/workflows/release.yml": [
       "xcode-version: '16.4'\n",
       "DEVELOPER_DIR: /Applications/Xcode_27.0.app/Contents/Developer\n",
-      "select Xcode_26.1.app\n",
+      "run: xcode-select --switch /Applications/Xcode_26.1.app/Contents/Developer\n",
     ].join(""),
   });
   try {
@@ -209,7 +209,7 @@ test("an Xcode pin in a folded block scalar still fails when too old", () => {
     ".github/toolchain-min.txt": MIN,
     ".github/workflows/ci.yml": [
       "run: >-\n",
-      '  echo build" #1"; echo xcode-version: "27.0"\n',
+      '  echo build" #1"; export DEVELOPER_DIR=/Applications/Xcode_27.0.app/Contents/Developer\n',
     ].join(""),
   });
   try {
@@ -260,9 +260,123 @@ test("the live tree meets the recorded minima", () => {
   assert.equal(result.status, 0, result.stderr);
 });
 
+test("a list item block scalar run still fails an older Swift image", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      "jobs:\n",
+      "  build:\n",
+      "    steps:\n",
+      "      - run: |\n",
+      "          docker run --rm swift:6.3 swift --version\n",
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /6\.3/);
+    assert.match(result.stderr, /6\.4/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an older container image mapping fails", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      "jobs:\n",
+      "  build:\n",
+      "    container:\n",
+      "      image: swift:6.3\n",
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /6\.3/);
+    assert.match(result.stderr, /6\.4/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an older service image fails", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      "jobs:\n",
+      "  build:\n",
+      "    services:\n",
+      "      compiler:\n",
+      "        image: swift:6.3\n",
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /6\.3/);
+    assert.match(result.stderr, /6\.4/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an older docker:// action image fails", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": [
+      "jobs:\n",
+      "  build:\n",
+      "    steps:\n",
+      "      - uses: docker://swift:6.3\n",
+    ].join(""),
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /6\.3/);
+    assert.match(result.stderr, /6\.4/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("an older xcode-select pin in run fails", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml":
+      "run: sudo xcode-select --switch /Applications/Xcode_26.1.app/Contents/Developer\n",
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /26\.1/);
+    assert.match(result.stderr, /27\.1/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("invalid YAML fails with a French message and the file name", () => {
+  const dir = tree({
+    ".github/toolchain-min.txt": MIN,
+    ".github/workflows/ci.yml": "jobs:\n  build: [\n",
+  });
+  try {
+    const result = run(dir);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /\.github\/workflows\/ci\.yml/);
+    assert.match(result.stderr, /YAML invalide/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("ci.yml runs the checker on ubuntu-latest", () => {
   const ci = readFileSync(join(root, ".github/workflows/ci.yml"), "utf8");
   const job = ci.slice(ci.indexOf("  toolchain-min:"));
   assert.match(job, /runs-on: ubuntu-latest\n/);
+  assert.match(job, /npm ci/);
   assert.match(job, /node scripts\/check-toolchain-min\.mjs/);
 });
