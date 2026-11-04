@@ -91,6 +91,8 @@ final class ConversationModel {
     private var loopHistory: [ProfileKey: [LoopGuard.TurnStats]] = [:]
     private var loopEvents: [RunKey: [LoopGuard.Event]] = [:]
     private var loopReports: [RunKey: LoopGuard.Report] = [:]
+    /// Dernier `usage.total_tokens` reçu pour un fil ; absent : l'UI estime.
+    private var lastServerTokens: [RunKey: Int] = [:]
     #if DEBUG
     private var pauseTimes: [RunKey: TimeInterval] = [:]
     var pauseDecisionTime: TimeInterval? { shownRun.flatMap { pauseTimes[$0] } }
@@ -161,6 +163,30 @@ final class ConversationModel {
         do { return String(decoding: try resumeStore.data(connection: connection(), bot: botID), as: UTF8.self) }
         catch { return "Lecture du fichier de reprise impossible." }
     }
+
+    /// Capture XCUITest : pose un fil fictif sans effet réseau.
+    func seedShot(bot: String, session: String? = nil, lines: [ConversationMachine.Line] = [], streaming: String? = nil, isOpening: Bool = false, openError: String? = nil, serverTokens: Int? = nil) {
+        let host = connection()
+        var machine = machines[host, default: ConversationMachine()]
+        _ = machine.handle(.select(bot: bot))
+        if let session {
+            let key = ConversationMachine.Key(bot: bot, thread: .session(session))
+            _ = machine.handle(.open(session: session, bot: bot, model: nil, read: 1))
+            if streaming != nil {
+                _ = machine.handle(.loaded(key, []))
+                _ = machine.handle(.send("capture"))
+                _ = machine.handle(.streamed(key, streaming ?? ""))
+            } else {
+                _ = machine.handle(.loaded(key, lines))
+            }
+            if let serverTokens {
+                lastServerTokens[RunKey(connection: host, thread: key)] = serverTokens
+            }
+        }
+        machines[host] = machine
+        self.isOpening = isOpening
+        self.openError = openError
+    }
     #endif
 
     /// La machine de l'hôte courant
@@ -179,7 +205,10 @@ final class ConversationModel {
     /// Erreur d'ouverture après les tentatives ; nil pendant les essais
     private(set) var openError: String?
     var compaction: ContextCompaction {
-        ContextCompaction.of(transcript: conversation.entries.map(\.text).joined(separator: "\n"))
+        if let key = shownRun, let tokens = lastServerTokens[key] {
+            return .server(usedTokens: tokens)
+        }
+        return .of(transcript: conversation.entries.map(\.text).joined(separator: "\n"))
     }
 
     var profileLockReason: String? { botID.flatMap { profileLock?.reason($0) } }
@@ -260,7 +289,10 @@ final class ConversationModel {
 
     func retryOpen() {
         guard let botID else { return }
-        Task { await attachUniqueSession(bot: botID, on: connection()) }
+        isOpening = true
+        openError = nil
+        let host = connection()
+        Task { await attachUniqueSession(bot: botID, on: host) }
     }
 
     private func attachUniqueSession(bot: String, on host: String) async {
@@ -617,6 +649,7 @@ final class ConversationModel {
         // Sans horodatage serveur, le silence part de la réception de l'événement
         if event.timestamp == nil || replay[key]?.replayed == true { event.timestamp = Date().timeIntervalSince1970 }
         loopEvents[key, default: []].append(event)
+        if let tokens = event.tokens { lastServerTokens[key] = tokens }
         return evaluateLoop(key)
     }
 

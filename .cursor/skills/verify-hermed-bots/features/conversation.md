@@ -26,4 +26,5 @@ Envoyer un message à un bot, voir la réponse rendue en Markdown, l'attente « 
 ## Gotchas
 
 - Le fil affiché n'est pas le contexte envoyé au modèle (PRD) : ne pas déduire le contexte de l'écran.
-- La compaction UI s'aligne sur les seuils Hermes Agent ; `session.compress` n'est pas appelé par l'app.
+- La compaction UI s'aligne sur les seuils Hermes Agent (50 % / 85 %) ; `session.compress` n'est pas appelé par l'app.
+- Si le flux porte `usage.total_tokens`, le bandeau `hd.conversation.compacted` et le pied utilisent ce signal serveur. Sinon l'UI estime d'après la taille du transcript : le bandeau dit « Estimation du contexte » et le pied ajoute « (estimation) ». Ne pas présenter une estimation comme un relevé Hermes.

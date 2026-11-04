@@ -15,6 +15,7 @@ public enum CompatibilityStatus: Equatable, Sendable {
     public static let composerUnavailable = "Indisponible : la clé API est refusée"
     public static let thinkingLabel = "Le bot réfléchit…"
     public static let compactedNotice = "Contexte compacté — résumé des tours plus anciens. Le transcript reste visible ; le modèle reçoit le résumé + la queue récente."
+    public static let compactedEstimateNotice = "Estimation du contexte (Hermes n'a pas envoyé l'usage) — un résumé des tours anciens est probable. Le transcript reste visible."
     public static let uniqueChatTitle = "Conversation unique"
     public static let uniqueChatBody = "Un fil par bot. Le contexte grossit sans déborder (compaction / résumé)."
     public static let waitingChatTitle = "Conversation en attente"

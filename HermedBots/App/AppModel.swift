@@ -666,9 +666,68 @@ final class AppModel {
 
     #if DEBUG
     func applyShot(_ scene: ShotScene) {
+        let bot = Bot(id: "shot-bot", name: "Bot de capture", model: "demo")
+        let markdown: [ConversationMachine.Line] = [
+            (1, .user, "Montre **gras**, une liste et un tableau."),
+            (2, .assistant, """
+            Le profil **default** produit plus de structure ; *tiny* reste plat.
+            - Gras et listes rendus
+            | Profil | Style |
+            | --- | --- |
+            | default | titres |
+            ```
+            func render()
+            ```
+            """),
+        ]
+        func showConversation(lines: [ConversationMachine.Line] = markdown, streaming: String? = nil, opening: Bool = false, error: String? = nil, tokens: Int? = nil) {
+            bots.seedShown([bot])
+            conversation.seedShot(bot: bot.id, session: "s-shot", lines: lines, streaming: streaming, isOpening: opening, openError: error, serverTokens: tokens)
+        }
         switch scene {
-        case .footerTunnel, .error: testTunnelFailed = true
-        default: break
+        case .footerReady, .aboutReady:
+            bots.seedShown([bot])
+            capabilities = CapabilityMap(version: "0.22.2")
+            version = .known("0.22.2")
+            isCheckingAPI = false
+        case .footerConnecting, .aboutConnecting:
+            bots.seedShown([bot])
+            isCheckingAPI = true
+            version = .loading
+        case .footerUntested, .aboutUntested:
+            bots.seedShown([bot])
+            capabilities = CapabilityMap(version: "0.99.0")
+            version = .known("0.99.0")
+        case .footerFailed, .aboutFailed:
+            bots.seedShown([bot])
+            apiError = HermesAPIKey.unauthorizedMessage(profile: bot.id, holdsKey: true)
+            version = .unknown
+        case .footerTunnel:
+            bots.seedShown([bot])
+            testTunnelFailed = true
+            apiError = String(localized: "Hermes ne répond pas. Vérifiez la liaison puis réessayez.")
+            version = .unknown
+        case .bannerDegraded:
+            bots.seedShown([bot])
+            capabilities = CapabilityMap(version: "0.22.2", states: [.listSessions: .disabled(message: "Fonction désactivée (la liste des fils passés) : capture.")])
+            version = .known("0.22.2")
+        case .connection:
+            bots.seedShown([])
+        case .error:
+            testTunnelFailed = true
+            bots.seedShown([bot])
+            conversation.seedShot(bot: bot.id, session: nil, isOpening: false, openError: "Impossible d'ouvrir shot-bot. Après 3 essais : la clé API du profil est refusée.")
+            apiError = String(localized: "La clé API est refusée.")
+        case .emptyHome:
+            bots.seedShown([])
+        case .emptyConversation:
+            showConversation(lines: [])
+        case .markdown:
+            showConversation()
+        case .markdownStreaming:
+            showConversation(streaming: "Début **gras encore ouvert")
+        case .compacted:
+            showConversation(tokens: 70_000)
         }
     }
     #endif

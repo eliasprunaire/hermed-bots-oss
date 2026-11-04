@@ -83,6 +83,8 @@ final class AppEnvironmentTests: XCTestCase {
             XCTAssertNil(AppEnvironment.resolve(["HV_TEST_MODE": "1", "HV_WINDOW_SIZE": value], keychain: spy).testWindowSize, value)
         }
         XCTAssertFalse(AppEnvironment.resolve(["HV_TEST_MODE": "1", "HV_APPEARANCE": "light"], keychain: spy).testDarkAppearance)
+        XCTAssertEqual(AppEnvironment.resolve(["HV_TEST_MODE": "1", "HV_SHOT_SCENE": "footer-ready"], keychain: spy).testShotScene, "footer-ready")
+        XCTAssertNil(AppEnvironment.resolve(["HV_SHOT_SCENE": "footer-ready"], defaults: isolatedDefaults(), keychain: { SpyKeychain() }).testShotScene)
     }
 
     func testInvalidProfileMapFailsClosed() throws {

@@ -73,6 +73,7 @@ struct ContentView: View {
         }
         #endif
         .task(id: "\(model.apiURL?.absoluteString ?? "")#\((model.bots.list.shown ?? []).map(\.id).joined(separator: ","))") {
+            guard !model.isShotPreview else { return }
             while !Task.isCancelled {
                 await model.killSwitch.checkSupport()
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }
@@ -82,11 +83,12 @@ struct ContentView: View {
             model.reconnectAfterWake()
         }
         .task(id: "\(model.apiURL?.absoluteString ?? "")#\((model.bots.list.shown ?? []).map(\.id).joined(separator: ","))") {
+            guard !model.isShotPreview else { return }
             await model.conversation.restoreAvailable()
         }
         .task { if !model.isShotPreview { await model.start() } }
         .task(id: model.apiURL) {
-            guard model.apiURL != nil else { return }
+            guard !model.isShotPreview, model.apiURL != nil else { return }
             await model.profileLock.run()
         }
         .task(id: "\(model.tunnel.state)#\(model.versionProfile ?? "")#\(model.bots.phase)") {
@@ -170,7 +172,9 @@ private struct SidebarFooter: View {
     private var footerLabel: String {
         var label = CompatibilityStatus.footerLabel(status: status, tunnelFailed: tunnelFailed)
         if status == .ready, model.conversation.compaction.percent > 0 {
-            label += " · contexte \(model.conversation.compaction.percent) %"
+            let compaction = model.conversation.compaction
+            label += " · contexte \(compaction.percent) %"
+            if compaction.source == .estimate { label += " (estimation)" }
         }
         return label
     }

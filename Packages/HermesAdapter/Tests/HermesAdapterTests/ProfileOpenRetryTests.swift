@@ -58,5 +58,7 @@ final class CompatibilityStatusTests: XCTestCase {
         XCTAssertEqual(CompatibilityStatus.waitingChatBody, "Réessayez la connexion pour ouvrir le fil.")
         XCTAssertFalse(CompatibilityStatus.waitingChatBody.contains("backoff"))
         XCTAssertFalse(CompatibilityStatus.waitingChatBody.contains("relecture"))
+        XCTAssertTrue(CompatibilityStatus.compactedEstimateNotice.contains("Estimation"))
+        XCTAssertNotEqual(CompatibilityStatus.compactedNotice, CompatibilityStatus.compactedEstimateNotice)
     }
 }

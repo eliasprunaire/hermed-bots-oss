@@ -50,7 +50,8 @@ struct ConversationView: View {
             }
             if model.compaction.isCompacted, !model.conversation.entries.isEmpty {
                 NoticeCard(tint: .blue, symbol: "rectangle.compress.vertical") {
-                    Text(CompatibilityStatus.compactedNotice).accessibilityID(.conversationCompacted)
+                    Text(model.compaction.source == .server ? CompatibilityStatus.compactedNotice : CompatibilityStatus.compactedEstimateNotice)
+                        .accessibilityID(.conversationCompacted)
                 }
                 .column()
                 .padding(.bottom, 8)

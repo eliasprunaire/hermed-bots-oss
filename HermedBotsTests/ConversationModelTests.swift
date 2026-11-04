@@ -1780,9 +1780,33 @@ final class ConversationModelTests: XCTestCase {
         await eventually("fil unique ouvert") { model.sessionID == "s-past-1" && !model.isOpening && !model.isLoading && model.conversation.entries.count == 2 }
         XCTAssertEqual(model.conversation.entries.map(\.text), ["Bonjour", "**Réponse**"])
         XCTAssertNil(model.openError)
-        let rendered = MarkdownDocument.parse(model.conversation.entries.last?.text ?? "")
-        XCTAssertFalse(rendered.visibleText.contains("**"))
-        XCTAssertEqual(rendered.visibleText, "Réponse")
+        let rendered = MarkdownVisibleText.of(model.conversation.entries.last?.text ?? "")
+        XCTAssertFalse(rendered.contains("**"))
+        XCTAssertEqual(rendered, "Réponse")
+    }
+
+    func testActivatePrefersTheSessionModelOverTheProfileModel() async throws {
+        let model = makeModel(bots: profiles(["profil-m"]))
+        model.activate(bot: bot)
+        XCTAssertTrue(model.isOpening)
+        try await held(0, "GET", "/api/sessions").reply(#"{"data":[{"id":"s-lock","title":"Fil","model":"session-lock"}],"pagination":{"has_more":false}}"#)
+        try await held(1, "GET", "/api/sessions/s-lock/messages").reply(emptyTranscript)
+        await eventually("fil unique ouvert") { model.sessionID == "s-lock" && !model.isOpening }
+        XCTAssertEqual(model.shownModel, "session-lock")
+        XCTAssertNotEqual(model.shownModel, "profil-m")
+    }
+
+    func testALateListSessionsDoesNotApplyToAnotherBot() async throws {
+        let model = makeModel(bots: profiles(["profil-m", "other"]))
+        model.activate(bot: bot)
+        let first = try await held(0, "GET", "/api/sessions")
+        model.activate(bot: "bot-1")
+        let second = try await held(1, "GET", "/api/sessions")
+        first.reply(#"{"data":[{"id":"s-stolen","title":"Fil A","model":"from-a"}],"pagination":{"has_more":false}}"#)
+        second.reply(#"{"data":[],"pagination":{"has_more":false}}"#)
+        await eventually("second bot à l'écran") { model.botID == "bot-1" && !model.isOpening }
+        XCTAssertNotEqual(model.sessionID, "s-stolen")
+        XCTAssertNotEqual(model.botID, bot)
     }
 
     func testActivateRetriesUnauthorizedListSessionsThenShowsTheError() async throws {
@@ -1800,6 +1824,21 @@ final class ConversationModelTests: XCTestCase {
         let model = makeModel()
         try await openEmptyThread(model, session: "t")
         XCTAssertFalse(model.compaction.isCompacted)
+        XCTAssertEqual(model.compaction.source, .estimate)
+    }
+
+    func testCompactionPrefersServerUsageOverTheTranscriptEstimate() async throws {
+        let model = makeModel()
+        try await openEmptyThread(model, session: "t")
+        model.draft = "hi"
+        model.send()
+        try await held(1, "POST", "/v1/runs").reply(#"{"run_id":"r1"}"#)
+        try await held(2, "GET", "/v1/runs/r1/events").reply(
+            "data: {\"event\":\"message.delta\",\"delta\":\"ok\"}\n\ndata: {\"event\":\"run.completed\",\"output\":\"ok\",\"usage\":{\"total_tokens\":70000}}\n\n: stream closed\n\n"
+        )
+        await eventually("usage serveur") { model.compaction.source == .server }
+        XCTAssertEqual(model.compaction.usedTokens, 70_000)
+        XCTAssertTrue(model.compaction.isCompacted)
     }
 }
 

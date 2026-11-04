@@ -34,5 +34,15 @@ final class ContextCompactionTests: XCTestCase {
         XCTAssertEqual(ContextCompaction.estimateTokens(text), 16_000)
         XCTAssertTrue(compaction.isCompacted)
         XCTAssertEqual(compaction.percent, 50)
+        XCTAssertEqual(compaction.source, .estimate)
+    }
+
+    func testServerUsageIsDistinctFromTheTranscriptEstimate() {
+        let estimated = ContextCompaction.of(transcript: "court")
+        XCTAssertEqual(estimated.source, .estimate)
+        let server = ContextCompaction.server(usedTokens: 70_000)
+        XCTAssertEqual(server.source, .server)
+        XCTAssertTrue(server.isCompacted)
+        XCTAssertGreaterThan(server.percent, estimated.percent)
     }
 }

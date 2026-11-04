@@ -7,12 +7,21 @@ public struct ContextCompaction: Equatable, Sendable {
     /// Fenêtre par défaut quand Hermes ne donne pas le budget (128 k tokens, docs Hermes Agent).
     public static let defaultWindowTokens = 128_000
 
+    public enum Source: Equatable, Sendable {
+        /// `usage.total_tokens` du flux Hermes.
+        case server
+        /// Compte dérivé de la taille du transcript, faute de signal serveur.
+        case estimate
+    }
+
     public var usedTokens: Int
     public var windowTokens: Int
+    public var source: Source
 
-    public init(usedTokens: Int, windowTokens: Int = ContextCompaction.defaultWindowTokens) {
+    public init(usedTokens: Int, windowTokens: Int = ContextCompaction.defaultWindowTokens, source: Source = .estimate) {
         self.usedTokens = max(0, usedTokens)
         self.windowTokens = max(1, windowTokens)
+        self.source = source
     }
 
     public var ratio: Double { min(1, Double(usedTokens) / Double(windowTokens)) }
@@ -20,7 +29,7 @@ public struct ContextCompaction: Equatable, Sendable {
     /// Pourcentage entier, borné 0…100, pour le pied de page.
     public var percent: Int { min(100, Int((ratio * 100).rounded(.down))) }
 
-    /// Le compressor Hermes a dû résumer les tours anciens.
+    /// Le compressor Hermes a dû résumer les tours anciens (seuil 50 %), d'après le signal serveur ou l'estimation.
     public var isCompacted: Bool { ratio >= Self.compressorRatio }
 
     /// La passerelle a compressé le contexte (seuil haut).
@@ -32,6 +41,10 @@ public struct ContextCompaction: Equatable, Sendable {
     }
 
     public static func of(transcript: String, windowTokens: Int = defaultWindowTokens) -> ContextCompaction {
-        ContextCompaction(usedTokens: estimateTokens(transcript), windowTokens: windowTokens)
+        ContextCompaction(usedTokens: estimateTokens(transcript), windowTokens: windowTokens, source: .estimate)
+    }
+
+    public static func server(usedTokens: Int, windowTokens: Int = defaultWindowTokens) -> ContextCompaction {
+        ContextCompaction(usedTokens: usedTokens, windowTokens: windowTokens, source: .server)
     }
 }
