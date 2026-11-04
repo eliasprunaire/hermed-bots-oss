@@ -26,8 +26,32 @@ const ACTION_REF = "(?:[0-9a-fA-F]{40}|v?\\d+(?:\\.\\d+){0,2}(?:-[0-9A-Za-z.]+)?
 const USES_PIN = new RegExp(
   `^(\\s*(?:-\\s+)?uses:\\s+)([^\\s@]+)@(${ACTION_REF})(\\s+#\\s*v\\S+)?\\s*$`,
 );
-const IMAGE_PIN =
-  /^(\s*(?:container|image):\s+)(.+?)(?::([^:@\s]+)|@sha256:([0-9a-fA-F]{64}))\s*$/;
+const IMAGE_LINE = /^(\s*(?:container|image):\s+)(\S+)\s*$/;
+const IMAGE_DIGEST = /^(.*)@(sha256:[0-9a-fA-F]{64})$/;
+const IMAGE_TAG = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
+
+// Docker: HOST:PORT/REPOSITORY is not NAME:TAG when a slash follows the colon.
+function parseImageRef(ref) {
+  const digest = IMAGE_DIGEST.exec(ref);
+  if (digest) {
+    const name = digest[1];
+    if (!name || name.includes("@")) {
+      return null;
+    }
+    return { name };
+  }
+  const lastColon = ref.lastIndexOf(":");
+  const lastSlash = ref.lastIndexOf("/");
+  if (lastColon <= lastSlash) {
+    return null;
+  }
+  const name = ref.slice(0, lastColon);
+  const tag = ref.slice(lastColon + 1);
+  if (!name || name.includes("@") || !IMAGE_TAG.test(tag)) {
+    return null;
+  }
+  return { name };
+}
 
 function posix(file) {
   return String(file).replace(/\\/g, "/").toLowerCase();
@@ -60,9 +84,12 @@ function parsePin(line) {
   if (uses) {
     return { kind: "uses", prefix: uses[1], name: uses[2] };
   }
-  const image = IMAGE_PIN.exec(text);
+  const image = IMAGE_LINE.exec(text);
   if (image) {
-    return { kind: "image", prefix: image[1], name: image[2] };
+    const parsed = parseImageRef(image[2]);
+    if (parsed) {
+      return { kind: "image", prefix: image[1], name: parsed.name };
+    }
   }
   return null;
 }

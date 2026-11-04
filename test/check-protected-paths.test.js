@@ -860,7 +860,7 @@ const renovateEnv = {
   PR_AUTHOR_LOGIN: "renovate[bot]",
 };
 
-async function withWorkflowHead(afterText, run) {
+async function withWorkflowHead(afterText, run, beforeText = "        uses: actions/checkout@v4\n") {
   const dir = mkdtempSync(join(tmpdir(), "check-protected-paths-"));
   const previous = process.cwd();
   try {
@@ -868,7 +868,7 @@ async function withWorkflowHead(afterText, run) {
     git(dir, "config", "user.email", "t@example.test");
     git(dir, "config", "user.name", "t");
     git(dir, "config", "commit.gpgsign", "false");
-    put(dir, WORKFLOW, "        uses: actions/checkout@v4\n");
+    put(dir, WORKFLOW, beforeText);
     git(dir, "add", "-A");
     git(dir, "commit", "-q", "-m", "init");
     const base = git(dir, "rev-parse", "HEAD");
@@ -905,4 +905,35 @@ test("main still blocks a Renovate pull that adds a run step", async () => {
     });
     assert.equal(code, 1);
   });
+});
+
+test("main blocks a Renovate image rewrite that changes registry and repository", async () => {
+  await withWorkflowHead(
+    "    container: swift:443/other/image\n",
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    "    container: swift:6.4.2\n",
+  );
+});
+
+test("main exempts a Renovate container tag bump", async () => {
+  await withWorkflowHead(
+    "    container: swift:6.4.3\n",
+    async (base, head) => {
+      const { code, stdout } = await withStdout(() =>
+        main(["--base", base, "--head", head], {
+          env: renovateEnv,
+          fetch: renovateFetch(["renovate[bot]"]),
+        }),
+      );
+      assert.equal(code, 0);
+      assert.equal(stdout.trim(), RENOVATE_EXEMPTION_MESSAGE);
+    },
+    "    container: swift:6.4.2\n",
+  );
 });
