@@ -1,20 +1,20 @@
-## Why
+## Pourquoi
 
 <!-- Pourquoi ce changement, en français -->
 
-## What changed
+## Ce qui change
 
 <!-- Ce qui a changé, en français -->
 
-## Scope
+## Périmètre
 
 <!-- Périmètre du changement, en français -->
 
-## Blast Radius
+## Impact possible
 
 <!-- Rayon d'impact, en français -->
 
-## Verification
+## Vérification
 
 <!-- Comment le changement a été vérifié, en français -->
 
