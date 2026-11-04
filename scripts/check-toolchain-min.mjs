@@ -9,7 +9,8 @@ const WORKFLOWS_DIR = ".github/workflows";
 const KEYS = ["swift", "xcode"];
 const VERSION = /^(\d+\.\d+(?:\.\d+)?)$/;
 const SWIFT_IMAGE = /\bswift:(\d+\.\d+(?:\.\d+)?)/g;
-const XCODE_VERSION_KEY = /xcode-version\s*:\s*['"]?(\d+\.\d+(?:\.\d+)?)['"]?/g;
+const XCODE_VERSION_KEY =
+  /['"]?xcode-version['"]?\s*:\s*['"]?(\d+\.\d+(?:\.\d+)?)['"]?/g;
 const DEVELOPER_DIR_XCODE =
   /DEVELOPER_DIR[^\n#]*Xcode_(\d+\.\d+(?:\.\d+)?)\.app/g;
 const XCODE_APP = /Xcode_(\d+\.\d+(?:\.\d+)?)\.app/g;
@@ -65,6 +66,54 @@ function unique(values) {
   return [...new Set(values)];
 }
 
+function stripYamlComments(text) {
+  let out = "";
+  let quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote === '"') {
+      out += c;
+      if (c === "\\" && i + 1 < text.length) {
+        out += text[i + 1];
+        i += 1;
+        continue;
+      }
+      if (c === '"') {
+        quote = null;
+      }
+      continue;
+    }
+    if (quote === "'") {
+      out += c;
+      if (c === "'" && text[i + 1] === "'") {
+        out += text[i + 1];
+        i += 1;
+        continue;
+      }
+      if (c === "'") {
+        quote = null;
+      }
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      out += c;
+      continue;
+    }
+    if (c === "#") {
+      while (i < text.length && text[i] !== "\n") {
+        i += 1;
+      }
+      if (i < text.length) {
+        out += "\n";
+      }
+      continue;
+    }
+    out += c;
+  }
+  return out;
+}
+
 function matches(re, text) {
   const found = [];
   re.lastIndex = 0;
@@ -79,7 +128,7 @@ function workflowFiles(root) {
   const dir = path.join(root, WORKFLOWS_DIR);
   return fs
     .readdirSync(dir)
-    .filter((name) => name.endsWith(".yml"))
+    .filter((name) => name.endsWith(".yml") || name.endsWith(".yaml"))
     .sort()
     .map((name) => path.join(WORKFLOWS_DIR, name));
 }
@@ -118,7 +167,7 @@ function main(argv = process.argv.slice(2)) {
   }
 
   for (const rel of files) {
-    const text = fs.readFileSync(path.join(root, rel), "utf8");
+    const text = stripYamlComments(fs.readFileSync(path.join(root, rel), "utf8"));
     for (const found of unique(matches(SWIFT_IMAGE, text))) {
       if (compareVersions(found, mins.swift) < 0) {
         process.stderr.write(failLine(rel, "swift", found, mins.swift));
