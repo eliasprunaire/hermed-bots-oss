@@ -1,5 +1,6 @@
 # On-demand Sparkle check plan
 
+Historique. TabView, l'onglet « Mises à jour » et le bouton sur Connexion ont été remplacés.
 The macOS app already starts Sparkle in Release and checks the feed on its own cycle. This program gives the user the moment of the check. One command in the app menu and one button in the existing connection sheet both start a Sparkle check. The controls disable while a check is running. The sheet stays a single form. Tabbed settings stay out of this PR. The user never sees Sparkle internals, the feed URL, or other plumbing. macOS 27 and Swift 6 only.
 The program enforces one rule. Automatic Sparkle checks and silent installs are off. A check starts only from those two controls.
 SU-01 is the only PR.

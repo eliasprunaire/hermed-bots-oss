@@ -14,7 +14,7 @@
 | Tester la connexion | `hd.connection.check` | Relit la version Hermes. |
 | Fermer | `hd.connection.close` | Ferme la fenêtre Réglages. |
 
-Le champ Utilisateur n'est plus éditable. Aucune saisie de clé API.
+Le champ Utilisateur n'est plus éditable.
 
 ## Lecture seule, sans secret
 
@@ -31,12 +31,20 @@ Le champ Utilisateur n'est plus éditable. Aucune saisie de clé API.
 
 Le statut de la fenêtre principale reprend le même port (`hd.status.port`).
 
-Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché. Aucun `hd.connection.api-*`.
+Aucune ligne « Clé SSH : … Trousseau ». Aucun chemin d'identité affiché.
 
 ## Clé API
 
-- Pas de champ, pas de section, pas de secours manuel.
-- Un HTTP 401 ou 403 déclenche une lecture SSH du même alias, jusqu'à trois essais (0 → 400 ms → 1,2 s). Le dump de cette commande doit viser le même hostname, utilisateur et port que le tunnel ouvert. Un écart refuse la lecture avant le spawn. `APIKeyFetches.fetch` avale cette erreur : le bandeau 401 n'apparaît qu'après les essais, la clé n'est pas stockée. Pendant les essais : « Connexion… ».
+Section **Clé API d'un profil** sur l'onglet Connexion. La saisie enregistre la clé dans le Trousseau, une entrée par profil. Le champ est vidé tout de suite. La valeur n'est jamais réaffichée.
+
+| Contrôle | Identifiant | Rôle |
+| --- | --- | --- |
+| Profil | `hd.connection.api-key-profile` | Sélecteur des profils lus, ou champ libre tant que la liste est vide. Valeur initiale : le profil de la version affichée. |
+| Clé API | `hd.connection.api-key` | Champ sécurisé. Jamais une valeur déjà stockée. |
+| Enregistrer la clé | `hd.connection.api-key-save` | Inactif si la clé ou le profil est vide. |
+| Statut | `hd.connection.api-key-status` | Enregistrement, clé invalide, profil invalide, ou refus du Trousseau. |
+
+- Un HTTP 401 ou 403 déclenche aussi une lecture SSH du même alias, jusqu'à trois essais (0 → 400 ms → 1,2 s). Le dump de cette commande doit viser le même hostname, utilisateur et port que le tunnel ouvert. Un écart refuse la lecture avant le spawn. `APIKeyFetches.fetch` avale cette erreur : le bandeau 401 n'apparaît qu'après les essais, la clé n'est pas stockée. Pendant les essais : « Connexion… ».
 - Commande distante figée : `hermes -p <profil> config get API_SERVER_KEY --raw`. Le profil passe une liste blanche.
 - Uniquement la clé du profil demandé (`hermes -p <profil> …`). Pas de repli sur `default`. Cache Trousseau `WhenUnlockedThisDeviceOnly`. Jamais affichée ni journalisée.
 - Échec sans clé détenue : bandeau `Clé API introuvable sur l'hôte pour le profil <id>`. Un profil nommé sans clé n'envoie jamais la clé de `default`.
@@ -95,6 +103,6 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 - Échec temporaire de la lecture SSH, puis « Réessayer » : la lecture repart et la clé est récupérée (`APIKeyFetches`).
 - `AppModel` avec deux profils : un 401 d'un bot en arrière-plan, échec temporaire de la lecture, puis « Réessayer » relit ce bot et pas celui de l'écran. Une clé trop courte qui reste refusée ne coûte qu'une lecture SSH, malgré un `/health` valide.
 - Deux bots refusés en même temps : chaque refus nomme son bot, pas celui à l'écran (`onAPIError`).
-- Affichage en lecture seule sans secret ni saisie API.
+- Aperçu SSH en lecture seule, sans secret. Saisie de la clé API d'un profil dans la section dédiée.
 - Connect ne lit pas le Trousseau. Un faux magasin qui échoue s'il est appelé reste silencieux. `SystemSSHBackend.open` lance `/usr/bin/ssh` avec l'alias. Mode test : pas de `SecItem*`.
 - Course aperçu/lancement (`AppModelConnectTests.testRefreshPreviewDuringConnectKeepsEphemeralLaunchIdentity`) : `ssh -G` est suspendu, `refreshPreview` part pendant cette attente, puis Identité reste `agent SSH` et le client lancé `ephemeralAgent`. Échec si `preview=fichier` avec `launch=ephemeralAgent`.

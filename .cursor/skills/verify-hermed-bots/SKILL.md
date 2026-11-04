@@ -250,7 +250,7 @@ Les références versionnées et leur régénération suivent le [README des ré
 
 - Chaque test appelle `HVShot.capture("<écran>")` (helper XCUITest : `XCUIScreen.main.screenshot()` ou `app.windows.firstMatch.screenshot()`, fenêtre 1280×800, apparence claire, `-AppleLanguages (fr)`), joint l'image au xcresult et écrit `HV-SHOT <écran>` dans la sortie. Le runner XCUITest est sandboxé : il n'écrit pas dans `$HV_SHOTS`. `hv-run.sh ui` exporte les pièces jointes vers `shots/<écran>.png` (`hv-shotdiff.sh --export`) et échoue (code 15) si une capture annoncée manque.
 - Écrans : `bots`, `conversation`, `model-picker`, `approval`, `tool-current`, `degraded`, `error`, `threads`.
-- Comparaison : `scripts/hv-shotdiff.sh <evd>/reference-shots baselines <evd>/diffs 0.02` (fraction de pixels différents, fuzz 5 %). Le code 11 fait échouer la passe.
+- Comparaison : `scripts/hv-shotdiff.sh <evd>/reference-shots baselines <evd>/diffs <tolérance>` (fraction de pixels différents, fuzz 5 %). La lane orb utilise 0.03 (3 %). Les lanes fake et les autres modes utilisent 0.02 (2 %). `hv-run.sh` choisit cette valeur selon `HV_UI_BACKEND` ou, à défaut, le mode d'environnement. Le code 11 fait échouer la passe.
 - Promotion d'une référence : **humaine seulement**, `scripts/hv-shotdiff.sh --bless <evd>/reference-shots baselines`, dans une PR dédiée. Le jugement visuel final reste manuel.
 
 ### Test quotidien (A11) — 13 h 00, heure de Paris
@@ -297,7 +297,7 @@ Tous dans `scripts/`, exécutables, compatibles bash 3.2 (macOS) et Linux, shell
 | `hv-fake-hermes.py` | faux serveur à fixtures (A10), `/_hv/config` et `/_hv/reset` | `python3 scripts/hv-fake-hermes.py --port "$HV_PORT" --version current --mode drop-route` |
 | `hv-spike-probe.py` | formes observées S1 à S7 (orb) | `python3 scripts/hv-spike-probe.py --url "http://127.0.0.1:${HV_PORT}" --out r.json` |
 | `hv-contract-check.py` | contrats + sondes de bord ; `--acceptance` (daily) | `python3 scripts/hv-contract-check.py --url "http://127.0.0.1:${HV_PORT}" --fixture fixtures/hermes-current/contract.json --out r.json` |
-| `hv-shotdiff.sh` | comparaison de captures | `scripts/hv-shotdiff.sh shots baselines diffs 0.02` |
+| `hv-shotdiff.sh` | comparaison de captures | `scripts/hv-shotdiff.sh shots baselines diffs 0.03` (orb) ou `0.02` (fake et autres) |
 | `hv-netwatch.sh` | connexions sortantes (lsof/nettop) | `scripts/hv-netwatch.sh <pid> 30 net.txt "$HV_PORT"` |
 | `hv-selftest.sh` | auto-tests des scripts | `scripts/hv-selftest.sh` |
 | `hv-start-env-key.sh` | `.env` au premier volume, clé distincte conservée, chmod 600 | `scripts/hv-start-env-key.sh` |
