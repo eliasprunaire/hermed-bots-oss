@@ -18,6 +18,16 @@ const GATE_LABEL = "gate-change-approved";
 const GATE_VERIFIER_LOGIN = "app-pilote-verifier[bot]";
 const VERDICT_CONTEXT = "verdict-gate";
 const HEX_SHA = /^[0-9a-fA-F]{40}$/;
+const PULL_COMMIT_CAP = 250;
+const RENOVATE_LOGINS = Object.freeze(["renovate[bot]", "mend-renovate[bot]"]);
+const RENOVATE_EXEMPTION_MESSAGE =
+  "exemption Renovate : uniquement des montées de version dans les workflows protégés";
+const ACTION_REF = "(?:[0-9a-fA-F]{40}|v?\\d+(?:\\.\\d+){0,2}(?:-[0-9A-Za-z.]+)?)";
+const USES_PIN = new RegExp(
+  `^(\\s*(?:-\\s+)?uses:\\s+)([^\\s@]+)@(${ACTION_REF})(\\s+#\\s*v\\S+)?\\s*$`,
+);
+const IMAGE_PIN =
+  /^(\s*(?:container|image):\s+)(.+?)(?::([^:@\s]+)|@sha256:([0-9a-fA-F]{64}))\s*$/;
 
 function posix(file) {
   return String(file).replace(/\\/g, "/").toLowerCase();
@@ -34,6 +44,107 @@ function isAgentPath(file) {
 function isGateFile(file) {
   const lower = posix(file);
   return GATE_FILES.some((name) => lower === name);
+}
+
+function isRenovateLogin(login) {
+  return RENOVATE_LOGINS.includes(login);
+}
+
+function isProtectedWorkflowPath(file) {
+  return /^\.github\/workflows\/[^/]+\.ya?ml$/.test(posix(file));
+}
+
+function parsePin(line) {
+  const text = String(line ?? "").replace(/\r$/, "");
+  const uses = USES_PIN.exec(text);
+  if (uses) {
+    return { kind: "uses", prefix: uses[1], name: uses[2] };
+  }
+  const image = IMAGE_PIN.exec(text);
+  if (image) {
+    return { kind: "image", prefix: image[1], name: image[2] };
+  }
+  return null;
+}
+
+function isVersionBumpPair(removed, added) {
+  const left = parsePin(removed);
+  const right = parsePin(added);
+  if (left == null || right == null) {
+    return false;
+  }
+  return left.kind === right.kind && left.prefix === right.prefix && left.name === right.name;
+}
+
+function parseUnifiedChangedLines(diff) {
+  const removed = [];
+  const added = [];
+  for (const raw of String(diff ?? "").split("\n")) {
+    if (
+      raw.startsWith("+++") ||
+      raw.startsWith("---") ||
+      raw.startsWith("diff ") ||
+      raw.startsWith("index ") ||
+      raw.startsWith("@@")
+    ) {
+      continue;
+    }
+    if (raw.startsWith("+")) {
+      added.push(raw.slice(1));
+    } else if (raw.startsWith("-")) {
+      removed.push(raw.slice(1));
+    }
+  }
+  return { removed, added };
+}
+
+function renovateWorkflowBumpExemption({ authorLogin, commitLogins, hits, lineChanges } = {}) {
+  if (!isRenovateLogin(authorLogin)) {
+    return { ok: false, reason: "author" };
+  }
+  if (!Array.isArray(commitLogins) || commitLogins.length === 0) {
+    return { ok: false, reason: "commits" };
+  }
+  if (commitLogins.length >= PULL_COMMIT_CAP) {
+    return { ok: false, reason: "commits" };
+  }
+  if (!commitLogins.every((login) => isRenovateLogin(login))) {
+    return { ok: false, reason: "commits" };
+  }
+  if (!Array.isArray(hits) || hits.length === 0) {
+    return { ok: false, reason: "path" };
+  }
+  if (!hits.every((hit) => isProtectedWorkflowPath(hit))) {
+    return { ok: false, reason: "path" };
+  }
+  if (!Array.isArray(lineChanges)) {
+    return { ok: false, reason: "diff" };
+  }
+  const byFile = new Map();
+  for (const change of lineChanges) {
+    if (change == null || typeof change !== "object") {
+      return { ok: false, reason: "diff" };
+    }
+    if (typeof change.file !== "string") {
+      return { ok: false, reason: "diff" };
+    }
+    byFile.set(posix(change.file), change);
+  }
+  for (const hit of hits) {
+    const change = byFile.get(posix(hit));
+    if (change == null || !Array.isArray(change.removed) || !Array.isArray(change.added)) {
+      return { ok: false, reason: "diff" };
+    }
+    if (change.removed.length !== change.added.length || change.removed.length === 0) {
+      return { ok: false, reason: "diff" };
+    }
+    for (let i = 0; i < change.removed.length; i += 1) {
+      if (!isVersionBumpPair(change.removed[i], change.added[i])) {
+        return { ok: false, reason: "diff" };
+      }
+    }
+  }
+  return { ok: true };
 }
 
 // case-insensitive: macOS and Windows checkouts resolve .Claude/ to .claude/
@@ -348,6 +459,63 @@ async function ownerApproval(io, headSha) {
   return gateApprovalFromEvents(events, { verdict: verdictGateStatus(payload) });
 }
 
+function lineChangesFor(base, head, files) {
+  return files.map((file) => {
+    const diff = git([
+      "diff",
+      "--no-ext-diff",
+      "--unified=0",
+      "--no-color",
+      "--no-renames",
+      `${base}...${head}`,
+      "--",
+      file,
+    ]).toString("utf8");
+    const { removed, added } = parseUnifiedChangedLines(diff);
+    return { file, removed, added };
+  });
+}
+
+function commitLogin(raw) {
+  if (raw == null || typeof raw !== "object") {
+    return null;
+  }
+  return readLogin(raw.author);
+}
+
+async function loadPullCommitLogins(io) {
+  const token = io.env.GITHUB_TOKEN;
+  const repository = io.env.GITHUB_REPOSITORY;
+  const number = io.env.PR_NUMBER;
+  const names = repositoryParts(repository);
+  if (!token || names == null || !number) {
+    return null;
+  }
+  let items;
+  try {
+    items = await loadPages(
+      io,
+      token,
+      `https://api.github.com/repos/${names.owner}/${names.repo}/pulls/${number}/commits?per_page=100`,
+    );
+  } catch {
+    return null;
+  }
+  if (items.length >= PULL_COMMIT_CAP) {
+    return null;
+  }
+  const logins = [];
+  for (const raw of items) {
+    const login = commitLogin(raw);
+    if (login == null) {
+      logins.push(null);
+      continue;
+    }
+    logins.push(login);
+  }
+  return logins;
+}
+
 function collectHits(base, head) {
   const entries = changedEntries(base, head);
   const agent = [];
@@ -394,6 +562,29 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     return 1;
   }
   const { agent, gate } = grouped;
+  const hits = [...agent, ...gate];
+  if (hits.length > 0 && isRenovateLogin(io.env.PR_AUTHOR_LOGIN)) {
+    const commitLogins = await loadPullCommitLogins(io);
+    const workflowHits = hits.filter((hit) => isProtectedWorkflowPath(hit));
+    let lineChanges = [];
+    if (workflowHits.length > 0) {
+      try {
+        lineChanges = lineChangesFor(args.base, args.head, workflowHits);
+      } catch {
+        lineChanges = [];
+      }
+    }
+    const exemption = renovateWorkflowBumpExemption({
+      authorLogin: io.env.PR_AUTHOR_LOGIN,
+      commitLogins,
+      hits,
+      lineChanges,
+    });
+    if (exemption.ok) {
+      process.stdout.write(`${RENOVATE_EXEMPTION_MESSAGE}\n`);
+      return 0;
+    }
+  }
   if (agent.length > 0) {
     writeHits("agent", agent);
     return 1;
@@ -424,8 +615,12 @@ module.exports = {
   isGateFile,
   classifyHits,
   gateApprovalFromEvents,
+  isVersionBumpPair,
+  renovateWorkflowBumpExemption,
   GATE_FILES,
   GATE_LABEL,
+  RENOVATE_EXEMPTION_MESSAGE,
+  RENOVATE_LOGINS,
   main,
 };
 
