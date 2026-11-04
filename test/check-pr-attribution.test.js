@@ -453,6 +453,12 @@ test("main exits 1 when Agents has only the template bc- text", () => {
     join(__dirname, "../.github/PULL_REQUEST_TEMPLATE.md"),
     "utf8",
   );
+  assert.match(template, /^## Pourquoi$/m);
+  assert.match(template, /^## Ce qui change$/m);
+  assert.match(template, /^## Périmètre$/m);
+  assert.match(template, /^## Impact possible$/m);
+  assert.match(template, /^## Vérification$/m);
+  assert.match(template, /^## Agents$/m);
   writeFileSync(body, template);
   writeFileSync(commits, `ci(pr): note\n\n${REAL_BC_ID}\n`);
   const { code, err } = runMain([
@@ -465,14 +471,14 @@ test("main exits 1 when Agents has only the template bc- text", () => {
   assert.match(err, /bc- UUID/);
 });
 
-test("main exits 1 when the only bc- UUID sits under Why", () => {
+test("main exits 1 when the only bc- UUID sits under Pourquoi", () => {
   const dir = mkdtempSync(join(tmpdir(), "attr-"));
   const body = join(dir, "body.txt");
   const commits = join(dir, "commits.txt");
   writeFileSync(
     body,
     [
-      "## Why",
+      "## Pourquoi",
       `Ship ${REAL_BC_ID}.`,
       "",
       "## Agents",

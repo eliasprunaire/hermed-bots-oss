@@ -1,13 +1,14 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository.
+Consignes pour les agents de code qui travaillent dans ce dépôt.
 
-- Read `README.md` and `docs/` before changing code. Plans live in `docs/plans/`.
-- Run `npm test` and `npm run lint` before every commit; Swift code: `swift test --package-path Packages/HermesAdapter --skip PerfTests` and the Xcode scheme `HermedBots` (probe classes skipped). Performance probes are a separate pass on scheme `HermedBotsPerf`, documented in `docs/perf-probes.md`.
-- Work on a branch and open a pull request against `main`; never push to `main` directly.
-- No infrastructure information in the repository, commits, issues, pull requests or comments: no local paths (`/Users/<name>`, `/home/<name>`), host names, internal domains (`*.local`), private IPs, internal ports, machine names, Apple Team ID or signing identity, personal e-mail addresses. Redact before posting (`~`/`<HOME>`, `<HOST>`, `<IP>`). The `infra-guard` workflow enforces this.
-- Evidence, raw logs and screenshots stay on the machine that produced them (see `.gitignore`); pull requests cite a redacted summary only.
-- Machine-specific or operator-specific instructions do not belong in this repository.
+- Lire `README.md` et `docs/` avant de modifier le code. Les plans sont dans `docs/plans/`.
+- Exécuter `npm test` et `npm run lint` avant chaque commit ; code Swift : `swift test --package-path Packages/HermesAdapter --skip PerfTests` et le scheme Xcode `HermedBots` (classes de sondes exclues). Les sondes de performance forment une passe séparée sur le scheme `HermedBotsPerf`, documentée dans `docs/perf-probes.md`.
+- Travailler sur une branche et ouvrir une pull request contre `main` ; ne jamais pousser directement sur `main`.
+- Aucune information d'infrastructure dans le dépôt, les commits, les issues, les pull requests ou les commentaires : pas de chemins locaux (`/Users/<name>`, `/home/<name>`), noms d'hôte, domaines internes (`*.local`), IP privées, ports internes, noms de machine, Apple Team ID ou identité de signature, adresses e-mail personnelles. Caviarder avant publication (`~`/`<HOME>`, `<HOST>`, `<IP>`). Le workflow `infra-guard` applique cette règle.
+- Les preuves, journaux bruts et captures restent sur la machine qui les a produits (voir `.gitignore`) ; les pull requests ne citent qu'un résumé caviardé.
+- Les consignes propres à une machine ou à un opérateur n'ont pas leur place dans ce dépôt.
+- Langue : titres et corps de PR, messages de commit et commentaires GitHub sont rédigés en français, sauf demande explicite de l'utilisateur. Seul le titre « Agents » du modèle de PR est lu par pr-attribution.
 
 ## Rule to mechanism
 
@@ -27,3 +28,4 @@ Guidance for coding agents working in this repository.
 | No infrastructure information in diffs, PR bodies, pushes or comments | `scripts/infra-guard-ci.js`, `test/infra-guard-ci.test.js`, and job `scan` in `.github/workflows/infra-guard.yml` |
 | une mise à jour remplace l'app, jamais de doublon | `scripts/sparkle-update-proof.sh` (`count_hermedbots_copies` / `prove_single_copy`, `single-copy pass` or `single-copy fail` on `SPARKLE-PROOF*`), `test/distribution/sparkle-update.test.js`, and the mandatory post-update check in `.cursor/skills/verify-hermed-bots/` |
 | One verifier per head SHA and one executor per PR | Concurrency group `verdict-gate-<pr>` in `.github/workflows/verdict-gate.yml`, `verifier-<pr>` in `.github/workflows/anti-parallel.yml`, and `executor-<pr>` in `.github/workflows/ci.yml` (`cancel-in-progress: false`). Groups use the pull number only (`github.event.pull_request.number || github.event.issue.number`). `scripts/check-anti-parallel.js`, `test/check-anti-parallel.test.js`, and job `anti-parallel` fail closed when more than one marked `VERDICT` comment (`<!-- dev-lead-verifier -->`) from an approved verifier (`app-pilote-verifier[bot]` with type `Bot`) cites the head SHA, when a second verifier workflow run is in progress or queued for that SHA, or when PR commits name more than one `bc-` agent identity in an overlapping authored-at window. The job recomputes the full verdict on `pull_request` and `issue_comment`. Executor commits come from `git log` when that range is readable, otherwise from the pull commits API. That API stops at 250 commits; a list of 250 items, a declared `commits` count of 250 or more, or a count that does not match the loaded list fails closed. |
+| Langue : titres et corps de PR, messages de commit et commentaires GitHub sont rédigés en français, sauf demande explicite de l'utilisateur. Seul le titre « Agents » est lu par pr-attribution. | Revue. `.github/PULL_REQUEST_TEMPLATE.md` utilise les titres `Pourquoi`, `Ce qui change`, `Périmètre`, `Impact possible`, `Vérification`, `Agents`. Journal optionnel : `docs/fusions.md` et `test/fusions.test.js` (`scripts/check-fusions.js`). Pas de workflow CI ni de fichier de porte. |

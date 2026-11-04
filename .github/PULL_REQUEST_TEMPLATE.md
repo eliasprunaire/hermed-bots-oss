@@ -1,13 +1,25 @@
-## Why
+## Pourquoi
 
-## What changed
+<!-- Pourquoi ce changement, en français -->
 
-## Scope
+## Ce qui change
 
-## Blast Radius
+<!-- Ce qui a changé, en français -->
 
-## Verification
+## Périmètre
+
+<!-- Périmètre du changement, en français -->
+
+## Impact possible
+
+<!-- Rayon d'impact, en français -->
+
+## Vérification
+
+<!-- Comment le changement a été vérifié, en français -->
 
 ## Agents
+
+<!-- Identifiants bc- de chaque agent sur cette PR -->
 
 - `bc-` id for each agent on this PR
