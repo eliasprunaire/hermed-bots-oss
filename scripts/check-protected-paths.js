@@ -28,6 +28,10 @@ const GATE_FILES = [
 const GATE_LABEL = "gate-change-approved";
 const GATE_VERIFIER_LOGIN = "app-pilote-verifier[bot]";
 const VERDICT_CONTEXT = "verdict-gate";
+const REQUIRED_CHECK_JOB = "protected-agent-config";
+const VERDICT_WORKFLOW_NAME = "Verdict gate";
+const VERDICT_WORKFLOW_PATH = ".github/workflows/verdict-gate.yml";
+const VERDICT_RUN_PULL = /(?:^|\s)pr-(\d+)(?![0-9])/;
 const HEX_SHA = /^[0-9a-fA-F]{40}$/;
 const PULL_COMMIT_CAP = 250;
 const RENOVATE_LOGINS = Object.freeze(["renovate[bot]", "mend-renovate[bot]"]);
@@ -470,8 +474,18 @@ function shouldRefreshFromEvent(eventName, payload) {
   if (payload == null || typeof payload !== "object") {
     return false;
   }
-  if (eventName === "status") {
-    return payload.context === VERDICT_CONTEXT && typeof payload.sha === "string" && HEX_SHA.test(payload.sha);
+  if (eventName === "workflow_run") {
+    if (payload.action !== "completed") {
+      return false;
+    }
+    const run = payload.workflow_run;
+    if (run == null || typeof run !== "object") {
+      return false;
+    }
+    if (run.name !== VERDICT_WORKFLOW_NAME && run.path !== VERDICT_WORKFLOW_PATH) {
+      return false;
+    }
+    return true;
   }
   if (eventName === "pull_request_target") {
     if (payload.action !== "labeled" && payload.action !== "unlabeled") {
@@ -480,6 +494,33 @@ function shouldRefreshFromEvent(eventName, payload) {
     return labelName(payload.label) === GATE_LABEL;
   }
   return false;
+}
+
+function verdictRunPullNumber(run) {
+  if (run == null || typeof run !== "object") {
+    return null;
+  }
+  const title = typeof run.display_title === "string" ? run.display_title : "";
+  const match = VERDICT_RUN_PULL.exec(title);
+  if (match) {
+    return Number(match[1]);
+  }
+  return null;
+}
+
+function selectJobsToRerun(jobs) {
+  if (!Array.isArray(jobs)) {
+    return [];
+  }
+  return jobs.filter((job) => {
+    if (job == null || typeof job !== "object") {
+      return false;
+    }
+    if (job.name !== REQUIRED_CHECK_JOB) {
+      return false;
+    }
+    return typeof job.id === "number" || typeof job.id === "string";
+  });
 }
 
 function runPullMatches(run, number, headSha) {
@@ -522,6 +563,9 @@ function selectRunsToRerun(runs, { number, headSha } = {}) {
 function refreshTargetsFromPull(payload) {
   const pull = payload && payload.pull_request;
   if (pull == null || typeof pull !== "object") {
+    return [];
+  }
+  if (pull.state != null && pull.state !== "open") {
     return [];
   }
   const sha = pull.head && typeof pull.head.sha === "string" ? pull.head.sha : "";
@@ -823,18 +867,64 @@ async function loadCommitPulls(io, token, owner, repo, sha) {
   return response.json();
 }
 
+async function loadPull(io, token, owner, repo, number) {
+  const response = await githubGet(
+    io,
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`,
+  );
+  return response.json();
+}
+
+async function loadRunJobs(io, token, owner, repo, runId) {
+  const items = [];
+  let url = `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100`;
+  while (url) {
+    const response = await githubGet(io, token, url);
+    const page = await response.json();
+    if (page == null || typeof page !== "object" || !Array.isArray(page.jobs)) {
+      throw new Error("page is unreadable");
+    }
+    items.push(...page.jobs);
+    url = nextUrl(response.headers.get("link"));
+  }
+  return items;
+}
+
+async function refreshTargetsFromWorkflowRun(io, token, owner, repo, payload) {
+  const run = payload.workflow_run;
+  if (run == null || typeof run !== "object") {
+    return [];
+  }
+  const number = verdictRunPullNumber(run);
+  if (number != null) {
+    let pull;
+    try {
+      pull = await loadPull(io, token, owner, repo, number);
+    } catch {
+      return null;
+    }
+    return refreshTargetsFromPull({ pull_request: pull });
+  }
+  const sha = typeof run.head_sha === "string" ? run.head_sha : "";
+  if (run.event === "pull_request" && HEX_SHA.test(sha)) {
+    let pulls;
+    try {
+      pulls = await loadCommitPulls(io, token, owner, repo, sha);
+    } catch {
+      return null;
+    }
+    return refreshTargetsFromPulls(pulls, sha);
+  }
+  return [];
+}
+
 async function refreshTargets(io, token, owner, repo, eventName, payload) {
   if (eventName === "pull_request_target") {
     return refreshTargetsFromPull(payload);
   }
-  if (eventName === "status") {
-    let pulls;
-    try {
-      pulls = await loadCommitPulls(io, token, owner, repo, payload.sha);
-    } catch {
-      return null;
-    }
-    return refreshTargetsFromPulls(pulls, payload.sha);
+  if (eventName === "workflow_run") {
+    return refreshTargetsFromWorkflowRun(io, token, owner, repo, payload);
   }
   return [];
 }
@@ -887,12 +977,30 @@ async function refreshRuns(io) {
       selected.push(run);
     }
   }
+  const selectedJobs = [];
+  const seenJobs = new Set();
   for (const run of selected) {
+    let jobs;
+    try {
+      jobs = await loadRunJobs(io, token, names.owner, names.repo, run.id);
+    } catch {
+      return 1;
+    }
+    for (const job of selectJobsToRerun(jobs)) {
+      const key = String(job.id);
+      if (seenJobs.has(key)) {
+        continue;
+      }
+      seenJobs.add(key);
+      selectedJobs.push(job);
+    }
+  }
+  for (const job of selectedJobs) {
     try {
       await githubPost(
         io,
         token,
-        `https://api.github.com/repos/${names.owner}/${names.repo}/actions/runs/${run.id}/rerun`,
+        `https://api.github.com/repos/${names.owner}/${names.repo}/actions/jobs/${job.id}/rerun`,
       );
     } catch {
       return 1;
@@ -1122,6 +1230,10 @@ module.exports = {
   renovateWorkflowBumpExemption,
   shouldRefreshFromEvent,
   selectRunsToRerun,
+  selectJobsToRerun,
+  verdictRunPullNumber,
+  REQUIRED_CHECK_JOB,
+  VERDICT_WORKFLOW_NAME,
   WORKFLOW_BUMP_REFUSED_MESSAGE,
   GATE_FILES,
   GATE_LABEL,
