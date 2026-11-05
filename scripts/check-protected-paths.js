@@ -2,6 +2,16 @@
 
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");
+const {
+  LineCounter,
+  isAlias,
+  isMap,
+  isPair,
+  isScalar,
+  isSeq,
+  parseAllDocuments,
+  visit,
+} = require("yaml");
 
 const PROTECTED_DIRS = [".claude/", ".codex/"];
 const PROTECTED_FILES = [".mcp.json"];
@@ -18,6 +28,326 @@ const GATE_LABEL = "gate-change-approved";
 const GATE_VERIFIER_LOGIN = "app-pilote-verifier[bot]";
 const VERDICT_CONTEXT = "verdict-gate";
 const HEX_SHA = /^[0-9a-fA-F]{40}$/;
+const PULL_COMMIT_CAP = 250;
+const RENOVATE_LOGINS = Object.freeze(["renovate[bot]", "mend-renovate[bot]"]);
+const RENOVATE_EXEMPTION_MESSAGE =
+  "exemption Renovate : uniquement des montées de version dans les workflows protégés";
+const WORKFLOW_BUMP_REFUSED_MESSAGE =
+  "exemption refusée : seuls jobs.<id>.steps[i].uses, jobs.<id>.container, jobs.<id>.container.image et jobs.<id>.services.<n>.image peuvent changer, au même chemin, même action ou même image, avec une référence toujours épinglée au moins aussi strictement";
+const ACTION_TAG = /^v?\d+(?:\.\d+){0,2}(?:-[0-9A-Za-z.]+)?$/;
+const IMAGE_DIGEST = /^(.*)@(sha256:[0-9a-fA-F]{64})$/;
+const IMAGE_TAG = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/;
+
+function imageNameAndTag(rest) {
+  const lastColon = rest.lastIndexOf(":");
+  const lastSlash = rest.lastIndexOf("/");
+  if (lastColon <= lastSlash) {
+    return { name: rest, tag: null };
+  }
+  const name = rest.slice(0, lastColon);
+  const tag = rest.slice(lastColon + 1);
+  if (!name || !IMAGE_TAG.test(tag)) {
+    return null;
+  }
+  return { name, tag };
+}
+
+// Docker: HOST:PORT/REPOSITORY is not NAME:TAG when a slash follows the colon.
+function parseImageRef(ref) {
+  const text = String(ref ?? "");
+  if (text === "" || text.includes(" ")) {
+    return null;
+  }
+  const digest = IMAGE_DIGEST.exec(text);
+  if (digest) {
+    const rest = digest[1];
+    if (!rest || rest.includes("@")) {
+      return null;
+    }
+    const parsed = imageNameAndTag(rest);
+    if (parsed == null) {
+      return null;
+    }
+    return { name: parsed.name, pin: "digest", ref: digest[2] };
+  }
+  const parsed = imageNameAndTag(text);
+  if (parsed == null || parsed.tag == null) {
+    return null;
+  }
+  return { name: parsed.name, pin: "tag", ref: parsed.tag };
+}
+
+function parseUsesRef(ref) {
+  const text = String(ref ?? "");
+  if (text.startsWith("docker://")) {
+    const image = parseImageRef(text.slice("docker://".length));
+    if (image == null) {
+      return null;
+    }
+    return { name: `docker://${image.name}`, pin: image.pin, ref: image.ref };
+  }
+  const at = text.lastIndexOf("@");
+  if (at <= 0) {
+    return null;
+  }
+  const name = text.slice(0, at);
+  const pinRef = text.slice(at + 1);
+  if (!name || name.includes("@") || /\s/.test(name) || pinRef === "") {
+    return null;
+  }
+  if (name.startsWith(".") || name.startsWith("/")) {
+    return null;
+  }
+  if (HEX_SHA.test(pinRef)) {
+    return { name, pin: "sha", ref: pinRef.toLowerCase() };
+  }
+  if (ACTION_TAG.test(pinRef)) {
+    return { name, pin: "tag", ref: pinRef };
+  }
+  return null;
+}
+
+function pinRank(pin) {
+  if (pin === "sha" || pin === "digest") {
+    return 2;
+  }
+  if (pin === "tag") {
+    return 1;
+  }
+  return 0;
+}
+
+function isAllowedPinBump(before, after, kind) {
+  const parse = kind === "uses" ? parseUsesRef : parseImageRef;
+  const left = parse(before);
+  const right = parse(after);
+  if (left == null || right == null) {
+    return false;
+  }
+  if (left.name !== right.name) {
+    return false;
+  }
+  if (left.pin === "sha" && right.pin !== "sha") {
+    return false;
+  }
+  if (left.pin === "digest" && right.pin !== "digest") {
+    return false;
+  }
+  if (pinRank(right.pin) < pinRank(left.pin)) {
+    return false;
+  }
+  return String(before) !== String(after);
+}
+
+function pinKindAt(path) {
+  if (!Array.isArray(path) || path[0] !== "jobs" || path.length < 3) {
+    return null;
+  }
+  if (
+    path.length === 5 &&
+    path[2] === "steps" &&
+    typeof path[3] === "number" &&
+    path[4] === "uses"
+  ) {
+    return "uses";
+  }
+  if (path.length === 3 && path[2] === "container") {
+    return "image";
+  }
+  if (path.length === 4 && path[2] === "container" && path[3] === "image") {
+    return "image";
+  }
+  if (
+    path.length === 5 &&
+    path[2] === "services" &&
+    typeof path[3] === "string" &&
+    path[4] === "image"
+  ) {
+    return "image";
+  }
+  return null;
+}
+
+function pairKeyString(pair) {
+  if (!isPair(pair) || pair.key == null) {
+    return null;
+  }
+  if (!isScalar(pair.key) || pair.key.value == null) {
+    return null;
+  }
+  return String(pair.key.value);
+}
+
+function nodeLine(node, lineCounter) {
+  if (!node || !Array.isArray(node.range) || typeof node.range[0] !== "number") {
+    return 1;
+  }
+  const pos = lineCounter.linePos(node.range[0]);
+  return pos.line > 0 ? pos.line : 1;
+}
+
+function aliasName(node) {
+  const raw = typeof node.source === "string" ? node.source : "";
+  return raw.replace(/:$/, "");
+}
+
+function firstAnchorOrAlias(doc, lineCounter) {
+  let hit = null;
+  visit(doc, {
+    Alias(_key, node) {
+      if (hit) {
+        return visit.BREAK;
+      }
+      hit = {
+        kind: "alias",
+        name: aliasName(node),
+        line: nodeLine(node, lineCounter),
+      };
+      return visit.BREAK;
+    },
+    Node(_key, node) {
+      if (hit) {
+        return visit.BREAK;
+      }
+      if (node && typeof node.anchor === "string" && node.anchor !== "") {
+        hit = {
+          kind: "ancre",
+          name: node.anchor,
+          line: nodeLine(node, lineCounter),
+        };
+        return visit.BREAK;
+      }
+    },
+  });
+  return hit;
+}
+
+function refuseAnchorOrAliasMessage(hit) {
+  if (hit.kind === "ancre") {
+    return `ancre YAML &${hit.name} refusée`;
+  }
+  return `alias YAML *${hit.name} refusé`;
+}
+
+function yamlErrorMessage(err) {
+  const detail = err && err.message ? String(err.message).replace(/\s+/g, " ").trim() : "";
+  if (detail === "") {
+    return "YAML invalide";
+  }
+  return `YAML invalide : ${detail}`;
+}
+
+function inspectWorkflow(text) {
+  if (typeof text !== "string") {
+    return { ok: false, message: "YAML invalide" };
+  }
+  const lineCounter = new LineCounter();
+  let docs;
+  try {
+    docs = parseAllDocuments(text, { prettyErrors: true, lineCounter, uniqueKeys: true });
+  } catch (err) {
+    return { ok: false, message: yamlErrorMessage(err) };
+  }
+  if (docs.length !== 1) {
+    return { ok: false, message: "le workflow YAML doit contenir exactement un document" };
+  }
+  const doc = docs[0];
+  const hit = firstAnchorOrAlias(doc, lineCounter);
+  if (hit) {
+    return { ok: false, message: refuseAnchorOrAliasMessage(hit) };
+  }
+  if (doc.errors && doc.errors.length > 0) {
+    return { ok: false, message: yamlErrorMessage(doc.errors[0]) };
+  }
+  if (isAlias(doc.contents)) {
+    return { ok: false, message: refuseAnchorOrAliasMessage({ kind: "alias", name: aliasName(doc.contents) }) };
+  }
+  if (doc.contents == null) {
+    return { ok: false, message: "YAML invalide" };
+  }
+  return { ok: true, doc };
+}
+
+function compareWorkflowNodes(left, right, path, acc) {
+  if (left == null && right == null) {
+    return true;
+  }
+  if (left == null || right == null) {
+    return false;
+  }
+  if (isAlias(left) || isAlias(right)) {
+    return false;
+  }
+  const kind = pinKindAt(path);
+  if (kind != null && isScalar(left) && isScalar(right)) {
+    const before = left.value == null ? "" : String(left.value);
+    const after = right.value == null ? "" : String(right.value);
+    if (before === after) {
+      return true;
+    }
+    if (!isAllowedPinBump(before, after, kind)) {
+      return false;
+    }
+    acc.count += 1;
+    return true;
+  }
+  if (isScalar(left) && isScalar(right)) {
+    return Object.is(left.value, right.value);
+  }
+  if (isMap(left) && isMap(right)) {
+    if (left.items.length !== right.items.length) {
+      return false;
+    }
+    for (let i = 0; i < left.items.length; i++) {
+      const leftKey = pairKeyString(left.items[i]);
+      const rightKey = pairKeyString(right.items[i]);
+      if (leftKey == null || leftKey !== rightKey) {
+        return false;
+      }
+      if (!compareWorkflowNodes(left.items[i].value, right.items[i].value, [...path, leftKey], acc)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (isSeq(left) && isSeq(right)) {
+    if (left.items.length !== right.items.length) {
+      return false;
+    }
+    for (let i = 0; i < left.items.length; i++) {
+      if (!compareWorkflowNodes(left.items[i], right.items[i], [...path, i], acc)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+function isVersionOnlyWorkflowChange(before, after) {
+  if (typeof before !== "string" || typeof after !== "string") {
+    return { ok: false, message: "YAML invalide" };
+  }
+  if (before === after) {
+    return { ok: false, message: WORKFLOW_BUMP_REFUSED_MESSAGE };
+  }
+  const left = inspectWorkflow(before);
+  if (!left.ok) {
+    return { ok: false, message: left.message };
+  }
+  const right = inspectWorkflow(after);
+  if (!right.ok) {
+    return { ok: false, message: right.message };
+  }
+  const acc = { count: 0 };
+  if (!compareWorkflowNodes(left.doc.contents, right.doc.contents, [], acc)) {
+    return { ok: false, message: WORKFLOW_BUMP_REFUSED_MESSAGE };
+  }
+  if (acc.count === 0) {
+    return { ok: false, message: WORKFLOW_BUMP_REFUSED_MESSAGE };
+  }
+  return { ok: true };
+}
 
 function posix(file) {
   return String(file).replace(/\\/g, "/").toLowerCase();
@@ -34,6 +364,59 @@ function isAgentPath(file) {
 function isGateFile(file) {
   const lower = posix(file);
   return GATE_FILES.some((name) => lower === name);
+}
+
+function isRenovateLogin(login) {
+  return RENOVATE_LOGINS.includes(login);
+}
+
+function isProtectedWorkflowPath(file) {
+  return /^\.github\/workflows\/[^/]+\.ya?ml$/.test(posix(file));
+}
+
+function renovateWorkflowBumpExemption({ authorLogin, commitLogins, hits, fileChanges } = {}) {
+  if (!isRenovateLogin(authorLogin)) {
+    return { ok: false, reason: "author" };
+  }
+  if (!Array.isArray(commitLogins) || commitLogins.length === 0) {
+    return { ok: false, reason: "commits" };
+  }
+  if (commitLogins.length >= PULL_COMMIT_CAP) {
+    return { ok: false, reason: "commits" };
+  }
+  if (!commitLogins.every((login) => isRenovateLogin(login))) {
+    return { ok: false, reason: "commits" };
+  }
+  if (!Array.isArray(hits) || hits.length === 0) {
+    return { ok: false, reason: "path" };
+  }
+  if (!hits.every((hit) => isProtectedWorkflowPath(hit))) {
+    return { ok: false, reason: "path" };
+  }
+  if (!Array.isArray(fileChanges)) {
+    return { ok: false, reason: "diff" };
+  }
+  const byFile = new Map();
+  for (const change of fileChanges) {
+    if (change == null || typeof change !== "object") {
+      return { ok: false, reason: "diff" };
+    }
+    if (typeof change.file !== "string") {
+      return { ok: false, reason: "diff" };
+    }
+    byFile.set(posix(change.file), change);
+  }
+  for (const hit of hits) {
+    const change = byFile.get(posix(hit));
+    if (change == null) {
+      return { ok: false, reason: "diff", message: WORKFLOW_BUMP_REFUSED_MESSAGE };
+    }
+    const compared = isVersionOnlyWorkflowChange(change.before, change.after);
+    if (!compared.ok) {
+      return { ok: false, reason: "diff", message: compared.message };
+    }
+  }
+  return { ok: true };
 }
 
 // case-insensitive: macOS and Windows checkouts resolve .Claude/ to .claude/
@@ -348,6 +731,67 @@ async function ownerApproval(io, headSha) {
   return gateApprovalFromEvents(events, { verdict: verdictGateStatus(payload) });
 }
 
+function blobText(commit, file) {
+  const spec = `${commit}:${file}`;
+  const probe = spawnSync("git", ["cat-file", "-e", spec], {
+    encoding: "buffer",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (probe.status !== 0) {
+    return null;
+  }
+  return git(["cat-file", "blob", spec]).toString("utf8");
+}
+
+function fileChangesFor(base, head, files) {
+  const ancestor = git(["merge-base", base, head]).toString("utf8").trim();
+  return files.map((file) => ({
+    file,
+    before: blobText(ancestor, file),
+    after: blobText(head, file),
+  }));
+}
+
+function commitLogin(raw) {
+  if (raw == null || typeof raw !== "object") {
+    return null;
+  }
+  return readLogin(raw.author);
+}
+
+async function loadPullCommitLogins(io) {
+  const token = io.env.GITHUB_TOKEN;
+  const repository = io.env.GITHUB_REPOSITORY;
+  const number = io.env.PR_NUMBER;
+  const names = repositoryParts(repository);
+  if (!token || names == null || !number) {
+    return null;
+  }
+  let items;
+  try {
+    items = await loadPages(
+      io,
+      token,
+      `https://api.github.com/repos/${names.owner}/${names.repo}/pulls/${number}/commits?per_page=100`,
+    );
+  } catch {
+    return null;
+  }
+  if (items.length >= PULL_COMMIT_CAP) {
+    return null;
+  }
+  const logins = [];
+  for (const raw of items) {
+    const login = commitLogin(raw);
+    if (login == null) {
+      logins.push(null);
+      continue;
+    }
+    logins.push(login);
+  }
+  return logins;
+}
+
 function collectHits(base, head) {
   const entries = changedEntries(base, head);
   const agent = [];
@@ -394,6 +838,32 @@ async function main(argv = process.argv.slice(2), io = defaultIo) {
     return 1;
   }
   const { agent, gate } = grouped;
+  const hits = [...agent, ...gate];
+  if (hits.length > 0 && isRenovateLogin(io.env.PR_AUTHOR_LOGIN)) {
+    const commitLogins = await loadPullCommitLogins(io);
+    const workflowHits = hits.filter((hit) => isProtectedWorkflowPath(hit));
+    let fileChanges = [];
+    if (workflowHits.length > 0) {
+      try {
+        fileChanges = fileChangesFor(args.base, args.head, workflowHits);
+      } catch {
+        fileChanges = [];
+      }
+    }
+    const exemption = renovateWorkflowBumpExemption({
+      authorLogin: io.env.PR_AUTHOR_LOGIN,
+      commitLogins,
+      hits,
+      fileChanges,
+    });
+    if (exemption.ok) {
+      process.stdout.write(`${RENOVATE_EXEMPTION_MESSAGE}\n`);
+      return 0;
+    }
+    if (typeof exemption.message === "string" && exemption.message !== "") {
+      process.stderr.write(`${exemption.message}\n`);
+    }
+  }
   if (agent.length > 0) {
     writeHits("agent", agent);
     return 1;
@@ -424,8 +894,13 @@ module.exports = {
   isGateFile,
   classifyHits,
   gateApprovalFromEvents,
+  isVersionOnlyWorkflowChange,
+  renovateWorkflowBumpExemption,
+  WORKFLOW_BUMP_REFUSED_MESSAGE,
   GATE_FILES,
   GATE_LABEL,
+  RENOVATE_EXEMPTION_MESSAGE,
+  RENOVATE_LOGINS,
   main,
 };
 

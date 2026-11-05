@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
-const { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
+const { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { dirname, join } = require("node:path");
 const { test } = require("node:test");
@@ -10,12 +10,16 @@ const { test } = require("node:test");
 const {
   GATE_FILES,
   GATE_LABEL,
+  RENOVATE_EXEMPTION_MESSAGE,
   classifyHits,
   gateApprovalFromEvents,
   isGateFile,
   isProtectedSymlink,
+  isVersionOnlyWorkflowChange,
   main,
   protectedPaths,
+  renovateWorkflowBumpExemption,
+  WORKFLOW_BUMP_REFUSED_MESSAGE,
 } = require("../scripts/check-protected-paths.js");
 
 const root = join(__dirname, "..");
@@ -333,6 +337,7 @@ test("the workflow is read from the base branch and never checks out the pull", 
   assert.doesNotMatch(workflow, /cp scripts\/check-protected-paths\.js/);
   assert.match(workflow, /PR_AUTHOR_LOGIN:/);
   assert.match(workflow, /pull-requests:\s*read/);
+  assert.match(workflow, /npm ci/);
 });
 
 // runs the `run:` block of the workflow in a clone whose tree is the base; the pull head
@@ -351,6 +356,8 @@ function runWorkflowStep(headFiles) {
     git(origin, "config", "commit.gpgsign", "false");
     git(origin, "config", "uploadpack.allowAnySHA1InWant", "true");
     put(origin, "README.md", "x\n");
+    put(origin, "package.json", readFileSync(join(root, "package.json"), "utf8"));
+    put(origin, "package-lock.json", readFileSync(join(root, "package-lock.json"), "utf8"));
     put(origin, "scripts/check-protected-paths.js", readFileSync(script, "utf8"));
     git(origin, "add", "-A");
     git(origin, "commit", "-q", "-m", "init");
@@ -369,6 +376,8 @@ function runWorkflowStep(headFiles) {
     assert.equal(cloned.status, 0, cloned.stderr);
     const probe = spawnSync("git", ["cat-file", "-t", head], { cwd: clone, encoding: "utf8" });
     assert.notEqual(probe.status, 0, "the clone starts without the pull head");
+    // mirrors the workflow `npm ci` step: yaml is required by the checker
+    cpSync(join(root, "node_modules/yaml"), join(clone, "node_modules/yaml"), { recursive: true });
     return spawnSync("bash", ["-e", "-c", body], {
       cwd: clone,
       encoding: "utf8",
@@ -684,4 +693,710 @@ test("a verifier label does not waive an agent-config change", () => {
   assert.equal(result.status, 1);
   assert.match(result.stderr, /\.mcp\.json/);
   assert.doesNotMatch(result.stderr, new RegExp(GATE_LABEL));
+});
+
+const WORKFLOW = ".github/workflows/protected-paths.yml";
+const SHA_OLD = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const SHA_NEW = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const DIGEST_OLD = `sha256:${"c".repeat(64)}`;
+const DIGEST_NEW = `sha256:${"d".repeat(64)}`;
+
+function usesWorkflow(ref) {
+  return ["jobs:", "  build:", "    steps:", `      - uses: ${ref}`, ""].join("\n");
+}
+
+function containerWorkflow(image) {
+  return [
+    "jobs:",
+    "  build:",
+    `    container: ${image}`,
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+}
+
+function containerImageWorkflow(image) {
+  return [
+    "jobs:",
+    "  build:",
+    "    container:",
+    `      image: ${image}`,
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+}
+
+function serviceImageWorkflow(image) {
+  return [
+    "jobs:",
+    "  build:",
+    "    services:",
+    "      db:",
+    `        image: ${image}`,
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+}
+
+function envImageWorkflow(value) {
+  return [
+    "jobs:",
+    "  build:",
+    "    env:",
+    `      image: ${value}`,
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+}
+
+function runImageWorkflow(value) {
+  return [
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - run: |",
+    `          image: ${value}`,
+    "",
+  ].join("\n");
+}
+
+function bumpInput(overrides = {}) {
+  return {
+    authorLogin: "renovate[bot]",
+    commitLogins: ["renovate[bot]"],
+    hits: [WORKFLOW],
+    fileChanges: [
+      {
+        file: WORKFLOW,
+        before: usesWorkflow("actions/checkout@v4"),
+        after: usesWorkflow("actions/checkout@v5"),
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function twoJobUses(first, second) {
+  return [
+    "jobs:",
+    "  one:",
+    "    steps:",
+    `      - ${first}`,
+    "  two:",
+    "    steps:",
+    `      - ${second}`,
+    "",
+  ].join("\n");
+}
+
+function twoJobContainer(firstHasContainer) {
+  if (firstHasContainer) {
+    return [
+      "jobs:",
+      "  one:",
+      "    container: swift:6.4.2",
+      "    steps:",
+      "      - run: echo one",
+      "  two:",
+      "    steps:",
+      "      - run: echo two",
+      "",
+    ].join("\n");
+  }
+  return [
+    "jobs:",
+    "  one:",
+    "    steps:",
+    "      - run: echo one",
+    "  two:",
+    "    container: swift:6.4.2",
+    "    steps:",
+    "      - run: echo two",
+    "",
+  ].join("\n");
+}
+
+test("a Renovate tag bump of actions/checkout@v4 to @v5 is exempted", () => {
+  assert.deepEqual(isVersionOnlyWorkflowChange(usesWorkflow("actions/checkout@v4"), usesWorkflow("actions/checkout@v5")), {
+    ok: true,
+  });
+  assert.deepEqual(renovateWorkflowBumpExemption(bumpInput()), { ok: true });
+});
+
+test("a Renovate sha-pinned action bump is exempted", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: usesWorkflow(`actions/checkout@${SHA_OLD}`),
+          after: usesWorkflow(`actions/checkout@${SHA_NEW}`),
+        },
+      ],
+    }),
+  );
+  assert.deepEqual(decision, { ok: true });
+});
+
+test("a Renovate digest and container image bump is exempted", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: [
+            "jobs:",
+            "  build:",
+            "    container: swift:6.4.2",
+            "    services:",
+            "      db:",
+            `        image: swift@${DIGEST_OLD}`,
+            "    steps:",
+            `      - uses: actions/checkout@${SHA_OLD} # v4`,
+            "",
+          ].join("\n"),
+          after: [
+            "jobs:",
+            "  build:",
+            "    container: swift:6.4.3",
+            "    services:",
+            "      db:",
+            `        image: swift@${DIGEST_NEW}`,
+            "    steps:",
+            `      - uses: actions/checkout@${SHA_NEW} # v5`,
+            "",
+          ].join("\n"),
+        },
+      ],
+    }),
+  );
+  assert.deepEqual(decision, { ok: true });
+});
+
+test("a Renovate container.image mapping bump is exempted", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: containerImageWorkflow("swift:6.4.2"),
+          after: containerImageWorkflow("swift:6.4.3"),
+        },
+      ],
+    }),
+  );
+  assert.deepEqual(decision, { ok: true });
+});
+
+test("Renovate removing a container tag is blocked", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: containerWorkflow("swift:6.4.2"),
+          after: containerWorkflow("swift"),
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+  assert.equal(decision.message, WORKFLOW_BUMP_REFUSED_MESSAGE);
+});
+
+test("Renovate removing an image digest is blocked", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: serviceImageWorkflow(`swift@${DIGEST_OLD}`),
+          after: serviceImageWorkflow("swift"),
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+  assert.equal(decision.message, WORKFLOW_BUMP_REFUSED_MESSAGE);
+});
+
+test("Renovate removing a uses: pin is blocked", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: usesWorkflow("actions/checkout@v4"),
+          after: usesWorkflow("actions/checkout"),
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+  assert.equal(decision.message, WORKFLOW_BUMP_REFUSED_MESSAGE);
+});
+
+test("the same version bump by another author is blocked", () => {
+  const decision = renovateWorkflowBumpExemption(bumpInput({ authorLogin: "pr-author" }));
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "author");
+});
+
+test("Renovate adding a run step or changing permissions is blocked", () => {
+  const withRun = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: usesWorkflow("actions/checkout@v4"),
+          after: [
+            "jobs:",
+            "  build:",
+            "    steps:",
+            "      - uses: actions/checkout@v5",
+            "        run: echo hi",
+            "",
+          ].join("\n"),
+        },
+      ],
+    }),
+  );
+  assert.equal(withRun.ok, false);
+  assert.equal(withRun.reason, "diff");
+  const withPermissions = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: [
+            "jobs:",
+            "  build:",
+            "    permissions:",
+            "      contents: read",
+            "    steps:",
+            "      - uses: actions/checkout@v4",
+            "",
+          ].join("\n"),
+          after: [
+            "jobs:",
+            "  build:",
+            "    permissions:",
+            "      contents: write",
+            "    steps:",
+            "      - uses: actions/checkout@v4",
+            "",
+          ].join("\n"),
+        },
+      ],
+    }),
+  );
+  assert.equal(withPermissions.ok, false);
+  assert.equal(withPermissions.reason, "diff");
+});
+
+test("Renovate replacing the action name is blocked", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: usesWorkflow("actions/checkout@v4"),
+          after: usesWorkflow("evil/checkout@v5"),
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+});
+
+test("Renovate changing env.image is not a version bump", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: envImageWorkflow("policy:enforce"),
+          after: envImageWorkflow("policy:skip"),
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+  assert.equal(decision.message, WORKFLOW_BUMP_REFUSED_MESSAGE);
+});
+
+test("Renovate changing image: inside a run block is not a version bump", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: runImageWorkflow("policy:enforce"),
+          after: runImageWorkflow("policy:skip"),
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+  assert.equal(decision.message, WORKFLOW_BUMP_REFUSED_MESSAGE);
+});
+
+test("Renovate changing a local action path is not a version bump", () => {
+  assert.deepEqual(
+    isVersionOnlyWorkflowChange(
+      usesWorkflow("./.github/actions/guard@v1"),
+      usesWorkflow("./.github/actions/guard@v2"),
+    ),
+    { ok: false, message: WORKFLOW_BUMP_REFUSED_MESSAGE },
+  );
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: usesWorkflow("./.github/actions/guard@v1"),
+          after: usesWorkflow("./.github/actions/guard@v2"),
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+  assert.equal(decision.message, WORKFLOW_BUMP_REFUSED_MESSAGE);
+});
+
+test("Renovate YAML anchors and aliases are blocked with a French message", () => {
+  const anchored = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: usesWorkflow("actions/checkout@v4"),
+          after: ["jobs:", "  build:", "    steps:", "      - uses: &pin actions/checkout@v5", ""].join("\n"),
+        },
+      ],
+    }),
+  );
+  assert.equal(anchored.ok, false);
+  assert.equal(anchored.reason, "diff");
+  assert.equal(anchored.message, "ancre YAML &pin refusée");
+  const aliased = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: usesWorkflow("actions/checkout@v4"),
+          after: [
+            "jobs:",
+            "  build:",
+            "    steps:",
+            "      - uses: &pin actions/checkout@v5",
+            "      - uses: *pin",
+            "",
+          ].join("\n"),
+        },
+      ],
+    }),
+  );
+  assert.equal(aliased.ok, false);
+  assert.match(aliased.message, /ancre YAML &pin refusée|alias YAML \*pin refusé/);
+});
+
+test("Renovate changing a protected path that is not a workflow is blocked", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      hits: ["scripts/check-protected-paths.js"],
+      fileChanges: [
+        {
+          file: "scripts/check-protected-paths.js",
+          before: "        uses: actions/checkout@v4\n",
+          after: "        uses: actions/checkout@v5\n",
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "path");
+});
+
+test("a non-Renovate commit in a Renovate pull is blocked", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({ commitLogins: ["renovate[bot]", "pr-author"] }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "commits");
+});
+
+test("moving a uses: line between jobs is not a Renovate version bump", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: twoJobUses("uses: actions/checkout@v4", "run: echo"),
+          after: twoJobUses("run: echo", "uses: actions/checkout@v4"),
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+});
+
+test("moving a container: line between jobs is not a Renovate version bump", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: twoJobContainer(true),
+          after: twoJobContainer(false),
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+});
+
+async function withStdout(run) {
+  const chunks = [];
+  const write = process.stdout.write.bind(process.stdout);
+  process.stdout.write = (chunk, encoding, callback) => {
+    chunks.push(String(chunk));
+    if (typeof encoding === "function") {
+      encoding();
+      return true;
+    }
+    if (typeof callback === "function") {
+      callback();
+    }
+    return true;
+  };
+  try {
+    const code = await run();
+    return { code, stdout: chunks.join("") };
+  } finally {
+    process.stdout.write = write;
+  }
+}
+
+function commitsUrl() {
+  return "https://api.github.com/repos/acme/app/pulls/7/commits?per_page=100";
+}
+
+function renovateFetch(logins) {
+  return async (url) => {
+    if (url === commitsUrl()) {
+      return jsonResponse(logins.map((login) => ({ author: { login }, commit: { author: { name: "other" } } })));
+    }
+    throw new Error(`unexpected GET ${url}`);
+  };
+}
+
+const renovateEnv = {
+  ...gateEnv,
+  PR_AUTHOR_LOGIN: "renovate[bot]",
+};
+
+async function withWorkflowHead(afterText, run, beforeText = usesWorkflow("actions/checkout@v4")) {
+  const dir = mkdtempSync(join(tmpdir(), "check-protected-paths-"));
+  const previous = process.cwd();
+  try {
+    git(dir, "init", "-q", "-b", "main");
+    git(dir, "config", "user.email", "t@example.test");
+    git(dir, "config", "user.name", "t");
+    git(dir, "config", "commit.gpgsign", "false");
+    put(dir, WORKFLOW, beforeText);
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "init");
+    const base = git(dir, "rev-parse", "HEAD");
+    put(dir, WORKFLOW, afterText);
+    git(dir, "add", "-A");
+    git(dir, "commit", "-q", "-m", "bump");
+    const head = git(dir, "rev-parse", "HEAD");
+    process.chdir(dir);
+    return await run(base, head);
+  } finally {
+    process.chdir(previous);
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test("main exempts a Renovate workflow tag bump and prints the French notice", async () => {
+  await withWorkflowHead(usesWorkflow("actions/checkout@v5"), async (base, head) => {
+    const { code, stdout } = await withStdout(() =>
+      main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      }),
+    );
+    assert.equal(code, 0);
+    assert.equal(stdout.trim(), RENOVATE_EXEMPTION_MESSAGE);
+  });
+});
+
+test("main still blocks a Renovate pull that adds a run step", async () => {
+  await withWorkflowHead(
+    ["jobs:", "  build:", "    steps:", "      - uses: actions/checkout@v5", "        run: echo hi", ""].join("\n"),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+  );
+});
+
+test("main blocks a Renovate image rewrite that changes registry and repository", async () => {
+  await withWorkflowHead(
+    containerWorkflow("swift:443/other/image"),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    containerWorkflow("swift:6.4.2"),
+  );
+});
+
+test("main exempts a Renovate container tag bump", async () => {
+  await withWorkflowHead(
+    containerWorkflow("swift:6.4.3"),
+    async (base, head) => {
+      const { code, stdout } = await withStdout(() =>
+        main(["--base", base, "--head", head], {
+          env: renovateEnv,
+          fetch: renovateFetch(["renovate[bot]"]),
+        }),
+      );
+      assert.equal(code, 0);
+      assert.equal(stdout.trim(), RENOVATE_EXEMPTION_MESSAGE);
+    },
+    containerWorkflow("swift:6.4.2"),
+  );
+});
+
+test("main exempts a Renovate sha-pinned action bump", async () => {
+  await withWorkflowHead(
+    usesWorkflow(`actions/checkout@${SHA_NEW}`),
+    async (base, head) => {
+      const { code, stdout } = await withStdout(() =>
+        main(["--base", base, "--head", head], {
+          env: renovateEnv,
+          fetch: renovateFetch(["renovate[bot]"]),
+        }),
+      );
+      assert.equal(code, 0);
+      assert.equal(stdout.trim(), RENOVATE_EXEMPTION_MESSAGE);
+    },
+    usesWorkflow(`actions/checkout@${SHA_OLD}`),
+  );
+});
+
+test("main blocks a Renovate env.image change", async () => {
+  await withWorkflowHead(
+    envImageWorkflow("policy:skip"),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    envImageWorkflow("policy:enforce"),
+  );
+});
+
+test("main blocks a Renovate image: rewrite inside a run block", async () => {
+  await withWorkflowHead(
+    runImageWorkflow("policy:skip"),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    runImageWorkflow("policy:enforce"),
+  );
+});
+
+test("main blocks a Renovate pull that changes a local action path", async () => {
+  await withWorkflowHead(
+    usesWorkflow("./.github/actions/guard@v2"),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    usesWorkflow("./.github/actions/guard@v1"),
+  );
+});
+
+test("main blocks a Renovate pull that removes a pinned version", async () => {
+  await withWorkflowHead(
+    usesWorkflow("actions/checkout"),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    usesWorkflow("actions/checkout@v4"),
+  );
+});
+
+test("main blocks the same version bump from another author", async () => {
+  await withWorkflowHead(usesWorkflow("actions/checkout@v5"), async (base, head) => {
+    const code = await main(["--base", base, "--head", head], {
+      env: gateEnv,
+      fetch: renovateFetch(["renovate[bot]"]),
+    });
+    assert.equal(code, 1);
+  });
+});
+
+test("main blocks a Renovate pull that moves a uses: line to another job", async () => {
+  await withWorkflowHead(
+    twoJobUses("run: echo", "uses: actions/checkout@v4"),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    twoJobUses("uses: actions/checkout@v4", "run: echo"),
+  );
+});
+
+test("main blocks a Renovate pull that moves a container: line to another job", async () => {
+  await withWorkflowHead(
+    twoJobContainer(false),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    twoJobContainer(true),
+  );
 });
