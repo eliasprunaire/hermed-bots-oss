@@ -19,6 +19,8 @@ const {
   main,
   protectedPaths,
   renovateWorkflowBumpExemption,
+  selectRunsToRerun,
+  shouldRefreshFromEvent,
   WORKFLOW_BUMP_REFUSED_MESSAGE,
 } = require("../scripts/check-protected-paths.js");
 
@@ -1399,4 +1401,221 @@ test("main blocks a Renovate pull that moves a container: line to another job", 
     },
     twoJobContainer(true),
   );
+});
+
+const HEAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const HEAD_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+function pullRequestTargetEvent(action, sha = HEAD_A) {
+  return {
+    action,
+    label: { name: GATE_LABEL },
+    pull_request: {
+      number: 7,
+      user: { login: "pr-author" },
+      base: { sha: "cccccccccccccccccccccccccccccccccccccccc" },
+      head: { sha },
+    },
+  };
+}
+
+function verdictStatusEvent(sha = HEAD_A, state = "success") {
+  return { context: "verdict-gate", sha, state };
+}
+
+function workflowRun({ id, sha, number = 7, status = "completed" }) {
+  return {
+    id,
+    event: "pull_request_target",
+    status,
+    pull_requests: [{ number, head: { sha } }],
+  };
+}
+
+test("the workflow re-evaluates on verdict-gate status without leaving the required check on the default branch", () => {
+  const workflow = readFileSync(workflowPath, "utf8");
+  assert.match(workflow, /\n {2}status:\n/);
+  assert.match(workflow, /github\.event\.context == 'verdict-gate'/);
+  assert.match(workflow, /check-protected-paths\.js --refresh/);
+  assert.match(workflow, /if: github\.event_name == 'pull_request_target'/);
+  assert.match(workflow, /actions:\s*write/);
+});
+
+test("shouldRefreshFromEvent accepts a verdict-gate status on a commit and a label change", () => {
+  assert.equal(shouldRefreshFromEvent("status", verdictStatusEvent()), true);
+  assert.equal(shouldRefreshFromEvent("status", verdictStatusEvent(HEAD_A, "failure")), true);
+  assert.equal(shouldRefreshFromEvent("pull_request_target", pullRequestTargetEvent("labeled")), true);
+  assert.equal(shouldRefreshFromEvent("pull_request_target", pullRequestTargetEvent("unlabeled")), true);
+});
+
+test("shouldRefreshFromEvent refuses other statuses, other PR actions, and a truncated sha", () => {
+  assert.equal(shouldRefreshFromEvent("status", { context: "ci", sha: HEAD_A, state: "success" }), false);
+  assert.equal(
+    shouldRefreshFromEvent("status", { context: "verdict-gate", sha: "abc", state: "success" }),
+    false,
+  );
+  assert.equal(shouldRefreshFromEvent("pull_request_target", pullRequestTargetEvent("synchronize")), false);
+  assert.equal(shouldRefreshFromEvent("pull_request_target", pullRequestTargetEvent("opened")), false);
+  assert.equal(
+    shouldRefreshFromEvent("pull_request_target", {
+      ...pullRequestTargetEvent("labeled"),
+      label: { name: "documentation" },
+    }),
+    false,
+  );
+  assert.equal(shouldRefreshFromEvent("workflow_run", { action: "completed" }), false);
+});
+
+test("selectRunsToRerun keeps completed pull_request_target runs for the current head only", () => {
+  const runs = [
+    workflowRun({ id: 1, sha: HEAD_A }),
+    workflowRun({ id: 2, sha: HEAD_B }),
+    workflowRun({ id: 3, sha: HEAD_A, status: "in_progress" }),
+    {
+      id: 4,
+      event: "status",
+      status: "completed",
+      pull_requests: [{ number: 7, head: { sha: HEAD_A } }],
+    },
+    workflowRun({ id: 5, sha: HEAD_A, number: 8 }),
+  ];
+  assert.deepEqual(
+    selectRunsToRerun(runs, { number: 7, headSha: HEAD_A }).map((run) => run.id),
+    [1],
+  );
+  assert.deepEqual(selectRunsToRerun(runs, { number: 7, headSha: HEAD_B }).map((run) => run.id), [2]);
+});
+
+test("a verdict-gate status on the current head reruns the required pull_request_target check", async () => {
+  const posted = [];
+  const eventPath = join(mkdtempSync(join(tmpdir(), "protected-refresh-")), "event.json");
+  writeFileSync(eventPath, JSON.stringify(verdictStatusEvent(HEAD_A)));
+  const code = await main(["--refresh"], {
+    env: {
+      GITHUB_TOKEN: "test-token",
+      GITHUB_REPOSITORY: "acme/app",
+      GITHUB_EVENT_NAME: "status",
+      GITHUB_EVENT_PATH: eventPath,
+    },
+    readFile(path) {
+      return readFileSync(path, "utf8");
+    },
+    async fetch(url, init) {
+      if (url === `https://api.github.com/repos/acme/app/commits/${HEAD_A}/pulls`) {
+        return jsonResponse([
+          {
+            number: 7,
+            state: "open",
+            head: { sha: HEAD_A },
+          },
+        ]);
+      }
+      if (
+        url ===
+        "https://api.github.com/repos/acme/app/actions/workflows/protected-paths.yml/runs?event=pull_request_target&per_page=100"
+      ) {
+        return jsonResponse({
+          workflow_runs: [
+            workflowRun({ id: 41, sha: HEAD_A }),
+            workflowRun({ id: 42, sha: HEAD_B }),
+          ],
+        });
+      }
+      if (url === "https://api.github.com/repos/acme/app/actions/runs/41/rerun" && init && init.method === "POST") {
+        posted.push(url);
+        return { ok: true, status: 201, json: async () => ({}) };
+      }
+      throw new Error(`unexpected ${init && init.method} ${url}`);
+    },
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(posted, ["https://api.github.com/repos/acme/app/actions/runs/41/rerun"]);
+});
+
+test("a labeled event reruns the required check for the current head", async () => {
+  const posted = [];
+  const eventPath = join(mkdtempSync(join(tmpdir(), "protected-refresh-")), "event.json");
+  writeFileSync(eventPath, JSON.stringify(pullRequestTargetEvent("labeled", HEAD_A)));
+  const code = await main(["--refresh"], {
+    env: {
+      GITHUB_TOKEN: "test-token",
+      GITHUB_REPOSITORY: "acme/app",
+      GITHUB_EVENT_NAME: "pull_request_target",
+      GITHUB_EVENT_PATH: eventPath,
+    },
+    readFile(path) {
+      return readFileSync(path, "utf8");
+    },
+    async fetch(url, init) {
+      if (
+        url ===
+        "https://api.github.com/repos/acme/app/actions/workflows/protected-paths.yml/runs?event=pull_request_target&per_page=100"
+      ) {
+        return jsonResponse({ workflow_runs: [workflowRun({ id: 9, sha: HEAD_A })] });
+      }
+      if (url === "https://api.github.com/repos/acme/app/actions/runs/9/rerun" && init && init.method === "POST") {
+        posted.push(url);
+        return { ok: true, status: 201, json: async () => ({}) };
+      }
+      throw new Error(`unexpected ${init && init.method} ${url}`);
+    },
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(posted, ["https://api.github.com/repos/acme/app/actions/runs/9/rerun"]);
+});
+
+test("a verdict-gate status on an older sha does not rerun the current head check", async () => {
+  const posted = [];
+  const eventPath = join(mkdtempSync(join(tmpdir(), "protected-refresh-")), "event.json");
+  writeFileSync(eventPath, JSON.stringify(verdictStatusEvent(HEAD_A)));
+  const code = await main(["--refresh"], {
+    env: {
+      GITHUB_TOKEN: "test-token",
+      GITHUB_REPOSITORY: "acme/app",
+      GITHUB_EVENT_NAME: "status",
+      GITHUB_EVENT_PATH: eventPath,
+    },
+    readFile(path) {
+      return readFileSync(path, "utf8");
+    },
+    async fetch(url, init) {
+      if (url === `https://api.github.com/repos/acme/app/commits/${HEAD_A}/pulls`) {
+        return jsonResponse([
+          {
+            number: 7,
+            state: "open",
+            head: { sha: HEAD_B },
+          },
+        ]);
+      }
+      if (init && init.method === "POST") {
+        posted.push(url);
+      }
+      throw new Error(`unexpected ${init && init.method} ${url}`);
+    },
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(posted, []);
+});
+
+test("refresh still refuses to treat a non-verifier label as a reason to skip rerun filtering", () => {
+  assert.equal(
+    gateApprovalFromEvents([labeled(AUTHOR)], withGreen()).reason,
+    "not-verifier",
+  );
+  assert.equal(
+    gateApprovalFromEvents([labeled(VERIFIER, "2026-10-31T10:00:00Z")], withGreen()).reason,
+    "stale-label",
+  );
+  assert.equal(gateApprovalFromEvents([labeled(VERIFIER)], {}).reason, "no-verdict-gate");
+});
+
+test("the Renovate exemption is unchanged: a gate script change still needs the verifier", async () => {
+  await withGateHead(async (base, head) => {
+    const code = await main(["--base", base, "--head", head], {
+      env: renovateEnv,
+      fetch: renovateFetch(["renovate[bot]"]),
+    });
+    assert.equal(code, 1);
+  });
 });

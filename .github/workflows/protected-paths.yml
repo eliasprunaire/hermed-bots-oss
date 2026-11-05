@@ -3,17 +3,48 @@ name: Protected paths
 # pull_request_target: GitHub reads this definition from the base branch, so a pull cannot
 # disable the job by editing this file (for example with `if: false`)
 # the job checks out the base branch only: nothing from the pull is checked out or run
+#
+# status: GITHUB_SHA is the last commit on the default branch, so a job on this event
+# cannot itself satisfy a required check on the pull head. verdict-gate posts a commit
+# status on the head; this workflow then reruns the pull_request_target check already
+# attached to that head (the same effect as a manual re-run). check_run is not used:
+# GitHub does not fire it for check suites created by Actions.
 
 on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
+  status:
 
 permissions:
   contents: read
   pull-requests: read
 
 jobs:
+  refresh-on-verdict:
+    if: >-
+      github.event_name == 'status' && github.event.context == 'verdict-gate' ||
+      (github.event_name == 'pull_request_target' &&
+       (github.event.action == 'labeled' || github.event.action == 'unlabeled'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Relancer le contrôle requis sur le sha de tête
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/check-protected-paths.js --refresh
+
   protected-agent-config:
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
