@@ -267,6 +267,16 @@ test("Feature Map : SixActions seul choisit ui-core", () => {
   assert.deepEqual(onlyTestingArgs(json.ui_plan), UI_CORE_ONLY_TESTING.map((id) => `-only-testing:${id}`));
 });
 
+test("Feature Map : HVShot seul force ui-full (helper captures, hors plan court)", () => {
+  const res = run(["--dry-run", "--files", "HermedBotsUITests/HVShot.swift"]);
+  assert.equal(res.status, 0, res.stderr);
+  const json = parseOut(res);
+  assertSchema(json);
+  assert.equal(json.path, "ui");
+  assert.equal(json.ui_plan, "ui-full");
+  assert.deepEqual(onlyTestingArgs(json.ui_plan), []);
+});
+
 test("Feature Map : LaunchTests et Errors (HD12Video) restent ui-core", () => {
   const res = run([
     "--dry-run",
@@ -295,6 +305,7 @@ test("Feature Map : captures et profils forcent ui-full", () => {
     "HermedBotsUITests/Compat.swift",
     "HermedBotsUITests/VersionProfiles.swift",
     "HermedBotsUITests/DesignShots.swift",
+    "HermedBotsUITests/HVShot.swift",
     "baselines/hd08-bots.png",
   ]) {
     const res = run(["--dry-run", "--files", file]);

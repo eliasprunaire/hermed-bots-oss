@@ -518,7 +518,7 @@ final class SixActions: XCTestCase {
     func testReopeningAThreadShowsItsTranscriptAndSendsNothing() throws {
         try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
         let start = Date()
-        let app = launch(isolated: false)
+        let app = launch()
         try openBot(in: app)
         openThread("s-past-1", in: app)
         XCTAssertTrue(waitForMessage(containing: "Réponse de test", in: app), "le transcript du fil n'arrive pas")
@@ -727,8 +727,8 @@ final class SixActions: XCTestCase {
     }
 
     /// Le sélecteur n'a qu'une option tant que les profils ont tous le même modèle : `hv-bot-b` prend `model-y`
+    /// Ne réinitialise pas le faux serveur : les scénarios appellent `FakeServer.reset()` avant `lockModel` ou `configureFake`.
     private func launchWithTwoModels() -> XCUIApplication {
-        FakeServer.reset()
         FakeServer.setProfileModels(["hv-bot-b": "model-y"])
         return launch()
     }
@@ -776,6 +776,7 @@ final class SixActions: XCTestCase {
     /// Le message suivant part avec le modèle choisi : `POST /v1/runs` ignore le verrou de la session (S4)
     func testModelSwitch() throws {
         try requireFakeServer()
+        FakeServer.reset()
         let app = launchWithTwoModels()
         try openBot(in: app)
         let picker = element(.modelPicker, in: app)
@@ -806,6 +807,7 @@ final class SixActions: XCTestCase {
     /// Un choix fait avant le premier message : affiché tout de suite, verrouillé à la création du fil, et le premier tour part avec le modèle confirmé
     func testAModelPickedBeforeTheFirstMessageIsLockedOnCreationAndTheFirstTurnUsesIt() throws {
         try requireFakeServer()
+        FakeServer.reset()
         let app = launchWithTwoModels()
         try openBot(in: app)
         // Chat unique : s-past-1 est déjà le fil ouvert ; le choix se verrouille tout de suite sur ce fil
@@ -831,6 +833,7 @@ final class SixActions: XCTestCase {
     /// Lane 2 : le choix reste sur la session ; une nouvelle session montre le modèle du profil
     func testAChosenModelStaysOnItsSessionAndANewSessionShowsTheProfileModel() throws {
         try requireFakeServer()
+        FakeServer.reset()
         let app = launchWithTwoModels()
         try openBot(in: app)
         openThread("s-past-1", in: app)
@@ -851,6 +854,7 @@ final class SixActions: XCTestCase {
     func testAnUnknownModelNameShowsAsSentAndNothingCrashes() throws {
         try requireFakeServer()
         let unknown = "Modèle inconnu (x) 9"
+        FakeServer.reset()
         FakeServer.lockModel(profile: "hv-bot-a", session: "s-past-1", model: unknown)
         let app = launchWithTwoModels()
         try openBot(in: app)
@@ -892,6 +896,7 @@ final class SixActions: XCTestCase {
     /// Lane 6 : le même choix deux fois de suite ne part qu'une fois
     func testSelectingTheSameOptionTwiceFastSendsOneSetModel() throws {
         try requireFakeServer()
+        FakeServer.reset()
         let app = launchWithTwoModels()
         try openBot(in: app)
         openThread("s-past-1", in: app)
@@ -911,6 +916,7 @@ final class SixActions: XCTestCase {
     /// Un message qui contient HV_SLOW espace les événements d'une seconde (faux serveur)
     func testSwitchingWhileATurnRunsLeavesTheTurnAloneAndAppliesToTheNextOne() throws {
         try requireFakeServer()
+        FakeServer.reset()
         let app = launchWithTwoModels()
         try openBot(in: app)
         openThread("s-past-1", in: app)
@@ -936,7 +942,8 @@ final class SixActions: XCTestCase {
     /// Lane 8 : `HV_FAKE_MODE=slow` (chaque réponse attend 8 s) : le sélecteur montre l'attente, la fenêtre répond
     func testASlowServerShowsAWaitStateAndTheWindowStaysResponsive() throws {
         try configureFake(mode: "slow")
-        let app = launchWithTwoModels()
+        FakeServer.setProfileModels(["hv-bot-b": "model-y"])
+        let app = launch()
         try openBot(in: app)
         XCTAssertTrue(element(.conversationView, in: app).waitForExistence(timeout: 40))
         pickModel("model-y", in: app)
@@ -955,6 +962,7 @@ final class SixActions: XCTestCase {
     /// Lane 9 : un fil rouvert dont la session a un autre modèle le montre
     func testReopeningAThreadShowsTheModelOfItsSession() throws {
         try requireFakeServer()
+        FakeServer.reset()
         FakeServer.lockModel(profile: "hv-bot-a", session: "s-past-1", model: "model-y")
         let start = Date()
         let app = launchWithTwoModels()

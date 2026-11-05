@@ -122,6 +122,7 @@
         { "glob": "HermedBotsUITests/SixActions.swift", "needs_ui": true, "ui_plan": "core" },
         { "glob": "HermedBotsUITests/LaunchTests.swift", "needs_ui": true, "ui_plan": "core" },
         { "glob": "HermedBotsUITests/Errors.swift", "needs_ui": true, "ui_plan": "core" },
+        { "glob": "HermedBotsUITests/HVShot.swift", "needs_ui": true, "ui_plan": "full" },
         { "glob": "HermedBotsUITests/**", "needs_ui": true, "ui_plan": "core" }
       ]
     },
