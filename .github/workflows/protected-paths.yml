@@ -24,6 +24,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      - name: Installer les dépendances
+        run: npm ci
       - name: Fail on changes to agent config
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

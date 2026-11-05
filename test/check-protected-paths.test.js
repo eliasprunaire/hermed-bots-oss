@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
-const { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
+const { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { dirname, join } = require("node:path");
 const { test } = require("node:test");
@@ -15,10 +15,11 @@ const {
   gateApprovalFromEvents,
   isGateFile,
   isProtectedSymlink,
-  isVersionBumpPair,
+  isVersionOnlyWorkflowChange,
   main,
   protectedPaths,
   renovateWorkflowBumpExemption,
+  WORKFLOW_BUMP_REFUSED_MESSAGE,
 } = require("../scripts/check-protected-paths.js");
 
 const root = join(__dirname, "..");
@@ -336,6 +337,7 @@ test("the workflow is read from the base branch and never checks out the pull", 
   assert.doesNotMatch(workflow, /cp scripts\/check-protected-paths\.js/);
   assert.match(workflow, /PR_AUTHOR_LOGIN:/);
   assert.match(workflow, /pull-requests:\s*read/);
+  assert.match(workflow, /npm ci/);
 });
 
 // runs the `run:` block of the workflow in a clone whose tree is the base; the pull head
@@ -354,6 +356,8 @@ function runWorkflowStep(headFiles) {
     git(origin, "config", "commit.gpgsign", "false");
     git(origin, "config", "uploadpack.allowAnySHA1InWant", "true");
     put(origin, "README.md", "x\n");
+    put(origin, "package.json", readFileSync(join(root, "package.json"), "utf8"));
+    put(origin, "package-lock.json", readFileSync(join(root, "package-lock.json"), "utf8"));
     put(origin, "scripts/check-protected-paths.js", readFileSync(script, "utf8"));
     git(origin, "add", "-A");
     git(origin, "commit", "-q", "-m", "init");
@@ -372,6 +376,8 @@ function runWorkflowStep(headFiles) {
     assert.equal(cloned.status, 0, cloned.stderr);
     const probe = spawnSync("git", ["cat-file", "-t", head], { cwd: clone, encoding: "utf8" });
     assert.notEqual(probe.status, 0, "the clone starts without the pull head");
+    // mirrors the workflow `npm ci` step: yaml is required by the checker
+    cpSync(join(root, "node_modules/yaml"), join(clone, "node_modules/yaml"), { recursive: true });
     return spawnSync("bash", ["-e", "-c", body], {
       cwd: clone,
       encoding: "utf8",
@@ -695,6 +701,69 @@ const SHA_NEW = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 const DIGEST_OLD = `sha256:${"c".repeat(64)}`;
 const DIGEST_NEW = `sha256:${"d".repeat(64)}`;
 
+function usesWorkflow(ref) {
+  return ["jobs:", "  build:", "    steps:", `      - uses: ${ref}`, ""].join("\n");
+}
+
+function containerWorkflow(image) {
+  return [
+    "jobs:",
+    "  build:",
+    `    container: ${image}`,
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+}
+
+function containerImageWorkflow(image) {
+  return [
+    "jobs:",
+    "  build:",
+    "    container:",
+    `      image: ${image}`,
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+}
+
+function serviceImageWorkflow(image) {
+  return [
+    "jobs:",
+    "  build:",
+    "    services:",
+    "      db:",
+    `        image: ${image}`,
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+}
+
+function envImageWorkflow(value) {
+  return [
+    "jobs:",
+    "  build:",
+    "    env:",
+    `      image: ${value}`,
+    "    steps:",
+    "      - run: echo ok",
+    "",
+  ].join("\n");
+}
+
+function runImageWorkflow(value) {
+  return [
+    "jobs:",
+    "  build:",
+    "    steps:",
+    "      - run: |",
+    `          image: ${value}`,
+    "",
+  ].join("\n");
+}
+
 function bumpInput(overrides = {}) {
   return {
     authorLogin: "renovate[bot]",
@@ -703,8 +772,8 @@ function bumpInput(overrides = {}) {
     fileChanges: [
       {
         file: WORKFLOW,
-        before: "        uses: actions/checkout@v4\n",
-        after: "        uses: actions/checkout@v5\n",
+        before: usesWorkflow("actions/checkout@v4"),
+        after: usesWorkflow("actions/checkout@v5"),
       },
     ],
     ...overrides,
@@ -752,8 +821,25 @@ function twoJobContainer(firstHasContainer) {
 }
 
 test("a Renovate tag bump of actions/checkout@v4 to @v5 is exempted", () => {
-  assert.equal(isVersionBumpPair("        uses: actions/checkout@v4", "        uses: actions/checkout@v5"), true);
+  assert.deepEqual(isVersionOnlyWorkflowChange(usesWorkflow("actions/checkout@v4"), usesWorkflow("actions/checkout@v5")), {
+    ok: true,
+  });
   assert.deepEqual(renovateWorkflowBumpExemption(bumpInput()), { ok: true });
+});
+
+test("a Renovate sha-pinned action bump is exempted", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: usesWorkflow(`actions/checkout@${SHA_OLD}`),
+          after: usesWorkflow(`actions/checkout@${SHA_NEW}`),
+        },
+      ],
+    }),
+  );
+  assert.deepEqual(decision, { ok: true });
 });
 
 test("a Renovate digest and container image bump is exempted", () => {
@@ -763,17 +849,42 @@ test("a Renovate digest and container image bump is exempted", () => {
         {
           file: WORKFLOW,
           before: [
-            `        uses: actions/checkout@${SHA_OLD} # v4`,
+            "jobs:",
+            "  build:",
             "    container: swift:6.4.2",
+            "    services:",
+            "      db:",
             `        image: swift@${DIGEST_OLD}`,
+            "    steps:",
+            `      - uses: actions/checkout@${SHA_OLD} # v4`,
             "",
           ].join("\n"),
           after: [
-            `        uses: actions/checkout@${SHA_NEW} # v5`,
+            "jobs:",
+            "  build:",
             "    container: swift:6.4.3",
+            "    services:",
+            "      db:",
             `        image: swift@${DIGEST_NEW}`,
+            "    steps:",
+            `      - uses: actions/checkout@${SHA_NEW} # v5`,
             "",
           ].join("\n"),
+        },
+      ],
+    }),
+  );
+  assert.deepEqual(decision, { ok: true });
+});
+
+test("a Renovate container.image mapping bump is exempted", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: containerImageWorkflow("swift:6.4.2"),
+          after: containerImageWorkflow("swift:6.4.3"),
         },
       ],
     }),
@@ -787,15 +898,15 @@ test("Renovate removing a container tag is blocked", () => {
       fileChanges: [
         {
           file: WORKFLOW,
-          before: "    container: swift:6.4.2\n",
-          after: "    container: swift\n",
+          before: containerWorkflow("swift:6.4.2"),
+          after: containerWorkflow("swift"),
         },
       ],
     }),
   );
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "diff");
-  assert.equal(isVersionBumpPair("    container: swift:6.4.2", "    container: swift"), false);
+  assert.equal(decision.message, WORKFLOW_BUMP_REFUSED_MESSAGE);
 });
 
 test("Renovate removing an image digest is blocked", () => {
@@ -804,15 +915,15 @@ test("Renovate removing an image digest is blocked", () => {
       fileChanges: [
         {
           file: WORKFLOW,
-          before: `        image: swift@${DIGEST_OLD}\n`,
-          after: "        image: swift\n",
+          before: serviceImageWorkflow(`swift@${DIGEST_OLD}`),
+          after: serviceImageWorkflow("swift"),
         },
       ],
     }),
   );
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "diff");
-  assert.equal(isVersionBumpPair(`        image: swift@${DIGEST_OLD}`, "        image: swift"), false);
+  assert.equal(decision.message, WORKFLOW_BUMP_REFUSED_MESSAGE);
 });
 
 test("Renovate removing a uses: pin is blocked", () => {
@@ -821,15 +932,15 @@ test("Renovate removing a uses: pin is blocked", () => {
       fileChanges: [
         {
           file: WORKFLOW,
-          before: "        uses: actions/checkout@v4\n",
-          after: "        uses: actions/checkout\n",
+          before: usesWorkflow("actions/checkout@v4"),
+          after: usesWorkflow("actions/checkout"),
         },
       ],
     }),
   );
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "diff");
-  assert.equal(isVersionBumpPair("        uses: actions/checkout@v4", "        uses: actions/checkout"), false);
+  assert.equal(decision.message, WORKFLOW_BUMP_REFUSED_MESSAGE);
 });
 
 test("the same version bump by another author is blocked", () => {
@@ -844,8 +955,15 @@ test("Renovate adding a run step or changing permissions is blocked", () => {
       fileChanges: [
         {
           file: WORKFLOW,
-          before: "        uses: actions/checkout@v4\n",
-          after: "        uses: actions/checkout@v5\n        run: echo hi\n",
+          before: usesWorkflow("actions/checkout@v4"),
+          after: [
+            "jobs:",
+            "  build:",
+            "    steps:",
+            "      - uses: actions/checkout@v5",
+            "        run: echo hi",
+            "",
+          ].join("\n"),
         },
       ],
     }),
@@ -857,15 +975,30 @@ test("Renovate adding a run step or changing permissions is blocked", () => {
       fileChanges: [
         {
           file: WORKFLOW,
-          before: "    permissions: contents: read\n",
-          after: "    permissions: contents: write\n",
+          before: [
+            "jobs:",
+            "  build:",
+            "    permissions:",
+            "      contents: read",
+            "    steps:",
+            "      - uses: actions/checkout@v4",
+            "",
+          ].join("\n"),
+          after: [
+            "jobs:",
+            "  build:",
+            "    permissions:",
+            "      contents: write",
+            "    steps:",
+            "      - uses: actions/checkout@v4",
+            "",
+          ].join("\n"),
         },
       ],
     }),
   );
   assert.equal(withPermissions.ok, false);
   assert.equal(withPermissions.reason, "diff");
-  assert.equal(isVersionBumpPair("    permissions: contents: read", "    permissions: contents: write"), false);
 });
 
 test("Renovate replacing the action name is blocked", () => {
@@ -874,18 +1007,85 @@ test("Renovate replacing the action name is blocked", () => {
       fileChanges: [
         {
           file: WORKFLOW,
-          before: "        uses: actions/checkout@v4\n",
-          after: "        uses: evil/checkout@v5\n",
+          before: usesWorkflow("actions/checkout@v4"),
+          after: usesWorkflow("evil/checkout@v5"),
         },
       ],
     }),
   );
   assert.equal(decision.ok, false);
   assert.equal(decision.reason, "diff");
-  assert.equal(
-    isVersionBumpPair("        uses: actions/checkout@v4", "        uses: evil/checkout@v5"),
-    false,
+});
+
+test("Renovate changing env.image is not a version bump", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: envImageWorkflow("policy:enforce"),
+          after: envImageWorkflow("policy:skip"),
+        },
+      ],
+    }),
   );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+  assert.equal(decision.message, WORKFLOW_BUMP_REFUSED_MESSAGE);
+});
+
+test("Renovate changing image: inside a run block is not a version bump", () => {
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: runImageWorkflow("policy:enforce"),
+          after: runImageWorkflow("policy:skip"),
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+  assert.equal(decision.message, WORKFLOW_BUMP_REFUSED_MESSAGE);
+});
+
+test("Renovate YAML anchors and aliases are blocked with a French message", () => {
+  const anchored = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: usesWorkflow("actions/checkout@v4"),
+          after: ["jobs:", "  build:", "    steps:", "      - uses: &pin actions/checkout@v5", ""].join("\n"),
+        },
+      ],
+    }),
+  );
+  assert.equal(anchored.ok, false);
+  assert.equal(anchored.reason, "diff");
+  assert.equal(anchored.message, "ancre YAML &pin refusée");
+  const aliased = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: usesWorkflow("actions/checkout@v4"),
+          after: [
+            "jobs:",
+            "  build:",
+            "    steps:",
+            "      - uses: &pin actions/checkout@v5",
+            "      - uses: *pin",
+            "",
+          ].join("\n"),
+        },
+      ],
+    }),
+  );
+  assert.equal(aliased.ok, false);
+  assert.match(aliased.message, /ancre YAML &pin refusée|alias YAML \*pin refusé/);
 });
 
 test("Renovate changing a protected path that is not a workflow is blocked", () => {
@@ -985,7 +1185,7 @@ const renovateEnv = {
   PR_AUTHOR_LOGIN: "renovate[bot]",
 };
 
-async function withWorkflowHead(afterText, run, beforeText = "        uses: actions/checkout@v4\n") {
+async function withWorkflowHead(afterText, run, beforeText = usesWorkflow("actions/checkout@v4")) {
   const dir = mkdtempSync(join(tmpdir(), "check-protected-paths-"));
   const previous = process.cwd();
   try {
@@ -1010,7 +1210,7 @@ async function withWorkflowHead(afterText, run, beforeText = "        uses: acti
 }
 
 test("main exempts a Renovate workflow tag bump and prints the French notice", async () => {
-  await withWorkflowHead("        uses: actions/checkout@v5\n", async (base, head) => {
+  await withWorkflowHead(usesWorkflow("actions/checkout@v5"), async (base, head) => {
     const { code, stdout } = await withStdout(() =>
       main(["--base", base, "--head", head], {
         env: renovateEnv,
@@ -1023,18 +1223,8 @@ test("main exempts a Renovate workflow tag bump and prints the French notice", a
 });
 
 test("main still blocks a Renovate pull that adds a run step", async () => {
-  await withWorkflowHead("        uses: actions/checkout@v5\n        run: echo hi\n", async (base, head) => {
-    const code = await main(["--base", base, "--head", head], {
-      env: renovateEnv,
-      fetch: renovateFetch(["renovate[bot]"]),
-    });
-    assert.equal(code, 1);
-  });
-});
-
-test("main blocks a Renovate image rewrite that changes registry and repository", async () => {
   await withWorkflowHead(
-    "    container: swift:443/other/image\n",
+    ["jobs:", "  build:", "    steps:", "      - uses: actions/checkout@v5", "        run: echo hi", ""].join("\n"),
     async (base, head) => {
       const code = await main(["--base", base, "--head", head], {
         env: renovateEnv,
@@ -1042,13 +1232,26 @@ test("main blocks a Renovate image rewrite that changes registry and repository"
       });
       assert.equal(code, 1);
     },
-    "    container: swift:6.4.2\n",
+  );
+});
+
+test("main blocks a Renovate image rewrite that changes registry and repository", async () => {
+  await withWorkflowHead(
+    containerWorkflow("swift:443/other/image"),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    containerWorkflow("swift:6.4.2"),
   );
 });
 
 test("main exempts a Renovate container tag bump", async () => {
   await withWorkflowHead(
-    "    container: swift:6.4.3\n",
+    containerWorkflow("swift:6.4.3"),
     async (base, head) => {
       const { code, stdout } = await withStdout(() =>
         main(["--base", base, "--head", head], {
@@ -1059,8 +1262,77 @@ test("main exempts a Renovate container tag bump", async () => {
       assert.equal(code, 0);
       assert.equal(stdout.trim(), RENOVATE_EXEMPTION_MESSAGE);
     },
-    "    container: swift:6.4.2\n",
+    containerWorkflow("swift:6.4.2"),
   );
+});
+
+test("main exempts a Renovate sha-pinned action bump", async () => {
+  await withWorkflowHead(
+    usesWorkflow(`actions/checkout@${SHA_NEW}`),
+    async (base, head) => {
+      const { code, stdout } = await withStdout(() =>
+        main(["--base", base, "--head", head], {
+          env: renovateEnv,
+          fetch: renovateFetch(["renovate[bot]"]),
+        }),
+      );
+      assert.equal(code, 0);
+      assert.equal(stdout.trim(), RENOVATE_EXEMPTION_MESSAGE);
+    },
+    usesWorkflow(`actions/checkout@${SHA_OLD}`),
+  );
+});
+
+test("main blocks a Renovate env.image change", async () => {
+  await withWorkflowHead(
+    envImageWorkflow("policy:skip"),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    envImageWorkflow("policy:enforce"),
+  );
+});
+
+test("main blocks a Renovate image: rewrite inside a run block", async () => {
+  await withWorkflowHead(
+    runImageWorkflow("policy:skip"),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    runImageWorkflow("policy:enforce"),
+  );
+});
+
+test("main blocks a Renovate pull that removes a pinned version", async () => {
+  await withWorkflowHead(
+    usesWorkflow("actions/checkout"),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    usesWorkflow("actions/checkout@v4"),
+  );
+});
+
+test("main blocks the same version bump from another author", async () => {
+  await withWorkflowHead(usesWorkflow("actions/checkout@v5"), async (base, head) => {
+    const code = await main(["--base", base, "--head", head], {
+      env: gateEnv,
+      fetch: renovateFetch(["renovate[bot]"]),
+    });
+    assert.equal(code, 1);
+  });
 });
 
 test("main blocks a Renovate pull that moves a uses: line to another job", async () => {
