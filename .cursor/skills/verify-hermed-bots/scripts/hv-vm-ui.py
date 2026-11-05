@@ -125,6 +125,21 @@ def guest(evidence: str, xctestrun: str) -> int:
         "-resultBundlePath",
         str(evd / "result.xcresult"),
     ]
+    plan = os.environ.get("HV_UI_PLAN", "ui-full")
+    if plan == "ui-core":
+        cmd.extend(
+            [
+                "-only-testing:HermedBotsUITests/SixActions",
+                "-only-testing:HermedBotsUITests/LaunchTests",
+                "-only-testing:HermedBotsUITests/HD12Video",
+            ]
+        )
+        log("UI plan=ui-core (SixActions LaunchTests HD12Video)")
+    elif plan in ("ui-full", "none", ""):
+        log("UI plan=ui-full")
+    else:
+        log("HV_UI_PLAN inconnu : %s (ui-core ou ui-full)" % plan)
+        return 2
     with log_path.open("w", encoding="utf-8") as fh:
         proc = subprocess.run(cmd, env=env, stdout=fh, stderr=subprocess.STDOUT)
     return 10 if proc.returncode else 0

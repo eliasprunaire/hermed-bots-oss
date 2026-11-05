@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
-const { mkdirSync, mkdtempSync, rmSync, writeFileSync } = require("node:fs");
+const { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
@@ -10,6 +10,8 @@ const { test } = require("node:test");
 const {
   DEFAULT_SCHEMA,
   SKILL_ROOT,
+  UI_CORE_ONLY_TESTING,
+  onlyTestingArgs,
   validateAgainstSchema,
 } = require("../scripts/hv-classify.js");
 
@@ -45,6 +47,7 @@ test("fixture fast: hors UI, path=fast", () => {
   assert.ok(json.features.includes("hermes-adapter"));
   assert.ok(json.features.includes("sparkle-update"));
   assert.equal(json.mode, "full");
+  assert.equal(json.ui_plan, "none");
 });
 
 test("fixture ui: fichiers UI, path=ui", () => {
@@ -58,6 +61,7 @@ test("fixture ui: fichiers UI, path=ui", () => {
   assert.ok(json.features.includes("bot-list"));
   assert.ok(json.features.includes("conversation"));
   assert.ok(json.features.includes("app-shell"));
+  assert.equal(json.ui_plan, "ui-full");
 });
 
 test("Resources/Localizable.xcstrings classe en ui", () => {
@@ -69,6 +73,7 @@ test("Resources/Localizable.xcstrings classe en ui", () => {
   assert.equal(json.needs_ui, true);
   assert.equal(json.ok, true);
   assert.ok(json.features.includes("app-shell"));
+  assert.equal(json.ui_plan, "ui-full");
 });
 
 test("Resources/Localizable.xcstrings en fast_suspended si UI indisponible", () => {
@@ -191,7 +196,7 @@ test("la sortie dry-run valide le schéma v1", () => {
   assert.equal(res.status, 0, res.stderr);
   const json = parseOut(res);
   assertSchema(json);
-  assert.deepEqual(Object.keys(json).sort(), ["errors", "features", "mode", "needs_ui", "ok", "path"]);
+  assert.deepEqual(Object.keys(json).sort(), ["errors", "features", "mode", "needs_ui", "ok", "path", "ui_plan"]);
 });
 
 test("mode light si même patch-id et PR déjà PASS", () => {
@@ -250,4 +255,114 @@ test("doctor du skill réel est ok", () => {
   const json = JSON.parse(res.stdout.trim());
   assert.equal(json.ok, true);
   assert.deepEqual(json.missing, []);
+});
+
+test("Feature Map : SixActions seul choisit ui-core", () => {
+  const res = run(["--dry-run", "--files", "HermedBotsUITests/SixActions.swift"]);
+  assert.equal(res.status, 0, res.stderr);
+  const json = parseOut(res);
+  assertSchema(json);
+  assert.equal(json.path, "ui");
+  assert.equal(json.ui_plan, "ui-core");
+  assert.deepEqual(onlyTestingArgs(json.ui_plan), UI_CORE_ONLY_TESTING.map((id) => `-only-testing:${id}`));
+});
+
+test("Feature Map : LaunchTests et Errors (HD12Video) restent ui-core", () => {
+  const res = run([
+    "--dry-run",
+    "--files",
+    "HermedBotsUITests/LaunchTests.swift,HermedBotsUITests/Errors.swift",
+  ]);
+  assert.equal(res.status, 0, res.stderr);
+  const json = parseOut(res);
+  assertSchema(json);
+  assert.equal(json.ui_plan, "ui-core");
+});
+
+test("Feature Map : Swift d'interface force ui-full", () => {
+  const res = run(["--dry-run", "--files", "HermedBots/Bots/BotList.swift"]);
+  assert.equal(res.status, 0, res.stderr);
+  const json = parseOut(res);
+  assertSchema(json);
+  assert.equal(json.ui_plan, "ui-full");
+  assert.deepEqual(onlyTestingArgs(json.ui_plan), []);
+});
+
+test("Feature Map : captures et profils forcent ui-full", () => {
+  for (const file of [
+    "HermedBotsUITests/Piste1Shots.swift",
+    "HermedBotsUITests/ProfileKeys.swift",
+    "HermedBotsUITests/Compat.swift",
+    "HermedBotsUITests/VersionProfiles.swift",
+    "HermedBotsUITests/DesignShots.swift",
+    "baselines/hd08-bots.png",
+  ]) {
+    const res = run(["--dry-run", "--files", file]);
+    assert.equal(res.status, 0, res.stderr);
+    const json = parseOut(res);
+    assertSchema(json);
+    assert.equal(json.path, "ui", file);
+    assert.equal(json.ui_plan, "ui-full", file);
+  }
+});
+
+test("Feature Map : Swift d'interface + tests core = ui-full", () => {
+  const res = run([
+    "--dry-run",
+    "--files",
+    "HermedBotsUITests/SixActions.swift,HermedBots/Conversation/Conversation.swift",
+  ]);
+  assert.equal(res.status, 0, res.stderr);
+  const json = parseOut(res);
+  assertSchema(json);
+  assert.equal(json.ui_plan, "ui-full");
+});
+
+test("Feature Map : Swift d'interface hors carte force ui-full", () => {
+  const res = run(["--dry-run", "--files", "HermedBots/Unmapped/NewScreen.swift"]);
+  assert.equal(res.status, 0, res.stderr);
+  const json = parseOut(res);
+  assertSchema(json);
+  assert.equal(json.path, "ui");
+  assert.equal(json.needs_ui, true);
+  assert.equal(json.ui_plan, "ui-full");
+});
+
+test("Feature Map : Secrets.swift n'ouvre pas de passe UI", () => {
+  const res = run(["--dry-run", "--files", "HermedBots/Secrets/SecretStore.swift"]);
+  assert.equal(res.status, 0, res.stderr);
+  const json = parseOut(res);
+  assertSchema(json);
+  assert.equal(json.path, "fast");
+  assert.equal(json.ui_plan, "none");
+});
+
+test("Feature Map : doute (autre test UI) choisit ui-full si ui_plan full, sinon ui-core", () => {
+  const tunnel = run(["--dry-run", "--files", "HermedBotsUITests/TunnelTests.swift"]);
+  assert.equal(tunnel.status, 0, tunnel.stderr);
+  assert.equal(parseOut(tunnel).ui_plan, "ui-core");
+});
+
+test("hv-run et hv-vm-ui filtrent ui-core par -only-testing", () => {
+  const runSh = readFileSync(join(SKILL_ROOT, "scripts", "hv-run.sh"), "utf8");
+  const vmUi = readFileSync(join(SKILL_ROOT, "scripts", "hv-vm-ui.py"), "utf8");
+  for (const src of [runSh, vmUi]) {
+    assert.match(src, /HV_UI_PLAN/);
+    assert.match(src, /-only-testing:HermedBotsUITests\/SixActions/);
+    assert.match(src, /-only-testing:HermedBotsUITests\/LaunchTests/);
+    assert.match(src, /-only-testing:HermedBotsUITests\/HD12Video/);
+  }
+});
+
+test("plans XCTest : ui-core sélectionne SixActions LaunchTests HD12Video", () => {
+  const core = JSON.parse(readFileSync(join(SKILL_ROOT, "..", "..", "..", "TestPlans", "UICore.xctestplan"), "utf8"));
+  const full = JSON.parse(readFileSync(join(SKILL_ROOT, "..", "..", "..", "TestPlans", "UIFull.xctestplan"), "utf8"));
+  const selected = core.testTargets[0].selectedTests;
+  assert.deepEqual([...selected].sort(), ["HD12Video", "LaunchTests", "SixActions"]);
+  assert.equal(core.testTargets[0].parallelizable, false);
+  assert.equal(full.testTargets[0].parallelizable, false);
+  assert.equal(full.testTargets[0].selectedTests, undefined);
+  for (const id of ["Piste1Shots", "ProfileKeys", "Compat", "VersionProfiles"]) {
+    assert.ok(!selected.includes(id), id);
+  }
 });
