@@ -1,6 +1,7 @@
 "use strict";
 
 const { spawnSync } = require("node:child_process");
+const { readFileSync } = require("node:fs");
 const path = require("node:path");
 const {
   LineCounter,
@@ -27,6 +28,10 @@ const GATE_FILES = [
 const GATE_LABEL = "gate-change-approved";
 const GATE_VERIFIER_LOGIN = "app-pilote-verifier[bot]";
 const VERDICT_CONTEXT = "verdict-gate";
+const REQUIRED_CHECK_JOB = "protected-agent-config";
+const VERDICT_WORKFLOW_NAME = "Verdict gate";
+const VERDICT_WORKFLOW_PATH = ".github/workflows/verdict-gate.yml";
+const VERDICT_RUN_PULL = /(?:^|\s)pr-(\d+)(?![0-9])/;
 const HEX_SHA = /^[0-9a-fA-F]{40}$/;
 const PULL_COMMIT_CAP = 250;
 const RENOVATE_LOGINS = Object.freeze(["renovate[bot]", "mend-renovate[bot]"]);
@@ -456,10 +461,139 @@ function isProtectedSymlink(file, target) {
 }
 
 function parseArgs(argv) {
+  if (argv.length === 1 && argv[0] === "--refresh") {
+    return { mode: "refresh" };
+  }
   if (argv.length === 4 && argv[0] === "--base" && argv[2] === "--head") {
-    return { base: argv[1], head: argv[3] };
+    return { mode: "check", base: argv[1], head: argv[3] };
   }
   return null;
+}
+
+function shouldRefreshFromEvent(eventName, payload) {
+  if (payload == null || typeof payload !== "object") {
+    return false;
+  }
+  if (eventName === "workflow_run") {
+    if (payload.action !== "completed") {
+      return false;
+    }
+    const run = payload.workflow_run;
+    if (run == null || typeof run !== "object") {
+      return false;
+    }
+    if (run.name !== VERDICT_WORKFLOW_NAME && run.path !== VERDICT_WORKFLOW_PATH) {
+      return false;
+    }
+    return true;
+  }
+  if (eventName === "pull_request_target") {
+    if (payload.action !== "labeled" && payload.action !== "unlabeled") {
+      return false;
+    }
+    return labelName(payload.label) === GATE_LABEL;
+  }
+  return false;
+}
+
+function verdictRunPullNumber(run) {
+  if (run == null || typeof run !== "object") {
+    return null;
+  }
+  const title = typeof run.display_title === "string" ? run.display_title : "";
+  const match = VERDICT_RUN_PULL.exec(title);
+  if (match) {
+    return Number(match[1]);
+  }
+  return null;
+}
+
+function selectJobsToRerun(jobs) {
+  if (!Array.isArray(jobs)) {
+    return [];
+  }
+  return jobs.filter((job) => {
+    if (job == null || typeof job !== "object") {
+      return false;
+    }
+    if (job.name !== REQUIRED_CHECK_JOB) {
+      return false;
+    }
+    return typeof job.id === "number" || typeof job.id === "string";
+  });
+}
+
+function runPullMatches(run, number, headSha) {
+  if (run == null || typeof run !== "object") {
+    return false;
+  }
+  if (run.event !== "pull_request_target") {
+    return false;
+  }
+  if (run.status !== "completed") {
+    return false;
+  }
+  const runSha = typeof run.head_sha === "string" ? run.head_sha.toLowerCase() : "";
+  if (runSha !== String(headSha).toLowerCase()) {
+    return false;
+  }
+  if (!Array.isArray(run.pull_requests)) {
+    return false;
+  }
+  const want = String(number);
+  for (const pull of run.pull_requests) {
+    if (pull == null || typeof pull !== "object") {
+      continue;
+    }
+    if (String(pull.number) === want) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function selectRunsToRerun(runs, { number, headSha } = {}) {
+  if (!Array.isArray(runs) || number == null || typeof headSha !== "string" || !HEX_SHA.test(headSha)) {
+    return [];
+  }
+  return runs.filter((run) => runPullMatches(run, number, headSha));
+}
+
+function refreshTargetsFromPull(payload) {
+  const pull = payload && payload.pull_request;
+  if (pull == null || typeof pull !== "object") {
+    return [];
+  }
+  if (pull.state != null && pull.state !== "open") {
+    return [];
+  }
+  const sha = pull.head && typeof pull.head.sha === "string" ? pull.head.sha : "";
+  if (!HEX_SHA.test(sha) || pull.number == null) {
+    return [];
+  }
+  return [{ number: pull.number, headSha: sha.toLowerCase() }];
+}
+
+function refreshTargetsFromPulls(pulls, sha) {
+  if (!Array.isArray(pulls) || typeof sha !== "string" || !HEX_SHA.test(sha)) {
+    return [];
+  }
+  const want = sha.toLowerCase();
+  const targets = [];
+  for (const pull of pulls) {
+    if (pull == null || typeof pull !== "object") {
+      continue;
+    }
+    if (pull.state !== "open") {
+      continue;
+    }
+    const head = pull.head && typeof pull.head.sha === "string" ? pull.head.sha.toLowerCase() : "";
+    if (head !== want || pull.number == null) {
+      continue;
+    }
+    targets.push({ number: pull.number, headSha: want });
+  }
+  return targets;
 }
 
 function git(args) {
@@ -687,6 +821,194 @@ async function loadCommitStatus(io, token, owner, repo, sha) {
   return response.json();
 }
 
+async function githubPost(io, token, url) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await io.fetch(url, {
+        method: "POST",
+        headers: {
+          ...apiHeaders(token),
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      });
+      if (response && (response.ok || response.status === 201)) {
+        return response;
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new Error("POST failed");
+}
+
+async function loadWorkflowRuns(io, token, owner, repo) {
+  const items = [];
+  let url = `https://api.github.com/repos/${owner}/${repo}/actions/workflows/protected-paths.yml/runs?event=pull_request_target&per_page=100`;
+  while (url) {
+    const response = await githubGet(io, token, url);
+    const page = await response.json();
+    if (page == null || typeof page !== "object" || !Array.isArray(page.workflow_runs)) {
+      throw new Error("page is unreadable");
+    }
+    items.push(...page.workflow_runs);
+    url = nextUrl(response.headers.get("link"));
+  }
+  return items;
+}
+
+async function loadCommitPulls(io, token, owner, repo, sha) {
+  const response = await githubGet(
+    io,
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/commits/${sha}/pulls`,
+  );
+  return response.json();
+}
+
+async function loadPull(io, token, owner, repo, number) {
+  const response = await githubGet(
+    io,
+    token,
+    `https://api.github.com/repos/${owner}/${repo}/pulls/${number}`,
+  );
+  return response.json();
+}
+
+async function loadRunJobs(io, token, owner, repo, runId) {
+  const items = [];
+  let url = `https://api.github.com/repos/${owner}/${repo}/actions/runs/${runId}/jobs?filter=latest&per_page=100`;
+  while (url) {
+    const response = await githubGet(io, token, url);
+    const page = await response.json();
+    if (page == null || typeof page !== "object" || !Array.isArray(page.jobs)) {
+      throw new Error("page is unreadable");
+    }
+    items.push(...page.jobs);
+    url = nextUrl(response.headers.get("link"));
+  }
+  return items;
+}
+
+async function refreshTargetsFromWorkflowRun(io, token, owner, repo, payload) {
+  const run = payload.workflow_run;
+  if (run == null || typeof run !== "object") {
+    return [];
+  }
+  const number = verdictRunPullNumber(run);
+  if (number != null) {
+    let pull;
+    try {
+      pull = await loadPull(io, token, owner, repo, number);
+    } catch {
+      return null;
+    }
+    return refreshTargetsFromPull({ pull_request: pull });
+  }
+  const sha = typeof run.head_sha === "string" ? run.head_sha : "";
+  if (run.event === "pull_request" && HEX_SHA.test(sha)) {
+    let pulls;
+    try {
+      pulls = await loadCommitPulls(io, token, owner, repo, sha);
+    } catch {
+      return null;
+    }
+    return refreshTargetsFromPulls(pulls, sha);
+  }
+  return [];
+}
+
+async function refreshTargets(io, token, owner, repo, eventName, payload) {
+  if (eventName === "pull_request_target") {
+    return refreshTargetsFromPull(payload);
+  }
+  if (eventName === "workflow_run") {
+    return refreshTargetsFromWorkflowRun(io, token, owner, repo, payload);
+  }
+  return [];
+}
+
+async function refreshRuns(io) {
+  const token = io.env.GITHUB_TOKEN;
+  const repository = io.env.GITHUB_REPOSITORY;
+  const eventName = io.env.GITHUB_EVENT_NAME;
+  const eventPath = io.env.GITHUB_EVENT_PATH;
+  const names = repositoryParts(repository);
+  if (!token || names == null || !eventName || !eventPath) {
+    return 1;
+  }
+  let payload;
+  try {
+    payload = JSON.parse(io.readFile(eventPath));
+  } catch {
+    return 1;
+  }
+  if (!shouldRefreshFromEvent(eventName, payload)) {
+    process.stdout.write("ok\n");
+    return 0;
+  }
+  const targets = await refreshTargets(io, token, names.owner, names.repo, eventName, payload);
+  if (targets == null) {
+    return 1;
+  }
+  if (targets.length === 0) {
+    process.stdout.write("ok\n");
+    return 0;
+  }
+  let runs;
+  try {
+    runs = await loadWorkflowRuns(io, token, names.owner, names.repo);
+  } catch {
+    return 1;
+  }
+  const selected = [];
+  const seen = new Set();
+  for (const target of targets) {
+    for (const run of selectRunsToRerun(runs, target)) {
+      if (typeof run.id !== "number" && typeof run.id !== "string") {
+        continue;
+      }
+      const key = String(run.id);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      selected.push(run);
+    }
+  }
+  const selectedJobs = [];
+  const seenJobs = new Set();
+  for (const run of selected) {
+    let jobs;
+    try {
+      jobs = await loadRunJobs(io, token, names.owner, names.repo, run.id);
+    } catch {
+      return 1;
+    }
+    for (const job of selectJobsToRerun(jobs)) {
+      const key = String(job.id);
+      if (seenJobs.has(key)) {
+        continue;
+      }
+      seenJobs.add(key);
+      selectedJobs.push(job);
+    }
+  }
+  for (const job of selectedJobs) {
+    try {
+      await githubPost(
+        io,
+        token,
+        `https://api.github.com/repos/${names.owner}/${names.repo}/actions/jobs/${job.id}/rerun`,
+      );
+    } catch {
+      return 1;
+    }
+  }
+  process.stdout.write("ok\n");
+  return 0;
+}
+
 function repositoryParts(repository) {
   if (typeof repository !== "string") {
     return null;
@@ -825,8 +1147,14 @@ function collectHits(base, head) {
 async function main(argv = process.argv.slice(2), io = defaultIo) {
   const args = parseArgs(argv);
   if (args === null) {
-    process.stderr.write("usage: node scripts/check-protected-paths.js --base SHA --head SHA\n");
+    process.stderr.write(
+      "usage: node scripts/check-protected-paths.js --base SHA --head SHA\n" +
+        "       node scripts/check-protected-paths.js --refresh\n",
+    );
     return 1;
+  }
+  if (args.mode === "refresh") {
+    return refreshRuns(io);
   }
   let grouped;
   let headSha;
@@ -886,6 +1214,9 @@ const defaultIo = {
   fetch(url, init) {
     return globalThis.fetch(url, init);
   },
+  readFile(path) {
+    return readFileSync(path, "utf8");
+  },
 };
 
 module.exports = {
@@ -896,6 +1227,12 @@ module.exports = {
   gateApprovalFromEvents,
   isVersionOnlyWorkflowChange,
   renovateWorkflowBumpExemption,
+  shouldRefreshFromEvent,
+  selectRunsToRerun,
+  selectJobsToRerun,
+  verdictRunPullNumber,
+  REQUIRED_CHECK_JOB,
+  VERDICT_WORKFLOW_NAME,
   WORKFLOW_BUMP_REFUSED_MESSAGE,
   GATE_FILES,
   GATE_LABEL,

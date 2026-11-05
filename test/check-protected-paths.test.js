@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
-const { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
+const { copyFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { dirname, join } = require("node:path");
 const { test } = require("node:test");
@@ -19,6 +19,12 @@ const {
   main,
   protectedPaths,
   renovateWorkflowBumpExemption,
+  REQUIRED_CHECK_JOB,
+  selectJobsToRerun,
+  selectRunsToRerun,
+  shouldRefreshFromEvent,
+  VERDICT_WORKFLOW_NAME,
+  verdictRunPullNumber,
   WORKFLOW_BUMP_REFUSED_MESSAGE,
 } = require("../scripts/check-protected-paths.js");
 
@@ -1399,4 +1405,509 @@ test("main blocks a Renovate pull that moves a container: line to another job", 
     },
     twoJobContainer(true),
   );
+});
+
+const HEAD_A = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const HEAD_B = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const DEFAULT_SHA = "dddddddddddddddddddddddddddddddddddddddd";
+
+function pullRequestTargetEvent(action, sha = HEAD_A) {
+  return {
+    action,
+    label: { name: GATE_LABEL },
+    pull_request: {
+      number: 7,
+      state: "open",
+      user: { login: "pr-author" },
+      base: { sha: "cccccccccccccccccccccccccccccccccccccccc" },
+      head: { sha },
+    },
+  };
+}
+
+function verdictWorkflowRunEvent({
+  sha = HEAD_A,
+  event = "issue_comment",
+  displayTitle = "verdict-gate pr-7",
+  name = VERDICT_WORKFLOW_NAME,
+  path = ".github/workflows/verdict-gate.yml",
+  action = "completed",
+} = {}) {
+  return {
+    action,
+    workflow_run: {
+      name,
+      path,
+      event,
+      head_sha: sha,
+      display_title: displayTitle,
+    },
+  };
+}
+
+function workflowRun({ id, sha, number = 7, status = "completed", prHead } = {}) {
+  return {
+    id,
+    event: "pull_request_target",
+    status,
+    head_sha: sha,
+    pull_requests: [{ number, head: { sha: prHead ?? sha } }],
+  };
+}
+
+function runJobsUrl(runId) {
+  return `https://api.github.com/repos/acme/app/actions/runs/${runId}/jobs?filter=latest&per_page=100`;
+}
+
+function jobRerunUrl(jobId) {
+  return `https://api.github.com/repos/acme/app/actions/jobs/${jobId}/rerun`;
+}
+
+function jobsForRun(runId, extra = []) {
+  return [
+    { id: Number(`${runId}01`), name: "refresh-on-verdict" },
+    { id: Number(`${runId}02`), name: REQUIRED_CHECK_JOB },
+    ...extra,
+  ];
+}
+
+async function runRefresh(eventName, payload, fetchImpl) {
+  const eventPath = join(mkdtempSync(join(tmpdir(), "protected-refresh-")), "event.json");
+  writeFileSync(eventPath, JSON.stringify(payload));
+  return main(["--refresh"], {
+    env: {
+      GITHUB_TOKEN: "test-token",
+      GITHUB_REPOSITORY: "acme/app",
+      GITHUB_EVENT_NAME: eventName,
+      GITHUB_EVENT_PATH: eventPath,
+    },
+    readFile(path) {
+      return readFileSync(path, "utf8");
+    },
+    fetch: fetchImpl,
+  });
+}
+
+test("the refresh script fails without yaml, and the refresh job installs it before running", () => {
+  const dir = mkdtempSync(join(tmpdir(), "protected-yaml-"));
+  try {
+    copyFileSync(script, join(dir, "check-protected-paths.js"));
+    const isolated = spawnSync(process.execPath, ["check-protected-paths.js", "--refresh"], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    assert.notEqual(isolated.status, 0);
+    assert.match(isolated.stderr, /Cannot find module 'yaml'/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  const workflow = readFileSync(workflowPath, "utf8");
+  const refresh = workflow.split("\n  refresh-on-verdict:")[1].split("\n  protected-agent-config:")[0];
+  const ciAt = refresh.indexOf("run: npm ci");
+  const runAt = refresh.indexOf("node scripts/check-protected-paths.js --refresh");
+  assert.ok(ciAt >= 0 && runAt > ciAt);
+});
+
+test("the workflow re-evaluates on a Verdict gate workflow_run without leaving the required check on the default branch", () => {
+  const workflow = readFileSync(workflowPath, "utf8");
+  assert.doesNotMatch(workflow, /\n {2}status:\n/);
+  assert.match(workflow, /\n {2}workflow_run:\n {4}workflows: \["Verdict gate"\]\n {4}types:\n {6}- completed\n/);
+  assert.match(workflow, /github\.event_name == 'workflow_run'/);
+  assert.match(workflow, /check-protected-paths\.js --refresh/);
+  assert.match(workflow, /if: github\.event_name == 'pull_request_target'/);
+  assert.match(workflow, /actions:\s*write/);
+  assert.match(workflow, new RegExp(`^ {2}${REQUIRED_CHECK_JOB}:`, "m"));
+  assert.doesNotMatch(workflow, /\/actions\/runs\/\$\{.*\}\/rerun/);
+});
+
+test("shouldRefreshFromEvent accepts a completed Verdict gate workflow_run and a label change", () => {
+  assert.equal(shouldRefreshFromEvent("workflow_run", verdictWorkflowRunEvent()), true);
+  assert.equal(
+    shouldRefreshFromEvent(
+      "workflow_run",
+      verdictWorkflowRunEvent({ sha: DEFAULT_SHA, event: "issue_comment" }),
+    ),
+    true,
+  );
+  assert.equal(shouldRefreshFromEvent("pull_request_target", pullRequestTargetEvent("labeled")), true);
+  assert.equal(shouldRefreshFromEvent("pull_request_target", pullRequestTargetEvent("unlabeled")), true);
+});
+
+test("shouldRefreshFromEvent refuses status, other PR actions, and other workflow_run payloads", () => {
+  assert.equal(
+    shouldRefreshFromEvent("status", { context: "verdict-gate", sha: HEAD_A, state: "success" }),
+    false,
+  );
+  assert.equal(shouldRefreshFromEvent("pull_request_target", pullRequestTargetEvent("synchronize")), false);
+  assert.equal(shouldRefreshFromEvent("pull_request_target", pullRequestTargetEvent("opened")), false);
+  assert.equal(
+    shouldRefreshFromEvent("pull_request_target", {
+      ...pullRequestTargetEvent("labeled"),
+      label: { name: "documentation" },
+    }),
+    false,
+  );
+  assert.equal(shouldRefreshFromEvent("workflow_run", { action: "completed" }), false);
+  assert.equal(
+    shouldRefreshFromEvent("workflow_run", verdictWorkflowRunEvent({ action: "requested" })),
+    false,
+  );
+  assert.equal(
+    shouldRefreshFromEvent(
+      "workflow_run",
+      verdictWorkflowRunEvent({ name: "Protected paths", path: ".github/workflows/protected-paths.yml" }),
+    ),
+    false,
+  );
+});
+
+test("selectRunsToRerun keeps completed pull_request_target runs for the current head only", () => {
+  const runs = [
+    workflowRun({ id: 1, sha: HEAD_A }),
+    workflowRun({ id: 2, sha: HEAD_B }),
+    workflowRun({ id: 3, sha: HEAD_A, status: "in_progress" }),
+    {
+      id: 4,
+      event: "status",
+      status: "completed",
+      pull_requests: [{ number: 7, head: { sha: HEAD_A } }],
+    },
+    workflowRun({ id: 5, sha: HEAD_A, number: 8 }),
+  ];
+  assert.deepEqual(
+    selectRunsToRerun(runs, { number: 7, headSha: HEAD_A }).map((run) => run.id),
+    [1],
+  );
+  assert.deepEqual(selectRunsToRerun(runs, { number: 7, headSha: HEAD_B }).map((run) => run.id), [2]);
+});
+
+test("selectRunsToRerun ignores a run whose pull_requests head sha was rewritten to the current head", () => {
+  const stale = workflowRun({ id: 1, sha: HEAD_B, prHead: HEAD_A });
+  const current = workflowRun({ id: 2, sha: HEAD_A, prHead: HEAD_A });
+  assert.equal(stale.pull_requests[0].head.sha, HEAD_A);
+  assert.equal(stale.head_sha, HEAD_B);
+  assert.deepEqual(
+    selectRunsToRerun([stale, current], { number: 7, headSha: HEAD_A }).map((run) => run.id),
+    [2],
+  );
+});
+
+test("selectJobsToRerun keeps only protected-agent-config", () => {
+  assert.deepEqual(
+    selectJobsToRerun(jobsForRun(1)).map((job) => job.id),
+    [102],
+  );
+  assert.deepEqual(selectJobsToRerun([{ id: 9, name: "refresh-on-verdict" }]), []);
+});
+
+test("verdictRunPullNumber reads the PR id from the Verdict gate run title", () => {
+  assert.equal(verdictRunPullNumber({ display_title: "verdict-gate pr-7" }), 7);
+  assert.equal(verdictRunPullNumber({ display_title: "verdict-gate pr-70" }), 70);
+  assert.equal(verdictRunPullNumber({ display_title: "Verdict gate" }), null);
+});
+
+test("a Verdict gate workflow_run on issue_comment reruns only the required job of the current head", async () => {
+  const posted = [];
+  const fetched = [];
+  const code = await runRefresh("workflow_run", verdictWorkflowRunEvent({ sha: DEFAULT_SHA }), async (url, init) => {
+    fetched.push(url);
+    if (url === "https://api.github.com/repos/acme/app/pulls/7") {
+      return jsonResponse({
+        number: 7,
+        state: "open",
+        head: { sha: HEAD_A },
+      });
+    }
+    if (
+      url ===
+      "https://api.github.com/repos/acme/app/actions/workflows/protected-paths.yml/runs?event=pull_request_target&per_page=100"
+    ) {
+      return jsonResponse({
+        workflow_runs: [workflowRun({ id: 41, sha: HEAD_A }), workflowRun({ id: 42, sha: HEAD_B })],
+      });
+    }
+    if (url === runJobsUrl(41)) {
+      return jsonResponse({ jobs: jobsForRun(41) });
+    }
+    if (url === jobRerunUrl(4102) && init && init.method === "POST") {
+      posted.push(url);
+      return { ok: true, status: 201, json: async () => ({}) };
+    }
+    throw new Error(`unexpected ${init && init.method} ${url}`);
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(posted, [jobRerunUrl(4102)]);
+  assert.equal(
+    fetched.some((url) => url.includes(`/commits/${DEFAULT_SHA}/pulls`)),
+    false,
+  );
+  assert.equal(
+    posted.some((url) => /\/actions\/runs\/\d+\/rerun$/.test(url)),
+    false,
+  );
+});
+
+test("a labeled event reruns only the required job for the current head", async () => {
+  const posted = [];
+  const code = await runRefresh("pull_request_target", pullRequestTargetEvent("labeled", HEAD_A), async (url, init) => {
+    if (
+      url ===
+      "https://api.github.com/repos/acme/app/actions/workflows/protected-paths.yml/runs?event=pull_request_target&per_page=100"
+    ) {
+      return jsonResponse({ workflow_runs: [workflowRun({ id: 9, sha: HEAD_A })] });
+    }
+    if (url === runJobsUrl(9)) {
+      return jsonResponse({ jobs: jobsForRun(9) });
+    }
+    if (url === jobRerunUrl(902) && init && init.method === "POST") {
+      posted.push(url);
+      return { ok: true, status: 201, json: async () => ({}) };
+    }
+    throw new Error(`unexpected ${init && init.method} ${url}`);
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(posted, [jobRerunUrl(902)]);
+});
+
+test("a Verdict gate workflow_run uses the current pull head, not the default-branch sha", async () => {
+  const posted = [];
+  const code = await runRefresh(
+    "workflow_run",
+    verdictWorkflowRunEvent({ displayTitle: "verdict-gate pr-7", sha: DEFAULT_SHA }),
+    async (url, init) => {
+      if (url === "https://api.github.com/repos/acme/app/pulls/7") {
+        return jsonResponse({
+          number: 7,
+          state: "open",
+          head: { sha: HEAD_B },
+        });
+      }
+      if (
+        url ===
+        "https://api.github.com/repos/acme/app/actions/workflows/protected-paths.yml/runs?event=pull_request_target&per_page=100"
+      ) {
+        return jsonResponse({
+          workflow_runs: [workflowRun({ id: 41, sha: HEAD_A }), workflowRun({ id: 42, sha: HEAD_B })],
+        });
+      }
+      if (url === runJobsUrl(42)) {
+        return jsonResponse({ jobs: jobsForRun(42) });
+      }
+      if (url === jobRerunUrl(4202) && init && init.method === "POST") {
+        posted.push(url);
+        return { ok: true, status: 201, json: async () => ({}) };
+      }
+      throw new Error(`unexpected ${init && init.method} ${url}`);
+    },
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(posted, [jobRerunUrl(4202)]);
+});
+
+test("a run on an older sha is never listed for rerun even if pull_requests head sha matches the current head", async () => {
+  const posted = [];
+  const code = await runRefresh("pull_request_target", pullRequestTargetEvent("labeled", HEAD_A), async (url, init) => {
+    if (
+      url ===
+      "https://api.github.com/repos/acme/app/actions/workflows/protected-paths.yml/runs?event=pull_request_target&per_page=100"
+    ) {
+      return jsonResponse({
+        workflow_runs: [
+          workflowRun({ id: 41, sha: HEAD_B, prHead: HEAD_A }),
+          workflowRun({ id: 42, sha: HEAD_A, prHead: HEAD_A }),
+        ],
+      });
+    }
+    if (url === runJobsUrl(41)) {
+      return jsonResponse({ jobs: jobsForRun(41) });
+    }
+    if (url === runJobsUrl(42)) {
+      return jsonResponse({ jobs: jobsForRun(42) });
+    }
+    if (init && init.method === "POST") {
+      posted.push(url);
+      if (url === jobRerunUrl(4102)) {
+        return { ok: false, status: 403, json: async () => ({}) };
+      }
+      if (url === jobRerunUrl(4202)) {
+        return { ok: true, status: 201, json: async () => ({}) };
+      }
+    }
+    throw new Error(`unexpected ${init && init.method} ${url}`);
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(posted, [jobRerunUrl(4202)]);
+});
+
+test("a Verdict gate run titled pr-70 does not refresh pull 7", async () => {
+  const posted = [];
+  const fetched = [];
+  const code = await runRefresh(
+    "workflow_run",
+    verdictWorkflowRunEvent({ displayTitle: "verdict-gate pr-70", sha: DEFAULT_SHA }),
+    async (url, init) => {
+      fetched.push(url);
+      if (url === "https://api.github.com/repos/acme/app/pulls/70") {
+        return jsonResponse({
+          number: 70,
+          state: "open",
+          head: { sha: HEAD_B },
+        });
+      }
+      if (
+        url ===
+        "https://api.github.com/repos/acme/app/actions/workflows/protected-paths.yml/runs?event=pull_request_target&per_page=100"
+      ) {
+        return jsonResponse({ workflow_runs: [workflowRun({ id: 41, sha: HEAD_A, number: 7 })] });
+      }
+      if (init && init.method === "POST") {
+        posted.push(url);
+      }
+      throw new Error(`unexpected ${init && init.method} ${url}`);
+    },
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(posted, []);
+  assert.equal(
+    fetched.some((url) => url === "https://api.github.com/repos/acme/app/pulls/7"),
+    false,
+  );
+});
+
+test("an issue_comment workflow_run without a PR title does not treat the default-branch sha as a pull head", async () => {
+  const posted = [];
+  const code = await runRefresh(
+    "workflow_run",
+    verdictWorkflowRunEvent({ sha: DEFAULT_SHA, displayTitle: "Verdict gate", event: "issue_comment" }),
+    async (url, init) => {
+      if (init && init.method === "POST") {
+        posted.push(url);
+      }
+      throw new Error(`unexpected ${init && init.method} ${url}`);
+    },
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(posted, []);
+});
+
+test("two completed labeled runs rerun only protected-agent-config and cannot retrigger refresh-on-verdict", async () => {
+  const posted = [];
+  const code = await runRefresh("pull_request_target", pullRequestTargetEvent("labeled", HEAD_A), async (url, init) => {
+    if (
+      url ===
+      "https://api.github.com/repos/acme/app/actions/workflows/protected-paths.yml/runs?event=pull_request_target&per_page=100"
+    ) {
+      return jsonResponse({
+        workflow_runs: [workflowRun({ id: 1, sha: HEAD_A }), workflowRun({ id: 2, sha: HEAD_A })],
+      });
+    }
+    if (url === runJobsUrl(1)) {
+      return jsonResponse({ jobs: jobsForRun(1) });
+    }
+    if (url === runJobsUrl(2)) {
+      return jsonResponse({ jobs: jobsForRun(2) });
+    }
+    if (init && init.method === "POST") {
+      posted.push(url);
+      if (url === jobRerunUrl(102) || url === jobRerunUrl(202)) {
+        return { ok: true, status: 201, json: async () => ({}) };
+      }
+    }
+    throw new Error(`unexpected ${init && init.method} ${url}`);
+  });
+  assert.equal(code, 0);
+  assert.deepEqual(posted, [jobRerunUrl(102), jobRerunUrl(202)]);
+  assert.equal(
+    posted.some((url) => url === jobRerunUrl(101) || url === jobRerunUrl(201) || /\/actions\/runs\/[12]\/rerun$/.test(url)),
+    false,
+  );
+});
+
+test("refresh exits 1 when the job list is unreadable or the job rerun is refused", async () => {
+  const unread = await runRefresh("pull_request_target", pullRequestTargetEvent("labeled", HEAD_A), async (url) => {
+    if (
+      url ===
+      "https://api.github.com/repos/acme/app/actions/workflows/protected-paths.yml/runs?event=pull_request_target&per_page=100"
+    ) {
+      return jsonResponse({ workflow_runs: [workflowRun({ id: 9, sha: HEAD_A })] });
+    }
+    if (url === runJobsUrl(9)) {
+      return jsonResponse({ jobs: null });
+    }
+    throw new Error(`unexpected ${url}`);
+  });
+  assert.equal(unread, 1);
+
+  const refused = await runRefresh("pull_request_target", pullRequestTargetEvent("labeled", HEAD_A), async (url, init) => {
+    if (
+      url ===
+      "https://api.github.com/repos/acme/app/actions/workflows/protected-paths.yml/runs?event=pull_request_target&per_page=100"
+    ) {
+      return jsonResponse({ workflow_runs: [workflowRun({ id: 9, sha: HEAD_A })] });
+    }
+    if (url === runJobsUrl(9)) {
+      return jsonResponse({ jobs: jobsForRun(9) });
+    }
+    if (url === jobRerunUrl(902) && init && init.method === "POST") {
+      return { ok: false, status: 403, json: async () => ({}) };
+    }
+    throw new Error(`unexpected ${init && init.method} ${url}`);
+  });
+  assert.equal(refused, 1);
+});
+
+test("a pull_request Verdict gate workflow_run with a matching head sha reruns the required job", async () => {
+  const posted = [];
+  const code = await runRefresh(
+    "workflow_run",
+    verdictWorkflowRunEvent({ sha: HEAD_A, event: "pull_request", displayTitle: "verdict-gate pr-7" }),
+    async (url, init) => {
+      if (url === "https://api.github.com/repos/acme/app/pulls/7") {
+        return jsonResponse({
+          number: 7,
+          state: "open",
+          head: { sha: HEAD_A },
+        });
+      }
+      if (
+        url ===
+        "https://api.github.com/repos/acme/app/actions/workflows/protected-paths.yml/runs?event=pull_request_target&per_page=100"
+      ) {
+        return jsonResponse({ workflow_runs: [workflowRun({ id: 41, sha: HEAD_A })] });
+      }
+      if (url === runJobsUrl(41)) {
+        return jsonResponse({ jobs: jobsForRun(41) });
+      }
+      if (url === jobRerunUrl(4102) && init && init.method === "POST") {
+        posted.push(url);
+        return { ok: true, status: 201, json: async () => ({}) };
+      }
+      throw new Error(`unexpected ${init && init.method} ${url}`);
+    },
+  );
+  assert.equal(code, 0);
+  assert.deepEqual(posted, [jobRerunUrl(4102)]);
+});
+
+test("refresh still refuses to treat a non-verifier label as a reason to skip rerun filtering", () => {
+  assert.equal(
+    gateApprovalFromEvents([labeled(AUTHOR)], withGreen()).reason,
+    "not-verifier",
+  );
+  assert.equal(
+    gateApprovalFromEvents([labeled(VERIFIER, "2026-10-31T10:00:00Z")], withGreen()).reason,
+    "stale-label",
+  );
+  assert.equal(gateApprovalFromEvents([labeled(VERIFIER)], {}).reason, "no-verdict-gate");
+});
+
+test("the Renovate exemption is unchanged: a gate script change still needs the verifier", async () => {
+  await withGateHead(async (base, head) => {
+    const code = await main(["--base", base, "--head", head], {
+      env: renovateEnv,
+      fetch: renovateFetch(["renovate[bot]"]),
+    });
+    assert.equal(code, 1);
+  });
 });
