@@ -533,20 +533,19 @@ function runPullMatches(run, number, headSha) {
   if (run.status !== "completed") {
     return false;
   }
+  const runSha = typeof run.head_sha === "string" ? run.head_sha.toLowerCase() : "";
+  if (runSha !== String(headSha).toLowerCase()) {
+    return false;
+  }
   if (!Array.isArray(run.pull_requests)) {
     return false;
   }
   const want = String(number);
-  const sha = String(headSha).toLowerCase();
   for (const pull of run.pull_requests) {
     if (pull == null || typeof pull !== "object") {
       continue;
     }
-    if (String(pull.number) !== want) {
-      continue;
-    }
-    const head = pull.head && typeof pull.head.sha === "string" ? pull.head.sha.toLowerCase() : "";
-    if (head === sha) {
+    if (String(pull.number) === want) {
       return true;
     }
   }

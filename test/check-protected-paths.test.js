@@ -1445,12 +1445,13 @@ function verdictWorkflowRunEvent({
   };
 }
 
-function workflowRun({ id, sha, number = 7, status = "completed" }) {
+function workflowRun({ id, sha, number = 7, status = "completed", prHead } = {}) {
   return {
     id,
     event: "pull_request_target",
     status,
-    pull_requests: [{ number, head: { sha } }],
+    head_sha: sha,
+    pull_requests: [{ number, head: { sha: prHead ?? sha } }],
   };
 }
 
@@ -1581,6 +1582,17 @@ test("selectRunsToRerun keeps completed pull_request_target runs for the current
   assert.deepEqual(selectRunsToRerun(runs, { number: 7, headSha: HEAD_B }).map((run) => run.id), [2]);
 });
 
+test("selectRunsToRerun ignores a run whose pull_requests head sha was rewritten to the current head", () => {
+  const stale = workflowRun({ id: 1, sha: HEAD_B, prHead: HEAD_A });
+  const current = workflowRun({ id: 2, sha: HEAD_A, prHead: HEAD_A });
+  assert.equal(stale.pull_requests[0].head.sha, HEAD_A);
+  assert.equal(stale.head_sha, HEAD_B);
+  assert.deepEqual(
+    selectRunsToRerun([stale, current], { number: 7, headSha: HEAD_A }).map((run) => run.id),
+    [2],
+  );
+});
+
 test("selectJobsToRerun keeps only protected-agent-config", () => {
   assert.deepEqual(
     selectJobsToRerun(jobsForRun(1)).map((job) => job.id),
@@ -1689,6 +1701,41 @@ test("a Verdict gate workflow_run uses the current pull head, not the default-br
       throw new Error(`unexpected ${init && init.method} ${url}`);
     },
   );
+  assert.equal(code, 0);
+  assert.deepEqual(posted, [jobRerunUrl(4202)]);
+});
+
+test("a run on an older sha is never listed for rerun even if pull_requests head sha matches the current head", async () => {
+  const posted = [];
+  const code = await runRefresh("pull_request_target", pullRequestTargetEvent("labeled", HEAD_A), async (url, init) => {
+    if (
+      url ===
+      "https://api.github.com/repos/acme/app/actions/workflows/protected-paths.yml/runs?event=pull_request_target&per_page=100"
+    ) {
+      return jsonResponse({
+        workflow_runs: [
+          workflowRun({ id: 41, sha: HEAD_B, prHead: HEAD_A }),
+          workflowRun({ id: 42, sha: HEAD_A, prHead: HEAD_A }),
+        ],
+      });
+    }
+    if (url === runJobsUrl(41)) {
+      return jsonResponse({ jobs: jobsForRun(41) });
+    }
+    if (url === runJobsUrl(42)) {
+      return jsonResponse({ jobs: jobsForRun(42) });
+    }
+    if (init && init.method === "POST") {
+      posted.push(url);
+      if (url === jobRerunUrl(4102)) {
+        return { ok: false, status: 403, json: async () => ({}) };
+      }
+      if (url === jobRerunUrl(4202)) {
+        return { ok: true, status: 201, json: async () => ({}) };
+      }
+    }
+    throw new Error(`unexpected ${init && init.method} ${url}`);
+  });
   assert.equal(code, 0);
   assert.deepEqual(posted, [jobRerunUrl(4202)]);
 });
