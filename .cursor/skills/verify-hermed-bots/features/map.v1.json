@@ -1,0 +1,126 @@
+{
+  "version": 1,
+  "features": [
+    {
+      "id": "bot-list",
+      "doc": "features/bot-list.md",
+      "paths": [
+        { "glob": "HermedBots/Bots/**", "needs_ui": true },
+        { "glob": "HermedBotsTests/BotListTests.swift", "needs_ui": false },
+        { "glob": "HermedBotsTests/BotIdentityTests.swift", "needs_ui": false }
+      ]
+    },
+    {
+      "id": "conversation",
+      "doc": "features/conversation.md",
+      "paths": [
+        { "glob": "HermedBots/Conversation/**", "needs_ui": true },
+        { "glob": "HermedBotsTests/Conversation*.swift", "needs_ui": false },
+        { "glob": "HermedBotsTests/MessageMarkdownViewTests.swift", "needs_ui": false },
+        { "glob": "Packages/HermesAdapter/Sources/HermesAdapter/MarkdownDocument.swift", "needs_ui": false },
+        { "glob": "Packages/HermesAdapter/Sources/HermesAdapter/MarkdownVisibleText.swift", "needs_ui": false },
+        { "glob": "Packages/HermesAdapter/Sources/HermesAdapter/ContextCompaction.swift", "needs_ui": false }
+      ]
+    },
+    {
+      "id": "model-switch",
+      "doc": "features/model-switch.md",
+      "paths": [
+        { "glob": "HermedBots/Conversation/ModelPicker.swift", "needs_ui": true }
+      ]
+    },
+    {
+      "id": "approval",
+      "doc": "features/approval.md",
+      "paths": [
+        { "glob": "HermedBots/Approval/**", "needs_ui": true },
+        { "glob": "HermedBots/Conversation/CurrentToolRow.swift", "needs_ui": true },
+        { "glob": "HermedBotsTests/ApprovalParamsTests.swift", "needs_ui": false }
+      ]
+    },
+    {
+      "id": "resume-and-errors",
+      "doc": "features/resume-and-errors.md",
+      "paths": [
+        { "glob": "HermedBots/Transport/ResumeAPI.swift", "needs_ui": true },
+        { "glob": "HermedBots/Transport/ResumeStore.swift", "needs_ui": true },
+        { "glob": "HermedBots/Banners/ErrorBanner.swift", "needs_ui": true },
+        { "glob": "HermedBotsUITests/ResumeLanes.swift", "needs_ui": true },
+        { "glob": "HermedBotsUITests/ResumeBaseline.swift", "needs_ui": true }
+      ]
+    },
+    {
+      "id": "compat-degraded",
+      "doc": "features/compat-degraded.md",
+      "paths": [
+        { "glob": "HermedBots/Banners/DegradedBanner.swift", "needs_ui": true },
+        { "glob": "Packages/HermesAdapter/Sources/HermesAdapter/Capabilities.swift", "needs_ui": false },
+        { "glob": "Packages/HermesAdapter/Sources/HermesAdapter/CompatibilityStatus.swift", "needs_ui": false },
+        { "glob": "Packages/HermesAdapter/Tests/HermesAdapterTests/CapabilitiesTests.swift", "needs_ui": false }
+      ]
+    },
+    {
+      "id": "vm-tunnel",
+      "doc": "features/vm-tunnel.md",
+      "paths": [
+        { "glob": "HermedBotsUITests/LiveTunnel.swift", "needs_ui": true },
+        { "glob": "HermedBotsUITests/TunnelTests.swift", "needs_ui": true },
+        { "glob": ".cursor/skills/verify-hermed-bots/scripts/hv-vm-ui.py", "needs_ui": true }
+      ]
+    },
+    {
+      "id": "sparkle-update",
+      "doc": "features/sparkle-update.md",
+      "paths": [
+        { "glob": "HermedBots/Updates/**", "needs_ui": true },
+        { "glob": "HermedBots/Settings/UpdatesSettingsView.swift", "needs_ui": true },
+        { "glob": "scripts/sparkle-update-proof.sh", "needs_ui": false },
+        { "glob": "test/distribution/sparkle-update.test.js", "needs_ui": false },
+        { "glob": "Packages/HermesAdapter/Sources/UpdateCheck/**", "needs_ui": false },
+        { "glob": "Packages/HermesAdapter/Tests/UpdateCheckTests/**", "needs_ui": false }
+      ]
+    },
+    {
+      "id": "about",
+      "doc": "features/about.md",
+      "paths": [
+        { "glob": "HermedBots/Settings/UpdatesSettingsView.swift", "needs_ui": true },
+        { "glob": "Packages/HermesAdapter/Sources/AppSettings/AboutVersions.swift", "needs_ui": false }
+      ]
+    },
+    {
+      "id": "connection",
+      "doc": "features/connection.md",
+      "paths": [
+        { "glob": "HermedBots/Settings/ConnectionView.swift", "needs_ui": true },
+        { "glob": "HermedBots/Transport/SSHConfig.swift", "needs_ui": false },
+        { "glob": "HermedBots/Transport/SSHTunnel.swift", "needs_ui": true },
+        { "glob": "HermedBots/Transport/EphemeralSSHAgent.swift", "needs_ui": false },
+        { "glob": "HermedBotsTests/SSHConfigTests.swift", "needs_ui": false },
+        { "glob": "HermedBotsTests/SSHTunnelTests.swift", "needs_ui": false },
+        { "glob": "HermedBotsTests/EphemeralSSHAgentTests.swift", "needs_ui": false },
+        { "glob": "Packages/HermesAdapter/Sources/AppSettings/**", "needs_ui": false }
+      ]
+    },
+    {
+      "id": "app-shell",
+      "doc": "features/README.md",
+      "paths": [
+        { "glob": "HermedBots/App/**", "needs_ui": true },
+        { "glob": "HermedBots/Settings/SettingsWindow.swift", "needs_ui": true },
+        { "glob": "HermedBots/KillSwitch/**", "needs_ui": true },
+        { "glob": "HermedBots/Shared/**", "needs_ui": true },
+        { "glob": "HermedBots/Banners/LoopPauseBanner.swift", "needs_ui": true },
+        { "glob": "HermedBots/Secrets/**", "needs_ui": false },
+        { "glob": "HermedBotsUITests/**", "needs_ui": true }
+      ]
+    },
+    {
+      "id": "hermes-adapter",
+      "doc": "features/compat-degraded.md",
+      "paths": [
+        { "glob": "Packages/HermesAdapter/**", "needs_ui": false }
+      ]
+    }
+  ]
+}

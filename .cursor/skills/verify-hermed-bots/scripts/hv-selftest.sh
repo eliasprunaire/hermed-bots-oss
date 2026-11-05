@@ -359,4 +359,12 @@ assert cfg["mode"] == "normal"
 assert req("/health")[0] == 200
 PY
 "$E" down fake >/dev/null
+
+CLS="$HERE/hv-classify.js"
+node "$CLS" doctor >/dev/null && ok "classify: doctor skill complet" || ko "classify doctor"
+node "$CLS" --dry-run --files-from "$HERE/../test/fixtures/fast/files.txt" >/dev/null && ok "classify: fixture fast" || ko "classify fast"
+MAP_MISS="$T/no-map.json"
+node "$CLS" --dry-run --files x --feature-map "$MAP_MISS" >"$T/classify-miss.json"
+[ $? -ne 0 ] && python3 -c "import json,sys; r=json.load(open(sys.argv[1])); sys.exit(0 if (r.get('ok') is False and any('feature map absente' in e for e in r.get('errors',[]))) else 1)" "$T/classify-miss.json" && ok "classify: Feature Map absente" || ko "classify map absente"
+
 rm -rf "$T"; exit $fail

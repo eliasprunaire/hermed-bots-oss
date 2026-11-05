@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hermed-bots.example/verify-hermed-bots/schema/dry-run.v1.json",
+  "title": "verify-hermed-bots dry-run v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["path", "needs_ui", "features", "mode", "ok", "errors"],
+  "properties": {
+    "path": {
+      "type": "string",
+      "enum": ["fast", "ui", "fast_suspended"]
+    },
+    "needs_ui": {
+      "type": "boolean"
+    },
+    "features": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "mode": {
+      "type": "string",
+      "enum": ["light", "full"]
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

@@ -1,0 +1,2 @@
+HermedBots/Settings/ConnectionView.swift
+HermedBotsUITests/SixActions.swift

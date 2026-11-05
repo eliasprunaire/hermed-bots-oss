@@ -132,6 +132,30 @@ Pièges de la VM (doc interne) :
 - **Session graphique initiale** : un assistant de configuration peut rester lancé sans fenêtre. Ne pas le tuer : sa mort casse la session Aqua, et xcodebuild ne joint plus le runner de tests (code 15).
 - **Script distant** : il est copié dans la VM, puis lancé avec stdin=/dev/null. Un `bash -s` alimenté par le tube ssh n'est pas utilisé.
 
+## Classement dry-run
+
+Modèle : aucun.
+
+Le script `scripts/hv-classify.js --dry-run` lit la Feature Map versionnée `features/map.v1.json` (fonctionnalités et globs de code) et écrit un JSON conforme à `schema/dry-run.v1.json` :
+
+| Champ | Valeurs |
+|---|---|
+| `path` | `fast` (aucun fichier UI), `ui` (au moins un fichier UI), `fast_suspended` (UI requise mais VM UI indisponible) |
+| `needs_ui` | booléen |
+| `features` | identifiants de la carte qui matchent |
+| `mode` | `light` si `--same-patch-id` et `--pr-pass` ; sinon `full`. Le label `needs-full-verify` force `full`. |
+| `ok` | booléen |
+| `errors` | liste de chaînes |
+
+VM UI indisponible : `--ui-unavailable`, ou `HV_UI_UNAVAILABLE=1`, ou `HV_UI_AVAILABLE=0`.
+
+Sans Feature Map : code de sortie ≠ 0, `ok=false`, erreur `feature map absente`.
+
+```bash
+node .cursor/skills/verify-hermed-bots/scripts/hv-classify.js --dry-run --files-from liste.txt
+node .cursor/skills/verify-hermed-bots/scripts/hv-classify.js doctor
+```
+
 ## Doctor
 
 Modèle : aucun. Lecture seule ; à lancer dès que quelque chose cloche.
@@ -142,6 +166,7 @@ scripts/hv-hermes-env.sh doctor orb      # conteneur à notre label, en marche, 
 scripts/hv-hermes-env.sh doctor fake
 xcrun xcodebuild -version; test -f "$HV_XCTESTRUN" && echo xctestrun OK
 ls ${HV_RUNNER_DIR}/PAUSE ${HV_RUNNER_DIR}/.lock "$HV_WORK/.hv-lock" 2>/dev/null   # rien ne doit sortir
+node .cursor/skills/verify-hermed-bots/scripts/hv-classify.js doctor   # SKILL.md, Feature Map v1, schéma dry-run v1
 ```
 
 Vaut la peine d'être piloté si : chemins protégés absents, environnement prêt avec version lue, `.xctestrun` présent, aucune pause ni verrou, session graphique de test ouverte dans la VM. Le module vérifie cette précondition avant XCUITest.
@@ -302,6 +327,7 @@ Tous dans `scripts/`, exécutables, compatibles bash 3.2 (macOS) et Linux, shell
 | `hv-selftest.sh` | auto-tests des scripts | `scripts/hv-selftest.sh` |
 | `hv-start-env-key.sh` | `.env` au premier volume, clé distincte conservée, chmod 600 | `scripts/hv-start-env-key.sh` |
 | `hv-daily-lanes.py` | dix lanes CLI et mesures HD-16, aucune UI | `python3 scripts/hv-daily-lanes.py` |
+| `hv-classify.js` | classement dry-run JSON v1 (fast / ui / fast_suspended) | `node scripts/hv-classify.js --dry-run --files a,b` ; `node scripts/hv-classify.js doctor` |
 
 ## Preuves HD-16 du 21 octobre 2026
 

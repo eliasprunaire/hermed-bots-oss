@@ -1,0 +1,330 @@
+#!/usr/bin/env node
+"use strict";
+
+const fs = require("node:fs");
+const path = require("node:path");
+
+const SKILL_ROOT = path.resolve(__dirname, "..");
+const DEFAULT_MAP = path.join(SKILL_ROOT, "features", "map.v1.json");
+const DEFAULT_SCHEMA = path.join(SKILL_ROOT, "schema", "dry-run.v1.json");
+const REQUIRED_SKILL_FILES = [
+  "SKILL.md",
+  "features/README.md",
+  "features/map.v1.json",
+  "schema/dry-run.v1.json",
+  "scripts/hv-classify.js",
+];
+const FULL_VERIFY_LABEL = "needs-full-verify";
+
+function usage() {
+  return [
+    "usage: hv-classify.js --dry-run [--files a,b] [--files-from path] [--feature-map path]",
+    "                      [--schema path] [--ui-unavailable] [--same-patch-id] [--pr-pass]",
+    "                      [--label name]",
+    "       hv-classify.js doctor [--skill-root path]",
+  ].join("\n");
+}
+
+function escapeRe(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function globToRegExp(glob) {
+  const normalized = String(glob).replace(/\\/g, "/");
+  let out = "^";
+  for (let i = 0; i < normalized.length; ) {
+    if (normalized.startsWith("**/", i)) {
+      out += "(?:.*/)?";
+      i += 3;
+      continue;
+    }
+    if (normalized.startsWith("**", i)) {
+      out += ".*";
+      i += 2;
+      continue;
+    }
+    const ch = normalized[i];
+    if (ch === "*") {
+      out += "[^/]*";
+    } else if (ch === "?") {
+      out += "[^/]";
+    } else {
+      out += escapeRe(ch);
+    }
+    i += 1;
+  }
+  out += "$";
+  return new RegExp(out);
+}
+
+function matchGlob(file, glob) {
+  const normalized = String(file).replace(/\\/g, "/").replace(/^\.\//, "");
+  return globToRegExp(glob).test(normalized);
+}
+
+function typeOf(value) {
+  if (value === null) return "null";
+  if (Array.isArray(value)) return "array";
+  return typeof value;
+}
+
+function validateAgainstSchema(value, schema, pointer = "#") {
+  const errors = [];
+  if (schema.type && typeOf(value) !== schema.type) {
+    errors.push(`${pointer}: type ${schema.type} attendu`);
+    return errors;
+  }
+  if (schema.enum && !schema.enum.includes(value)) {
+    errors.push(`${pointer}: valeur hors enum`);
+  }
+  if (schema.minLength != null && typeof value === "string" && value.length < schema.minLength) {
+    errors.push(`${pointer}: trop court`);
+  }
+  if (schema.type === "object" && value && typeof value === "object") {
+    const required = schema.required || [];
+    for (const key of required) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) {
+        errors.push(`${pointer}: champ requis manquant: ${key}`);
+      }
+    }
+    const properties = schema.properties || {};
+    for (const key of Object.keys(value)) {
+      if (!Object.prototype.hasOwnProperty.call(properties, key)) {
+        if (schema.additionalProperties === false) {
+          errors.push(`${pointer}: champ inconnu: ${key}`);
+        }
+        continue;
+      }
+      errors.push(...validateAgainstSchema(value[key], properties[key], `${pointer}/${key}`));
+    }
+  }
+  if (schema.type === "array" && Array.isArray(value) && schema.items) {
+    value.forEach((item, index) => {
+      errors.push(...validateAgainstSchema(item, schema.items, `${pointer}/${index}`));
+    });
+  }
+  return errors;
+}
+
+function loadJson(file) {
+  return JSON.parse(fs.readFileSync(file, "utf8"));
+}
+
+function result({ path: classifyPath, needs_ui, features, mode, ok, errors }) {
+  return {
+    path: classifyPath,
+    needs_ui,
+    features,
+    mode,
+    ok,
+    errors,
+  };
+}
+
+function printResult(payload, schema, exitOk) {
+  const schemaErrors = validateAgainstSchema(payload, schema);
+  const out = schemaErrors.length === 0
+    ? payload
+    : result({
+      path: payload.path || "fast",
+      needs_ui: Boolean(payload.needs_ui),
+      features: Array.isArray(payload.features) ? payload.features : [],
+      mode: payload.mode === "light" ? "light" : "full",
+      ok: false,
+      errors: [...(payload.errors || []), ...schemaErrors.map((err) => `schema: ${err}`)],
+    });
+  process.stdout.write(`${JSON.stringify(out)}\n`);
+  return out.ok && exitOk ? 0 : 1;
+}
+
+function parseList(value) {
+  return String(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function readFilesFrom(file) {
+  const raw = file === "-" ? fs.readFileSync(0, "utf8") : fs.readFileSync(file, "utf8");
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("#"));
+}
+
+function parseArgs(argv) {
+  const opts = {
+    doctor: false,
+    dryRun: false,
+    files: [],
+    featureMap: DEFAULT_MAP,
+    schema: DEFAULT_SCHEMA,
+    skillRoot: SKILL_ROOT,
+    uiUnavailable: process.env.HV_UI_UNAVAILABLE === "1" || process.env.HV_UI_AVAILABLE === "0",
+    samePatchId: false,
+    prPass: false,
+    labels: [],
+  };
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    const next = () => {
+      i += 1;
+      return argv[i];
+    };
+    if (arg === "doctor") {
+      opts.doctor = true;
+    } else if (arg === "--dry-run") {
+      opts.dryRun = true;
+    } else if (arg === "--files") {
+      opts.files.push(...parseList(next() || ""));
+    } else if (arg === "--files-from") {
+      opts.files.push(...readFilesFrom(next() || ""));
+    } else if (arg === "--feature-map") {
+      opts.featureMap = path.resolve(next() || "");
+    } else if (arg === "--schema") {
+      opts.schema = path.resolve(next() || "");
+    } else if (arg === "--skill-root") {
+      opts.skillRoot = path.resolve(next() || "");
+    } else if (arg === "--ui-unavailable") {
+      opts.uiUnavailable = true;
+    } else if (arg === "--same-patch-id") {
+      opts.samePatchId = true;
+    } else if (arg === "--pr-pass") {
+      opts.prPass = true;
+    } else if (arg === "--label") {
+      opts.labels.push(...parseList(next() || ""));
+    } else if (arg === "--help" || arg === "-h") {
+      opts.help = true;
+    } else {
+      opts.unknown = arg;
+    }
+  }
+  return opts;
+}
+
+function classifyMode(opts) {
+  if (opts.labels.includes(FULL_VERIFY_LABEL)) return "full";
+  if (opts.samePatchId && opts.prPass) return "light";
+  return "full";
+}
+
+function loadFeatureMap(mapPath) {
+  if (!fs.existsSync(mapPath)) {
+    return { error: `feature map absente: ${path.basename(mapPath)}` };
+  }
+  let parsed;
+  try {
+    parsed = loadJson(mapPath);
+  } catch {
+    return { error: `feature map illisible: ${path.basename(mapPath)}` };
+  }
+  if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.features)) {
+    return { error: "feature map invalide: version 1 requise" };
+  }
+  return { map: parsed };
+}
+
+function classifyFiles(files, map) {
+  const matched = new Set();
+  let needsUi = false;
+  for (const file of files) {
+    for (const feature of map.features) {
+      const paths = Array.isArray(feature.paths) ? feature.paths : [];
+      for (const entry of paths) {
+        const glob = typeof entry === "string" ? entry : entry.glob;
+        const entryNeedsUi = typeof entry === "string" ? Boolean(feature.needs_ui) : Boolean(entry.needs_ui);
+        if (!glob || !matchGlob(file, glob)) continue;
+        matched.add(feature.id);
+        if (entryNeedsUi) needsUi = true;
+      }
+    }
+  }
+  return {
+    features: [...matched].sort(),
+    needs_ui: needsUi,
+  };
+}
+
+function classify(opts) {
+  const loaded = loadFeatureMap(opts.featureMap);
+  const mode = classifyMode(opts);
+  if (loaded.error) {
+    return result({
+      path: "fast",
+      needs_ui: false,
+      features: [],
+      mode,
+      ok: false,
+      errors: [loaded.error],
+    });
+  }
+  const hit = classifyFiles(opts.files, loaded.map);
+  let classifyPath = "fast";
+  if (hit.needs_ui) classifyPath = opts.uiUnavailable ? "fast_suspended" : "ui";
+  return result({
+    path: classifyPath,
+    needs_ui: hit.needs_ui,
+    features: hit.features,
+    mode,
+    ok: true,
+    errors: [],
+  });
+}
+
+function doctor(skillRoot) {
+  const missing = REQUIRED_SKILL_FILES.filter((rel) => !fs.existsSync(path.join(skillRoot, rel)));
+  if (missing.length === 0) {
+    process.stdout.write(`${JSON.stringify({ ok: true, missing: [] })}\n`);
+    return 0;
+  }
+  process.stdout.write(`${JSON.stringify({ ok: false, missing })}\n`);
+  return 1;
+}
+
+function main(argv = process.argv.slice(2)) {
+  const opts = parseArgs(argv);
+  if (opts.help) {
+    process.stderr.write(`${usage()}\n`);
+    return 0;
+  }
+  if (opts.unknown) {
+    process.stderr.write(`${usage()}\n`);
+    return 2;
+  }
+  if (opts.doctor) {
+    return doctor(opts.skillRoot);
+  }
+  if (!opts.dryRun) {
+    process.stderr.write(`${usage()}\n`);
+    return 2;
+  }
+  let schema;
+  try {
+    schema = loadJson(opts.schema);
+  } catch {
+    process.stderr.write("schema dry-run v1 illisible\n");
+    return 1;
+  }
+  return printResult(classify(opts), schema, true);
+}
+
+module.exports = {
+  classify,
+  classifyFiles,
+  classifyMode,
+  doctor,
+  globToRegExp,
+  loadFeatureMap,
+  matchGlob,
+  parseArgs,
+  validateAgainstSchema,
+  main,
+  REQUIRED_SKILL_FILES,
+  DEFAULT_MAP,
+  DEFAULT_SCHEMA,
+  SKILL_ROOT,
+};
+
+if (require.main === module) {
+  process.exitCode = main();
+}
