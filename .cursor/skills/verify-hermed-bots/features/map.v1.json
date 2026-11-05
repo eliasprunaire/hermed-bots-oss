@@ -110,6 +110,7 @@
         { "glob": "HermedBots/Settings/SettingsWindow.swift", "needs_ui": true },
         { "glob": "HermedBots/KillSwitch/**", "needs_ui": true },
         { "glob": "HermedBots/Shared/**", "needs_ui": true },
+        { "glob": "HermedBots/Resources/**", "needs_ui": true },
         { "glob": "HermedBots/Banners/LoopPauseBanner.swift", "needs_ui": true },
         { "glob": "HermedBots/Secrets/**", "needs_ui": false },
         { "glob": "HermedBotsUITests/**", "needs_ui": true }

@@ -57,6 +57,33 @@ test("fixture ui: fichiers UI, path=ui", () => {
   assert.equal(json.ok, true);
   assert.ok(json.features.includes("bot-list"));
   assert.ok(json.features.includes("conversation"));
+  assert.ok(json.features.includes("app-shell"));
+});
+
+test("Resources/Localizable.xcstrings classe en ui", () => {
+  const res = run(["--dry-run", "--files", "HermedBots/Resources/Localizable.xcstrings"]);
+  assert.equal(res.status, 0, res.stderr);
+  const json = parseOut(res);
+  assertSchema(json);
+  assert.equal(json.path, "ui");
+  assert.equal(json.needs_ui, true);
+  assert.equal(json.ok, true);
+  assert.ok(json.features.includes("app-shell"));
+});
+
+test("Resources/Localizable.xcstrings en fast_suspended si UI indisponible", () => {
+  const res = run([
+    "--dry-run",
+    "--files",
+    "HermedBots/Resources/Localizable.xcstrings",
+    "--ui-unavailable",
+  ]);
+  assert.equal(res.status, 0, res.stderr);
+  const json = parseOut(res);
+  assertSchema(json);
+  assert.equal(json.path, "fast_suspended");
+  assert.equal(json.needs_ui, true);
+  assert.equal(json.ok, true);
 });
 
 test("fixture fast_suspended: UI requise, VM indisponible", () => {
@@ -85,6 +112,62 @@ test("HV_UI_UNAVAILABLE=1 classe aussi en fast_suspended", () => {
   const json = parseOut(res);
   assertSchema(json);
   assert.equal(json.path, "fast_suspended");
+});
+
+function writeTempMap(payload) {
+  const dir = mkdtempSync(join(tmpdir(), "hv-classify-map-"));
+  const file = join(dir, "map.v1.json");
+  writeFileSync(file, `${JSON.stringify(payload)}\n`);
+  return { dir, file };
+}
+
+test("carte paths:[{}] : ok=false, erreur explicite, pas de classement fast", () => {
+  const tmp = writeTempMap({
+    version: 1,
+    features: [{ id: "ui", paths: [{}] }],
+  });
+  try {
+    const res = run([
+      "--dry-run",
+      "--files",
+      "HermedBots/Bots/BotListView.swift",
+      "--feature-map",
+      tmp.file,
+    ]);
+    assert.notEqual(res.status, 0);
+    const json = parseOut(res);
+    assertSchema(json);
+    assert.equal(json.ok, false);
+    assert.equal(json.path, "fast");
+    assert.equal(json.needs_ui, false);
+    assert.match(json.errors.join("\n"), /glob manquant/);
+  } finally {
+    rmSync(tmp.dir, { recursive: true, force: true });
+  }
+});
+
+test("fonctionnalité nulle : JSON ok=false, pas d'exception", () => {
+  const tmp = writeTempMap({
+    version: 1,
+    features: [null],
+  });
+  try {
+    const res = run([
+      "--dry-run",
+      "--files",
+      "HermedBots/Bots/BotListView.swift",
+      "--feature-map",
+      tmp.file,
+    ]);
+    assert.equal(res.error, undefined);
+    assert.notEqual(res.status, 0);
+    const json = parseOut(res);
+    assertSchema(json);
+    assert.equal(json.ok, false);
+    assert.match(json.errors.join("\n"), /fonctionnalité nulle/);
+  } finally {
+    rmSync(tmp.dir, { recursive: true, force: true });
+  }
 });
 
 test("feature map absente: exit ≠ 0, ok=false, erreur explicite", () => {

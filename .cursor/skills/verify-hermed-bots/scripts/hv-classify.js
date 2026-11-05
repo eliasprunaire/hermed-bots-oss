@@ -208,6 +208,59 @@ function classifyMode(opts) {
   return "full";
 }
 
+function pathEntryLabel(feature, featureIndex, entryIndex) {
+  const id = feature && typeof feature.id === "string" && feature.id
+    ? feature.id
+    : `index ${featureIndex}`;
+  return `${id}/${entryIndex}`;
+}
+
+function validateFeatureMap(parsed) {
+  if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.features)) {
+    return ["feature map invalide: version 1 requise"];
+  }
+  const errors = [];
+  parsed.features.forEach((feature, featureIndex) => {
+    if (feature == null) {
+      errors.push(`feature map invalide: fonctionnalité nulle à l'index ${featureIndex}`);
+      return;
+    }
+    if (typeof feature !== "object" || Array.isArray(feature)) {
+      errors.push(`feature map invalide: fonctionnalité invalide à l'index ${featureIndex}`);
+      return;
+    }
+    if (typeof feature.id !== "string" || !feature.id) {
+      errors.push(`feature map invalide: identifiant manquant à l'index ${featureIndex}`);
+    }
+    if (!Array.isArray(feature.paths)) {
+      errors.push(
+        `feature map invalide: paths manquants pour ${feature.id || `index ${featureIndex}`}`,
+      );
+      return;
+    }
+    feature.paths.forEach((entry, entryIndex) => {
+      const label = pathEntryLabel(feature, featureIndex, entryIndex);
+      if (typeof entry === "string") {
+        if (!entry) {
+          errors.push(`feature map invalide: glob manquant (${label})`);
+        }
+        return;
+      }
+      if (entry == null || typeof entry !== "object" || Array.isArray(entry)) {
+        errors.push(`feature map invalide: entrée de chemin invalide (${label})`);
+        return;
+      }
+      if (typeof entry.glob !== "string" || !entry.glob) {
+        errors.push(`feature map invalide: glob manquant (${label})`);
+      }
+      if (typeof entry.needs_ui !== "boolean") {
+        errors.push(`feature map invalide: needs_ui manquant (${label})`);
+      }
+    });
+  });
+  return errors;
+}
+
 function loadFeatureMap(mapPath) {
   if (!fs.existsSync(mapPath)) {
     return { error: `feature map absente: ${path.basename(mapPath)}` };
@@ -218,8 +271,9 @@ function loadFeatureMap(mapPath) {
   } catch {
     return { error: `feature map illisible: ${path.basename(mapPath)}` };
   }
-  if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.features)) {
-    return { error: "feature map invalide: version 1 requise" };
+  const errors = validateFeatureMap(parsed);
+  if (errors.length > 0) {
+    return { error: errors[0], errors };
   }
   return { map: parsed };
 }
@@ -229,11 +283,11 @@ function classifyFiles(files, map) {
   let needsUi = false;
   for (const file of files) {
     for (const feature of map.features) {
-      const paths = Array.isArray(feature.paths) ? feature.paths : [];
+      const paths = feature.paths;
       for (const entry of paths) {
         const glob = typeof entry === "string" ? entry : entry.glob;
         const entryNeedsUi = typeof entry === "string" ? Boolean(feature.needs_ui) : Boolean(entry.needs_ui);
-        if (!glob || !matchGlob(file, glob)) continue;
+        if (!matchGlob(file, glob)) continue;
         matched.add(feature.id);
         if (entryNeedsUi) needsUi = true;
       }
@@ -246,29 +300,34 @@ function classifyFiles(files, map) {
 }
 
 function classify(opts) {
-  const loaded = loadFeatureMap(opts.featureMap);
   const mode = classifyMode(opts);
-  if (loaded.error) {
-    return result({
-      path: "fast",
-      needs_ui: false,
-      features: [],
-      mode,
-      ok: false,
-      errors: [loaded.error],
-    });
-  }
-  const hit = classifyFiles(opts.files, loaded.map);
-  let classifyPath = "fast";
-  if (hit.needs_ui) classifyPath = opts.uiUnavailable ? "fast_suspended" : "ui";
-  return result({
-    path: classifyPath,
-    needs_ui: hit.needs_ui,
-    features: hit.features,
+  const failed = (errors) => result({
+    path: "fast",
+    needs_ui: false,
+    features: [],
     mode,
-    ok: true,
-    errors: [],
+    ok: false,
+    errors,
   });
+  try {
+    const loaded = loadFeatureMap(opts.featureMap);
+    if (loaded.error) {
+      return failed(loaded.errors || [loaded.error]);
+    }
+    const hit = classifyFiles(opts.files, loaded.map);
+    let classifyPath = "fast";
+    if (hit.needs_ui) classifyPath = opts.uiUnavailable ? "fast_suspended" : "ui";
+    return result({
+      path: classifyPath,
+      needs_ui: hit.needs_ui,
+      features: hit.features,
+      mode,
+      ok: true,
+      errors: [],
+    });
+  } catch (err) {
+    return failed([`classement impossible: ${err && err.message ? err.message : err}`]);
+  }
 }
 
 function doctor(skillRoot) {
@@ -305,7 +364,18 @@ function main(argv = process.argv.slice(2)) {
     process.stderr.write("schema dry-run v1 illisible\n");
     return 1;
   }
-  return printResult(classify(opts), schema, true);
+  try {
+    return printResult(classify(opts), schema, true);
+  } catch (err) {
+    return printResult(result({
+      path: "fast",
+      needs_ui: false,
+      features: [],
+      mode: "full",
+      ok: false,
+      errors: [`classement impossible: ${err && err.message ? err.message : err}`],
+    }), schema, false);
+  }
 }
 
 module.exports = {
@@ -318,6 +388,7 @@ module.exports = {
   matchGlob,
   parseArgs,
   validateAgainstSchema,
+  validateFeatureMap,
   main,
   REQUIRED_SKILL_FILES,
   DEFAULT_MAP,
