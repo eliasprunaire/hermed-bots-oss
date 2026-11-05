@@ -1,0 +1,3 @@
+HermedBots/Bots/BotListView.swift
+HermedBots/Conversation/ConversationView.swift
+HermedBots/Resources/Localizable.xcstrings

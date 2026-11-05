@@ -1,0 +1,3 @@
+Packages/HermesAdapter/Sources/HermesAdapter/Contract.swift
+Packages/HermesAdapter/Tests/HermesAdapterTests/ClientTests.swift
+scripts/sparkle-update-proof.sh
