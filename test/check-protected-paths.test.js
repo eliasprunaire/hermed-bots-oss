@@ -1051,6 +1051,30 @@ test("Renovate changing image: inside a run block is not a version bump", () => 
   assert.equal(decision.message, WORKFLOW_BUMP_REFUSED_MESSAGE);
 });
 
+test("Renovate changing a local action path is not a version bump", () => {
+  assert.deepEqual(
+    isVersionOnlyWorkflowChange(
+      usesWorkflow("./.github/actions/guard@v1"),
+      usesWorkflow("./.github/actions/guard@v2"),
+    ),
+    { ok: false, message: WORKFLOW_BUMP_REFUSED_MESSAGE },
+  );
+  const decision = renovateWorkflowBumpExemption(
+    bumpInput({
+      fileChanges: [
+        {
+          file: WORKFLOW,
+          before: usesWorkflow("./.github/actions/guard@v1"),
+          after: usesWorkflow("./.github/actions/guard@v2"),
+        },
+      ],
+    }),
+  );
+  assert.equal(decision.ok, false);
+  assert.equal(decision.reason, "diff");
+  assert.equal(decision.message, WORKFLOW_BUMP_REFUSED_MESSAGE);
+});
+
 test("Renovate YAML anchors and aliases are blocked with a French message", () => {
   const anchored = renovateWorkflowBumpExemption(
     bumpInput({
@@ -1308,6 +1332,20 @@ test("main blocks a Renovate image: rewrite inside a run block", async () => {
       assert.equal(code, 1);
     },
     runImageWorkflow("policy:enforce"),
+  );
+});
+
+test("main blocks a Renovate pull that changes a local action path", async () => {
+  await withWorkflowHead(
+    usesWorkflow("./.github/actions/guard@v2"),
+    async (base, head) => {
+      const code = await main(["--base", base, "--head", head], {
+        env: renovateEnv,
+        fetch: renovateFetch(["renovate[bot]"]),
+      });
+      assert.equal(code, 1);
+    },
+    usesWorkflow("./.github/actions/guard@v1"),
   );
 });
 

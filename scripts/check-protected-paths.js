@@ -95,6 +95,9 @@ function parseUsesRef(ref) {
   if (!name || name.includes("@") || /\s/.test(name) || pinRef === "") {
     return null;
   }
+  if (name.startsWith(".") || name.startsWith("/")) {
+    return null;
+  }
   if (HEX_SHA.test(pinRef)) {
     return { name, pin: "sha", ref: pinRef.toLowerCase() };
   }
