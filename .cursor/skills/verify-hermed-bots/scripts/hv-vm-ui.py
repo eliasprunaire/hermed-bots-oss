@@ -341,11 +341,13 @@ def host() -> int:
     # Invité : hv-run.sh exige HV_RUNNER_DIR (set -u / :?). Chemin générique absent OK
     # (PAUSE/.lock inexistants) — pas de chemin hôte réel dans le dépôt.
     guest_runner = os.environ.get("HV_GUEST_RUNNER_DIR") or "/tmp/hv-runner"
+    ui_plan = env.get("HV_UI_PLAN", "ui-full")
     guest_env = [
         "HV_UI_BACKEND=%s" % backend,
         "HV_API_URL=http://127.0.0.1:%s" % port,
         "HV_UNDER_RUNNER=1",
         "HV_RUNNER_DIR=%s" % guest_runner,
+        "HV_UI_PLAN=%s" % ui_plan,
     ]
     packed = None
     try:

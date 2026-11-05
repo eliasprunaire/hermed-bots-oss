@@ -30,7 +30,6 @@ final class SixActions: XCTestCase {
         if !isolated, Self.hostedIsDefault, let hosted = Self.hostedApp, hosted.state == .runningForeground {
             return hosted
         }
-        FakeServer.reset()
         let app = XCUIApplication()
         app.launchArguments += ["-AppleLanguages", "(fr)"]
         app.launchEnvironment["HV_TEST_MODE"] = "1"
@@ -73,9 +72,9 @@ final class SixActions: XCTestCase {
 
     private func waitForRows(in app: XCUIApplication, timeout: TimeInterval = 20) {
         _ = waitUntil(timeout) {
-            let shown = shownBotIDs(in: app)
+            let shown = self.shownBotIDs(in: app)
             guard !shown.isEmpty else { return false }
-            if let active = activeProfileIDs() { return shown == active }
+            if let active = self.activeProfileIDs() { return shown == active }
             return true
         }
     }
@@ -729,6 +728,7 @@ final class SixActions: XCTestCase {
 
     /// Le sélecteur n'a qu'une option tant que les profils ont tous le même modèle : `hv-bot-b` prend `model-y`
     private func launchWithTwoModels() -> XCUIApplication {
+        FakeServer.reset()
         FakeServer.setProfileModels(["hv-bot-b": "model-y"])
         return launch()
     }
