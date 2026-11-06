@@ -4,11 +4,15 @@
   "title": "verify-hermed-bots dry-run v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["path", "needs_ui", "features", "mode", "ok", "errors"],
+  "required": ["path", "needs_ui", "features", "mode", "ok", "errors", "ui_plan"],
   "properties": {
     "path": {
       "type": "string",
       "enum": ["fast", "ui", "fast_suspended"]
+    },
+    "ui_plan": {
+      "type": "string",
+      "enum": ["none", "ui-core", "ui-full"]
     },
     "needs_ui": {
       "type": "boolean"

@@ -125,6 +125,21 @@ def guest(evidence: str, xctestrun: str) -> int:
         "-resultBundlePath",
         str(evd / "result.xcresult"),
     ]
+    plan = os.environ.get("HV_UI_PLAN", "ui-full")
+    if plan == "ui-core":
+        cmd.extend(
+            [
+                "-only-testing:HermedBotsUITests/SixActions",
+                "-only-testing:HermedBotsUITests/LaunchTests",
+                "-only-testing:HermedBotsUITests/HD12Video",
+            ]
+        )
+        log("UI plan=ui-core (SixActions LaunchTests HD12Video)")
+    elif plan in ("ui-full", "none", ""):
+        log("UI plan=ui-full (HermedBotsUITests HermedBotsTests)")
+    else:
+        log("HV_UI_PLAN inconnu : %s (ui-core ou ui-full)" % plan)
+        return 2
     with log_path.open("w", encoding="utf-8") as fh:
         proc = subprocess.run(cmd, env=env, stdout=fh, stderr=subprocess.STDOUT)
     return 10 if proc.returncode else 0
@@ -326,11 +341,13 @@ def host() -> int:
     # Invité : hv-run.sh exige HV_RUNNER_DIR (set -u / :?). Chemin générique absent OK
     # (PAUSE/.lock inexistants) — pas de chemin hôte réel dans le dépôt.
     guest_runner = os.environ.get("HV_GUEST_RUNNER_DIR") or "/tmp/hv-runner"
+    ui_plan = env.get("HV_UI_PLAN", "ui-full")
     guest_env = [
         "HV_UI_BACKEND=%s" % backend,
         "HV_API_URL=http://127.0.0.1:%s" % port,
         "HV_UNDER_RUNNER=1",
         "HV_RUNNER_DIR=%s" % guest_runner,
+        "HV_UI_PLAN=%s" % ui_plan,
     ]
     packed = None
     try:

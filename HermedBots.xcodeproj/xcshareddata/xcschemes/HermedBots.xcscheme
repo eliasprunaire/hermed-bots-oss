@@ -97,6 +97,15 @@
             </SkippedTests>
          </TestableReference>
       </Testables>
+      <TestPlans>
+         <TestPlanReference
+            reference = "container:TestPlans/UIFull.xctestplan"
+            default = "YES">
+         </TestPlanReference>
+         <TestPlanReference
+            reference = "container:TestPlans/UICore.xctestplan">
+         </TestPlanReference>
+      </TestPlans>
       <CommandLineArguments>
       </CommandLineArguments>
    </TestAction>

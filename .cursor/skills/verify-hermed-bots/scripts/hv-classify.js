@@ -110,7 +110,7 @@ function loadJson(file) {
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
-function result({ path: classifyPath, needs_ui, features, mode, ok, errors }) {
+function result({ path: classifyPath, needs_ui, features, mode, ok, errors, ui_plan }) {
   return {
     path: classifyPath,
     needs_ui,
@@ -118,6 +118,7 @@ function result({ path: classifyPath, needs_ui, features, mode, ok, errors }) {
     mode,
     ok,
     errors,
+    ui_plan: ui_plan || "none",
   };
 }
 
@@ -132,6 +133,7 @@ function printResult(payload, schema, exitOk) {
       mode: payload.mode === "light" ? "light" : "full",
       ok: false,
       errors: [...(payload.errors || []), ...schemaErrors.map((err) => `schema: ${err}`)],
+      ui_plan: payload.ui_plan === "ui-core" || payload.ui_plan === "ui-full" ? payload.ui_plan : "none",
     });
   process.stdout.write(`${JSON.stringify(out)}\n`);
   return out.ok && exitOk ? 0 : 1;
@@ -256,6 +258,9 @@ function validateFeatureMap(parsed) {
       if (typeof entry.needs_ui !== "boolean") {
         errors.push(`feature map invalide: needs_ui manquant (${label})`);
       }
+      if (entry.ui_plan != null && entry.ui_plan !== "core" && entry.ui_plan !== "full") {
+        errors.push(`feature map invalide: ui_plan invalide (${label})`);
+      }
     });
   });
   return errors;
@@ -278,10 +283,55 @@ function loadFeatureMap(mapPath) {
   return { map: parsed };
 }
 
+const UI_CORE_ONLY_TESTING = [
+  "HermedBotsUITests/SixActions",
+  "HermedBotsUITests/LaunchTests",
+  "HermedBotsUITests/HD12Video",
+];
+
+function isInterfaceSwift(file) {
+  const normalized = String(file).replace(/\\/g, "/").replace(/^\.\//, "");
+  return /^HermedBots\/.+\.swift$/.test(normalized) && !normalized.startsWith("HermedBots/Secrets/");
+}
+
+function mappedUiPlan(file, map) {
+  for (const feature of map.features) {
+    for (const entry of feature.paths) {
+      const glob = typeof entry === "string" ? entry : entry.glob;
+      if (!matchGlob(file, glob)) continue;
+      if (typeof entry !== "object" || entry == null) continue;
+      if (entry.ui_plan === "full") return "ui-full";
+      if (entry.ui_plan === "core") return "ui-core";
+    }
+  }
+  return null;
+}
+
+function selectUiPlan(files, map, needsUi) {
+  if (!needsUi) return "none";
+  let sawFull = false;
+  let sawCore = false;
+  for (const file of files) {
+    if (isInterfaceSwift(file)) sawFull = true;
+    const plan = mappedUiPlan(file, map);
+    if (plan === "ui-full") sawFull = true;
+    if (plan === "ui-core") sawCore = true;
+  }
+  if (sawFull) return "ui-full";
+  if (sawCore) return "ui-core";
+  return "ui-full";
+}
+
+function onlyTestingArgs(plan) {
+  if (plan !== "ui-core") return [];
+  return UI_CORE_ONLY_TESTING.map((id) => `-only-testing:${id}`);
+}
+
 function classifyFiles(files, map) {
   const matched = new Set();
   let needsUi = false;
   for (const file of files) {
+    if (isInterfaceSwift(file)) needsUi = true;
     for (const feature of map.features) {
       const paths = feature.paths;
       for (const entry of paths) {
@@ -296,6 +346,7 @@ function classifyFiles(files, map) {
   return {
     features: [...matched].sort(),
     needs_ui: needsUi,
+    ui_plan: selectUiPlan(files, map, needsUi),
   };
 }
 
@@ -308,6 +359,7 @@ function classify(opts) {
     mode,
     ok: false,
     errors,
+    ui_plan: "none",
   });
   try {
     const loaded = loadFeatureMap(opts.featureMap);
@@ -324,6 +376,7 @@ function classify(opts) {
       mode,
       ok: true,
       errors: [],
+      ui_plan: classifyPath === "fast" ? "none" : hit.ui_plan,
     });
   } catch (err) {
     return failed([`classement impossible: ${err && err.message ? err.message : err}`]);
@@ -374,6 +427,7 @@ function main(argv = process.argv.slice(2)) {
       mode: "full",
       ok: false,
       errors: [`classement impossible: ${err && err.message ? err.message : err}`],
+      ui_plan: "none",
     }), schema, false);
   }
 }
@@ -382,6 +436,10 @@ module.exports = {
   classify,
   classifyFiles,
   classifyMode,
+  selectUiPlan,
+  onlyTestingArgs,
+  isInterfaceSwift,
+  UI_CORE_ONLY_TESTING,
   doctor,
   globToRegExp,
   loadFeatureMap,

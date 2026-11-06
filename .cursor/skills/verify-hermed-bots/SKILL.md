@@ -144,12 +144,30 @@ Le script `scripts/hv-classify.js --dry-run` lit la Feature Map versionnée `fea
 | `needs_ui` | booléen |
 | `features` | identifiants de la carte qui matchent |
 | `mode` | `light` si `--same-patch-id` et `--pr-pass` ; sinon `full`. Le label `needs-full-verify` force `full`. |
+| `ui_plan` | `none` si `path=fast` ; sinon `ui-core` ou `ui-full` (voir « Plans de test UI ») |
 | `ok` | booléen |
 | `errors` | liste de chaînes |
 
 VM UI indisponible : `--ui-unavailable`, ou `HV_UI_UNAVAILABLE=1`, ou `HV_UI_AVAILABLE=0`.
 
 Sans Feature Map : code de sortie ≠ 0, `ok=false`, erreur `feature map absente`.
+
+### Plans de test UI (`ui-core` / `ui-full`)
+
+Les plans versionnés `TestPlans/UICore.xctestplan` et `TestPlans/UIFull.xctestplan` (scheme `HermedBots`, jamais de parallélisme) découpent la passe XCUITest :
+
+| Plan | Classes |
+|---|---|
+| `ui-core` | `SixActions`, `LaunchTests`, `HD12Video` |
+| `ui-full` | toute la cible UI (sondes de perf exclues) et la cible `HermedBotsTests` |
+
+`hv-classify.js` choisit `ui_plan` d’après la Feature Map (`ui_plan` sur chaque glob ; première entrée qui définit `ui_plan` pour le fichier) et ces règles, **en cas de doute : `ui-full`** :
+
+- **`ui-full`** si un fichier Swift d’interface est modifié (`HermedBots/**/*.swift` hors `Secrets/`), ou si une zone de captures / profils / compat visuelle est touchée (`Piste1Shots`, `DesignShots`, `ProfileKeys`, `Compat`, `VersionProfiles`, `baselines/**`, globs `ui_plan: "full"`).
+- **`ui-core`** si l’UI est requise sans ces déclencheurs (tests cœur, scripts de lane, etc.).
+- **`none`** si `needs_ui` est faux.
+
+Exporter `HV_UI_PLAN` depuis `ui_plan` avant `hv-run.sh ui` / `hv-vm-ui.py`. Défaut `ui-full`. Avec `test-without-building`, `ui-core` ajoute `-only-testing` pour les trois classes (le `.xctestplan` sert à `xcodebuild test -scheme HermedBots -testPlan UICore`).
 
 ```bash
 node .cursor/skills/verify-hermed-bots/scripts/hv-classify.js --dry-run --files-from liste.txt
@@ -175,7 +193,7 @@ Vaut la peine d'être piloté si : chemins protégés absents, environnement pr�
 
 Modèle : aucun pour l'exécution ; Sonnet/Codex seulement pour juger un résultat ambigu.
 
-**Harnais principal : XCUITest**, `xcodebuild test-without-building -xctestrun "$HV_XCTESTRUN" -destination 'platform=macOS' -resultBundlePath <evd>/result.xcresult`, lancé par `hv-run.sh ui`. Les variables `TEST_RUNNER_HV_*` sont transmises au runner de tests sans le préfixe. Permissions requises une fois (manuel, utilisateur présent) : Accessibilité et Automatisation pour `Xcode Helper`/`xctest` dans Réglages Système.
+**Harnais principal : XCUITest**, `xcodebuild test-without-building -xctestrun "$HV_XCTESTRUN" -destination 'platform=macOS' -resultBundlePath <evd>/result.xcresult`, lancé par `hv-run.sh ui`. `HV_UI_PLAN=ui-core|ui-full` (défaut `ui-full`, voir « Plans de test UI ») filtre les classes. Les variables `TEST_RUNNER_HV_*` sont transmises au runner de tests sans le préfixe. Permissions requises une fois (manuel, utilisateur présent) : Accessibilité et Automatisation pour `Xcode Helper`/`xctest` dans Réglages Système.
 
 Une VM indisponible laisse la passe UI en attente. Aucun pilotage de l'hôte ne sert de repli.
 
@@ -327,7 +345,7 @@ Tous dans `scripts/`, exécutables, compatibles bash 3.2 (macOS) et Linux, shell
 | `hv-selftest.sh` | auto-tests des scripts | `scripts/hv-selftest.sh` |
 | `hv-start-env-key.sh` | `.env` au premier volume, clé distincte conservée, chmod 600 | `scripts/hv-start-env-key.sh` |
 | `hv-daily-lanes.py` | dix lanes CLI et mesures HD-16, aucune UI | `python3 scripts/hv-daily-lanes.py` |
-| `hv-classify.js` | classement dry-run JSON v1 (fast / ui / fast_suspended) | `node scripts/hv-classify.js --dry-run --files a,b` ; `node scripts/hv-classify.js doctor` |
+| `hv-classify.js` | classement dry-run JSON v1 (fast / ui / fast_suspended, `ui_plan`) | `node scripts/hv-classify.js --dry-run --files a,b` ; `node scripts/hv-classify.js doctor` |
 
 ## Preuves HD-16 du 21 octobre 2026
 

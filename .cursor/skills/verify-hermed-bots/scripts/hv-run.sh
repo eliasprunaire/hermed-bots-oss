@@ -9,6 +9,7 @@
 #   HV_XCTESTRUN (fichier .xctestrun produit par build-for-testing), HV_APP_BUNDLE_ID,
 #   HV_TEST_API_KEY (secret, mode orb), HV_UNDER_RUNNER=1 si lancé par runner.sh (qui tient déjà .lock).
 #   HV_BASELINES (défaut ../baselines, remplacé par les références temporaires du selftest).
+#   HV_UI_PLAN (ui-core | ui-full, défaut ui-full) : filtre XCUITest aligné sur la Feature Map.
 # Codes de sortie :
 #   0 PASS | 2 usage | 3 PAUSE présent (rien lancé) | 4 verrou pris (rien lancé)
 #   10 au moins un contrat/test FAIL | 11 écart visuel > tolérance | 14 connexion interdite
@@ -158,8 +159,18 @@ PYKEYS
       start_env || { worst $?; return; }
       TR_ENV=(TEST_RUNNER_HV_TEST_MODE=1 TEST_RUNNER_HV_TEST_API_KEYS="$HV_TEST_API_KEYS" TEST_RUNNER_HV_API_URL="$(URL)" TEST_RUNNER_HV_SHOTS="$HV_EVIDENCE/shots")
       [ -n "${HV_TEST_PROFILE_TABLE:-}" ] && TR_ENV+=(TEST_RUNNER_HV_TEST_PROFILE_TABLE="$HV_TEST_PROFILE_TABLE")
+      UI_ONLY=()
+      case "${HV_UI_PLAN:-ui-full}" in
+        ui-core)
+          UI_ONLY=(-only-testing:HermedBotsUITests/SixActions -only-testing:HermedBotsUITests/LaunchTests -only-testing:HermedBotsUITests/HD12Video)
+          note "UI plan=ui-core (SixActions LaunchTests HD12Video)"
+          ;;
+        ui-full|none|"") note "UI plan=ui-full (HermedBotsUITests HermedBotsTests)" ;;
+        *) note "HV_UI_PLAN inconnu : ${HV_UI_PLAN} (ui-core ou ui-full)"; worst 2; return ;;
+      esac
       env "${TR_ENV[@]}" \
       xcodebuild test-without-building -xctestrun "$HV_XCTESTRUN" -destination 'platform=macOS' \
+        ${UI_ONLY[@]+"${UI_ONLY[@]}"} \
         -resultBundlePath "$HV_EVIDENCE/result.xcresult" > "$HV_EVIDENCE/xcodebuild.log" 2>&1; worst $(( $? ? 10 : 0 ))
       ;;
     *) note "HV_UI_BACKEND doit valoir orb ou fake"; worst 2; return ;;
