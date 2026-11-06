@@ -653,9 +653,12 @@ final class AppModel {
                         keyWaiters[profile, default: []].append((joinGeneration, continuation))
                     }
                 } catch is KeyFetchGenerationMismatch {
+                    // une saisie ou un reset a périmé l'attente : reprendre la clé du Trousseau sans relancer SSH
+                    if let held = try? environment.secrets.resolvedAPIKey(profile: profile) { return held }
                     continue
                 } catch is CancellationError {
                     guard !Task.isCancelled else { throw CancellationError() }
+                    if let held = try? environment.secrets.resolvedAPIKey(profile: profile) { return held }
                     continue
                 }
             }

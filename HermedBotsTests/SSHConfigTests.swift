@@ -1697,6 +1697,43 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertEqual(model.version, .known("0.22.1"))
     }
 
+    /// Deux lecteurs concurrents sur le même profil : une clé saisie pendant la lecture ne doit pas être effacée par une seconde lecture SSH relancée via une attente périmée
+    func testConcurrentSharedWaitersKeepManualKeyWithoutSecondSSHRead() async throws {
+        let gate = GatedKeyRead()
+        var readsForA = 0
+        let reader: @MainActor (String) async throws -> String? = { profile in
+            guard profile == "hv-bot-a" else { return nil }
+            readsForA += 1
+            if readsForA == 1 { return try await gate.read(profile) }
+            XCTFail("une seconde lecture SSH ne doit pas partir quand la clé est déjà saisie pour ce profil")
+            return "host-overwrite"
+        }
+        let items = FakeKeychainItems()
+        let table = "Profile  Model  Gateway  Alias  Distribution\n  hv-bot-a   hv-fake-1   running   —   —"
+        let environment = AppEnvironment(
+            secrets: items.store, baseURL: URL(string: "http://hermes.invalid"), ssh: nil, isTestMode: true,
+            defaults: isolatedDefaults(), testProfileTable: table
+        )
+        KeyStubProtocol.serve = { request in
+            request.url?.path.hasSuffix("/health") == true || request.value(forHTTPHeaderField: "Authorization") == "Bearer manual-VALUE" ? 200 : 401
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [KeyStubProtocol.self]
+        let model = AppModel(environment: environment, apiKeyReader: reader, urlConfiguration: configuration)
+        await model.bots.refresh()
+        let firstRefresh = Task { await model.refreshVersion() }
+        await eventually { gate.started }
+        let secondRefresh = Task { await model.refreshVersion() }
+        try await model.storeAPIKey("manual-VALUE", profile: "hv-bot-a")
+        gate.finish(.success("host-overwrite"))
+        await secondRefresh.value
+        await firstRefresh.value
+        XCTAssertEqual(readsForA, 1, "l'attente périmée ne doit pas relancer SSH quand la clé est déjà saisie")
+        XCTAssertEqual(items.values["\(KeychainSecretStore.account):hv-bot-a"], Data("manual-VALUE".utf8))
+        XCTAssertNil(model.apiError)
+        XCTAssertEqual(model.version, .known("0.22.1"))
+    }
+
     /// Un modèle dont la lecture SSH attend `gate.finish`, sur un Trousseau simulé qui n'accepte que `manual-VALUE`
     private func suspendedReadModel() async throws -> (AppModel, FakeKeychainItems, SeenAuthorizations, GatedKeyRead) {
         let items = FakeKeychainItems()
