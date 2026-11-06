@@ -18,6 +18,7 @@ enum AccessibilityID: String, CaseIterable {
     case conversationEmpty = "hd.conversation.empty"
     case conversationBusy = "hd.conversation.busy"
     case conversationError = "hd.conversation.error"
+    case conversationErrorRetry = "hd.conversation.error.retry"
     case profileLock = "hd.profile.lock"
     case composerInput = "hd.composer.input"
     case composerSend = "hd.composer.send"

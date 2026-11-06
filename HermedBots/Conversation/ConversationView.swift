@@ -44,7 +44,7 @@ struct ConversationView: View {
                         Spacer(minLength: 0)
                         Button("Réessayer") { model.retryOpen() }
                             .buttonStyle(.glass)
-                            .accessibilityID(.bannerErrorRetry)
+                            .accessibilityID(.conversationErrorRetry)
                     }
                 }
                 .column()
