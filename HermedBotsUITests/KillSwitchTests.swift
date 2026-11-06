@@ -7,6 +7,7 @@ final class KillSwitchTests: HD12Harness {
     private let profiles = ["hv-bot-a", "hv-bot-b", "cyber"]
 
     override func setUpWithError() throws {
+        try super.setUpWithError()
         try XCTSkipUnless(environment["HV_HD15_LANE"] == "1", "HD15 nécessite le serveur de lane dans la VM")
     }
 
@@ -47,13 +48,13 @@ final class KillSwitchTests: HD12Harness {
 
     private func openRun(_ profile: String) {
         let rows = request("/_hv/runs").filter { $0["profile"] as? String == profile }
-        guard let session = rows.last?["session"] as? String else { return XCTFail("session absente") }
+        guard rows.last?["session"] as? String != nil else { return XCTFail("session absente") }
+        // Chat unique : un clic sur le bot reprend le fil le plus récent (celui du run), sans ligne de session
         revealBot(profile)
-        let group = element("hd.bots.row.\(profile).threads")
-        if !group.exists { click("hd.bots.row.\(profile)") }
-        let row = group.descendants(matching: .any).matching(identifier: "hd.threads.row.\(session)").firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 10))
-        row.click()
+        XCTAssertTrue(element("hd.conversation.view").waitForExistence(timeout: 10), "chat unique absent pour \(profile)")
+        XCTAssertTrue(element("hd.composer.input").waitForExistence(timeout: 10))
+        _ = element("hd.conversation.opening").waitForNonExistence(timeout: 15)
+        XCTAssertFalse(element("hd.bots.row.\(profile).threads").exists, "plus de liste de fils sous \(profile)")
     }
 
     private func stops() -> [[String: Any]] {
@@ -152,10 +153,13 @@ final class KillSwitchTests: HD12Harness {
         XCTAssertEqual(rows.filter { ($0["messages"] as? Int ?? 0) > 0 && $0["http"] as? Int == 200 }.count, 3)
         for profile in profiles {
             openRun(profile)
-            guard let id = rows.first(where: { $0["profile"] as? String == profile })?["ids"] as? [Int], let first = id.first else { return XCTFail("transcript absent") }
+            // Chat unique : recharge le transcript API du fil (HV_KILL n'y est versé qu'à la fin du tour, donc absent après annulation).
+            // On vérifie que le fil est toujours là (messages seed) et que la fin « annulé » du tour survit à la réouverture.
+            guard let ids = rows.first(where: { $0["profile"] as? String == profile })?["ids"] as? [Int], let first = ids.first else { return XCTFail("transcript absent") }
             let message = "hd.conversation.message.\(first)"
-            XCTAssertTrue(element(message).waitForExistence(timeout: 10))
-            XCTAssertTrue(text(message).contains("HV_KILL"))
+            XCTAssertTrue(element(message).waitForExistence(timeout: 10), "le chat unique de \(profile) doit montrer le transcript conservé")
+            XCTAssertTrue(element("hd.conversation.state").waitForExistence(timeout: 10))
+            XCTAssertTrue(text("hd.conversation.state").contains("annulé"), "la fin du tour annulé reste sur le fil unique de \(profile)")
         }
         XCTAssertFalse(request("/_hv/log").contains { $0["m"] as? String == "DELETE" })
         HVShot.capture("hd15-kept", app)

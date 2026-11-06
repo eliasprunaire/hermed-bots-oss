@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Exécuter uniquement par le script de VM de test, jamais sur l’hôte
 set -uo pipefail
-[ "$HOME" =  ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo "VM hvtest requise"; exit 2; }
+[ "$(id -un)" = hvtest ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo "VM hvtest requise"; exit 2; }
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
-SK=$ROOT/.cursor/skills/verify-hermed-bots/scripts
+SK=${HV_SKILL_SCRIPTS:-$ROOT/.local-skills/verify-hermed-bots/scripts}
 WORK=${HV_WORK:-$HOME/hermed-bots-work}
 XCTESTRUN=${HV_XCTESTRUN:?HV_XCTESTRUN absent : lancer par le script de VM de test}
 mode=normal

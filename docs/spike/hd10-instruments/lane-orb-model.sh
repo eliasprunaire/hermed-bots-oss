@@ -8,7 +8,7 @@
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 REPO=$(git -C "$HERE" rev-parse --show-toplevel)
-SK=$REPO/.cursor/skills/verify-hermed-bots/scripts
+SK=${HV_SKILL_SCRIPTS:-$REPO/.local-skills/verify-hermed-bots/scripts}
 PNG=${1:?usage: lane-orb-model.sh <sortie.png>}
 WORK=${HV_WORK:-$HOME/hermed-bots-work}
 EVD=$WORK/evidence/hd10-orb-$(TZ=Europe/Paris date +%Y%m%d-%H%M%S)

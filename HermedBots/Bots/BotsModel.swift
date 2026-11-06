@@ -68,6 +68,15 @@ final class BotsModel {
     /// L'état de l'hôte courant ; un hôte jamais lu ne montre rien
     private var shown: Host { hosts[connection()] ?? Host() }
 
+    #if DEBUG
+    /// Capture XCUITest : liste figée, sans `hermes profile list`.
+    func seedShown(_ bots: [Bot], phase: Phase = .ready) {
+        let host = connection()
+        hosts[host, default: Host()].list.receive(bots)
+        hosts[host, default: Host()].phase = phase
+    }
+    #endif
+
     /// Relit la liste tout de suite puis à chaque intervalle, jusqu'à l'annulation de la tâche
     func run() async {
         let host = connection()

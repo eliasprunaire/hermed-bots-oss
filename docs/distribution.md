@@ -88,7 +88,7 @@ Conserver la même paire entre les versions.
 Sparkle démarre dans les builds Release.
 Les builds Debug ne lancent aucun contrôle de mise à jour, notamment pendant XCUITest.
 Les contrôles et les téléchargements automatiques sont désactivés dans le bundle.
-L'utilisateur lance une recherche depuis le menu de l'app ou depuis le bouton équivalent dans Connexion.
+L'utilisateur lance une recherche depuis le menu de l'app ou depuis le bouton équivalent de l'onglet À propos des Réglages.
 La première installation reste manuelle.
 Aucune compilation locale n'est nécessaire ensuite.
 Le réglage de connexion reste hors du bundle remplacé.

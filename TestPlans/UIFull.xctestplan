@@ -1,0 +1,49 @@
+{
+  "configurations" : [
+    {
+      "id" : "B9F2D1C3-5E84-40AB-8D22-7A3C9F6E2B81",
+      "name" : "Configuration 1",
+      "options" : {
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:HermedBots.xcodeproj",
+      "identifier" : "9319EB897B2D7E098CFBBF08",
+      "name" : "HermedBots"
+    }
+  },
+  "testTargets" : [
+    {
+      "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:HermedBots.xcodeproj",
+        "identifier" : "FBD2B6BC509D052C20634A38",
+        "name" : "HermedBotsTests"
+      }
+    },
+    {
+      "parallelizable" : false,
+      "skippedTests" : [
+        "ApprovalPerfProbe",
+        "BannerPerfProbe",
+        "BotsPerfProbe",
+        "ColdLaunchProbe",
+        "ConversationPerfProbe",
+        "ModelPerfProbe",
+        "ConcurrencyTests/testPerfFiveHolds",
+        "ConcurrencyTests/testPerfOneHold",
+        "KillSwitchTests/testPerfFiveStops",
+        "LaunchTests/testColdLaunchToVersionVisibleStaysUnderTwoSeconds",
+        "ResumeLanes/testResumeBudget"
+      ],
+      "target" : {
+        "containerPath" : "container:HermedBots.xcodeproj",
+        "identifier" : "F321D7A2E48B76A1377E86C1",
+        "name" : "HermedBotsUITests"
+      }
+    }
+  ],
+  "version" : 1
+}

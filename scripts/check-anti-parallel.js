@@ -4,6 +4,7 @@ const { spawnSync } = require("node:child_process");
 const { readFileSync } = require("node:fs");
 
 const MARKER = "<!-- dev-lead-verifier -->";
+const FORCED_RECHECK_MARKER = "<!-- forced-recheck -->";
 const VERDICT_LINE = /^VERDICT: (PASS\+NOTES|PASS|FAIL) @ ([0-9a-fA-F]{40})$/;
 const HEX_SHA = /^[0-9a-fA-F]{40}$/;
 const BC_UUID =
@@ -136,15 +137,23 @@ function decideVerifier(input) {
     }
   }
   if (citing.length > 1) {
-    return {
-      kind: "fail",
-      reason: {
-        code: "parallel-verdicts",
-        headSha,
-        count: citing.length,
-      },
-      description: render(`multiple marked VERDICT comments for ${headSha}`),
-    };
+    const last = citing[citing.length - 1];
+    if (
+      last == null ||
+      typeof last.body !== "string" ||
+      !last.body.includes(FORCED_RECHECK_MARKER)
+    ) {
+      return {
+        kind: "fail",
+        reason: {
+          code: "parallel-verdicts",
+          headSha,
+          count: citing.length,
+        },
+        description: render(`multiple marked VERDICT comments for ${headSha}`),
+      };
+    }
+    citing.splice(0, citing.length - 1);
   }
   if (!Array.isArray(input.runs)) {
     return {
@@ -784,7 +793,14 @@ const defaultIo = {
   },
 };
 
-module.exports = { decideExecutor, decideVerifier, main, STATUS_CONTEXT };
+module.exports = {
+  decideExecutor,
+  decideVerifier,
+  main,
+  STATUS_CONTEXT,
+  MARKER,
+  FORCED_RECHECK_MARKER,
+};
 
 if (require.main === module) {
   main()

@@ -82,8 +82,7 @@ function runPass(codes, extraEnv = {}, options = {}) {
     const skills = join(
       dir,
       "repo",
-      ".cursor",
-      "skills",
+      ".local-skills",
       "verify-hermed-bots",
       "scripts",
     );
@@ -132,8 +131,7 @@ function runLibRequire(spike, extraEnv = {}, options = {}) {
     const skills = join(
       dir,
       "repo",
-      ".cursor",
-      "skills",
+      ".local-skills",
       "verify-hermed-bots",
       "scripts",
     );

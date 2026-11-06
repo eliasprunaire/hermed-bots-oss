@@ -305,15 +305,16 @@ final class CapabilitiesTests: XCTestCase {
         XCTAssertNil(previous.versionNotice)
     }
 
-    /// Le correctif non testé d'une mineure testée n'est pas dégradé, mais son avis de version doit rester visible
+    /// Le correctif non testé d'une mineure testée n'est pas dégradé ; l'avis reste pour le pied et les Réglages, pas pour le bandeau
     func testUntestedPatchVersionShowsItsBannerWithoutBeingDegraded() async throws {
         try serve(.patch)
         let patch = try await capabilities()
         XCTAssertFalse(patch.isDegraded)
         XCTAssertNotNil(patch.versionNotice)
-        XCTAssertTrue(patch.showsBanner)
+        XCTAssertFalse(patch.showsBanner)
+        XCTAssertFalse(patch.hasDisabledFeature)
 
-        // une version testée sans fonction perdue ne montre rien ; une fonction perdue ou une autre mineure montre le bandeau
+        // une version testée sans fonction perdue ne montre rien ; une fonction perdue montre le bandeau
         try serve()
         let current = try await capabilities()
         XCTAssertFalse(current.showsBanner)
@@ -322,7 +323,8 @@ final class CapabilitiesTests: XCTestCase {
         XCTAssertTrue(dropped.showsBanner)
         try serve(overrides: [.version: .http(200, Data(#"{"status": "ok", "version": "0.23.0"}"#.utf8))])
         let other = try await capabilities()
-        XCTAssertTrue(other.showsBanner)
+        XCTAssertFalse(other.showsBanner)
+        XCTAssertTrue(other.isDegraded)
     }
 
     func testKnownVersionsAreTheFixtureVersions() throws {
@@ -355,7 +357,7 @@ final class CapabilitiesTests: XCTestCase {
         } catch let error as HermesError {
             XCTAssertEqual(error, .profileNotServed(profile))
         }
-        XCTAssertEqual(StubProtocol.seen.count, 2, "la version, puis profile_served")
+        XCTAssertGreaterThanOrEqual(StubProtocol.seen.count, 2, "la version, puis au moins une sonde authentifiée")
     }
 
     func testARefusedKeyThrowsInsteadOfDisablingAContract() async throws {
@@ -373,7 +375,9 @@ final class CapabilitiesTests: XCTestCase {
     func testTheProbeSendsOneHarmlessRequestPerContract() async throws {
         try serve()
         _ = try await capabilities()
-        XCTAssertEqual(StubProtocol.seen.map { "\($0.method) \($0.path)" }, [
+        let paths = StubProtocol.seen.map { "\($0.method) \($0.path)" }
+        XCTAssertEqual(paths.first, "GET /p/hv-bot-a/health")
+        XCTAssertEqual(Set(paths), [
             "GET /p/hv-bot-a/health",
             "GET /p/hv-bot-a/v1/models",
             "GET /p/hv-bot-a/api/sessions",

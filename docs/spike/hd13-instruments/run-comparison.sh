@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
-[ "$HOME" =  ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
+[ "$(id -un)" = hvtest ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
 ROOT=$(pwd)
 WORK=${HV_WORK:-$HOME/hermed-bots-work}
 EVD=$WORK/evidence/hd13-comparison-$(date +%Y%m%d-%H%M%S)
 BASE=$EVD/trunk
-mkdir -p "$BASE/.cursor/skills" "$BASE/docs/spike"
-cp -R "$ROOT/.cursor/skills/verify-hermed-bots" "$BASE/.cursor/skills/"
+mkdir -p "$BASE/.local-skills" "$BASE/docs/spike"
+# sans HV_SKILL_SCRIPTS, la copie de tronc cherche la skill sous son propre .local-skills
+[ -n "${HV_SKILL_SCRIPTS:-}" ] || cp -R "$ROOT/.local-skills/verify-hermed-bots" "$BASE/.local-skills/"
 cp -R "$ROOT/Packages" "$ROOT/HermedBotsTests" "$ROOT/HermedBotsUITests" "$BASE/"
 cp -R "$ROOT/docs/spike/hd13-instruments" "$ROOT/docs/spike/hd08-instruments" "$BASE/docs/spike/"
 tar xzf "$ROOT/docs/spike/hd13-instruments/trunk.tgz" -C "$BASE"

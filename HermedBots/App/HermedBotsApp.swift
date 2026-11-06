@@ -29,8 +29,8 @@ struct ContentView: View {
         NavigationSplitView {
             // pied sous la liste, pas en safeAreaInset : une ligne glissée sous un pied opaque reste « atteignable » pour XCUITest mais le clic tombe sur le pied
             VStack(spacing: 0) {
-                BotListView(model: model.bots, profileLock: model.profileLock, selectedBot: model.conversation.botID, selectedSession: model.conversation.sessionID,
-                            activity: model.conversation.activity(of:), select: model.conversation.select(bot:), open: model.conversation.open(session:of:))
+                BotListView(model: model.bots, profileLock: model.profileLock, selectedBot: model.conversation.botID,
+                            activity: model.conversation.activity(of:), select: model.conversation.activate(bot:))
                 SidebarFooter(model: model)
             }
             .navigationSplitViewColumnWidth(min: 220, ideal: 260)
@@ -39,7 +39,7 @@ struct ContentView: View {
                 ErrorBanner(model: model)
                 DegradedBanner(map: model.capabilities)
                 if let bot = shownBot {
-                    ConversationView(model: model.conversation, killSwitch: model.killSwitch, bot: bot)
+                    ConversationView(model: model.conversation, killSwitch: model.killSwitch, bot: bot, apiFailed: model.apiError != nil)
                 } else {
                     HomeView(bots: model.bots, profileLock: model.profileLock, activity: model.conversation.activity(of:), needsConnection: needsConnection,
                              open: open(bot:), configure: { openSettings() })
@@ -73,6 +73,7 @@ struct ContentView: View {
         }
         #endif
         .task(id: "\(model.apiURL?.absoluteString ?? "")#\((model.bots.list.shown ?? []).map(\.id).joined(separator: ","))") {
+            guard !model.isShotPreview else { return }
             while !Task.isCancelled {
                 await model.killSwitch.checkSupport()
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }
@@ -82,19 +83,20 @@ struct ContentView: View {
             model.reconnectAfterWake()
         }
         .task(id: "\(model.apiURL?.absoluteString ?? "")#\((model.bots.list.shown ?? []).map(\.id).joined(separator: ","))") {
+            guard !model.isShotPreview else { return }
             await model.conversation.restoreAvailable()
         }
-        .task { await model.start() }
+        .task { if !model.isShotPreview { await model.start() } }
         .task(id: model.apiURL) {
-            guard model.apiURL != nil else { return }
+            guard !model.isShotPreview, model.apiURL != nil else { return }
             await model.profileLock.run()
         }
         .task(id: "\(model.tunnel.state)#\(model.versionProfile ?? "")#\(model.bots.phase)") {
-            await model.refreshVersion()
+            if !model.isShotPreview { await model.refreshVersion() }
         }
         // la liste se relit tant qu'une adresse d'API existe ; une nouvelle adresse (tunnel rouvert) relance la lecture
         .task(id: model.apiURL) {
-            guard model.apiURL != nil else { return }
+            guard !model.isShotPreview, model.apiURL != nil else { return }
             await model.bots.run()
         }
     }
@@ -115,32 +117,44 @@ extension ContentView {
         }
     }
 
-    /// Une carte de l'accueil fait ce que fait un clic sur la ligne du bot, sans replier ses fils déjà dépliés
+    /// Une carte de l'accueil ouvre le fil unique du bot
     private func open(bot id: String) {
-        if model.profileLock.state(id) == .free, !model.bots.expanded.contains(id) { model.bots.toggle(id) }
-        model.conversation.select(bot: id)
+        model.conversation.activate(bot: id)
     }
 }
 
-/// Le pied de la barre latérale : le statut du kill switch, puis l'état de la liaison, la version de Hermes, le port et les réglages
+/// Le pied de la barre latérale : pastille de santé, mention discrète de compatibilité, version pour les tests, réglages
 private struct SidebarFooter: View {
     let model: AppModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             StopAllStatus(model: model.killSwitch)
-            HStack(spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
                 Circle()
                     .fill(health)
                     .frame(width: 7, height: 7)
                     .shadow(color: health.opacity(0.7), radius: 3)
+                    .padding(.top, 3)
                     .accessibilityHidden(true)
-                Text("Version de Hermes")
-                model.version.text.accessibilityID(.statusVersion)
-                if let port = model.displayedPort {
-                    Text(verbatim: port.statusText).accessibilityID(.statusPort)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(footerLabel)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineLimit(3)
+                        .help(footerLabel)
+                        .accessibilityID(.statusCompat)
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        model.version.text
+                            .fixedSize(horizontal: false, vertical: true)
+                            .lineLimit(2)
+                            .accessibilityID(.statusVersion)
+                        if let port = model.displayedPort {
+                            Text(verbatim: port.statusText).accessibilityID(.statusPort)
+                        }
+                    }
                 }
-                Spacer()
+                .layoutPriority(1)
+                Spacer(minLength: 4)
                 SettingsLink {
                     Label("Réglages", systemImage: "gearshape").labelStyle(.iconOnly)
                 }
@@ -148,7 +162,6 @@ private struct SidebarFooter: View {
                 .help("Réglages")
                 .accessibilityID(.connectionOpen)
             }
-            .lineLimit(1)
             .font(.footnote)
             .foregroundStyle(.secondary)
         }
@@ -156,12 +169,44 @@ private struct SidebarFooter: View {
         .background(.bar)
     }
 
-    /// Vert : version lue sans erreur ; rouge : tunnel ou API en échec ; orange : lecture en cours ou version inconnue
+    private var status: CompatibilityStatus {
+        CompatibilityStatus.of(
+            map: model.capabilities,
+            checking: model.isCheckingAPI || model.conversation.isOpening,
+            hasError: model.apiError != nil || model.conversation.openError != nil || {
+                if case .failed = model.tunnel.state { return true }
+                return false
+            }()
+        )
+    }
+
+    private var footerLabel: String {
+        var label = CompatibilityStatus.footerLabel(status: status, tunnelFailed: tunnelFailed)
+        if status == .ready, model.conversation.compaction.percent > 0 {
+            let compaction = model.conversation.compaction
+            label += " · contexte \(compaction.percent) %"
+            if compaction.source == .estimate { label += " (estimation)" }
+        }
+        return label
+    }
+
+    private var tunnelFailed: Bool {
+        if case .failed = model.tunnel.state { return true }
+        #if DEBUG
+        return model.testTunnelFailed
+        #else
+        return false
+        #endif
+    }
+
+    /// Vert : prêt ; bleu info : version non testée ; rouge : échec ; orange : connexion
     private var health: Color {
-        if model.apiError != nil { return .red }
-        if case .failed = model.tunnel.state { return .red }
-        if case .known = model.version, !model.isCheckingAPI { return .green }
-        return .orange
+        switch status {
+        case .ready: .green
+        case .untested: .blue
+        case .failed: .red
+        case .connecting: .orange
+        }
     }
 }
 

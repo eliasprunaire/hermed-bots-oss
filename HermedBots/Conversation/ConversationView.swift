@@ -1,3 +1,4 @@
+import HermesAdapter
 import SwiftUI
 
 /// La zone de conversation d'un bot : son en-tête, les lignes du fil, l'état du dernier tour et le champ de saisie
@@ -6,6 +7,8 @@ struct ConversationView: View {
     let model: ConversationModel
     let killSwitch: KillSwitch
     let bot: Bot
+    /// La bannière d'API a déjà tranché : la pastille d'ouverture ne reste pas sur un échec définitif
+    let apiFailed: Bool
     @Environment(\.motion) private var motion
 
     private var colors: [Color] { Palette.colors(bot) }
@@ -22,6 +25,39 @@ struct ConversationView: View {
                 .padding(.bottom, 8)
             }
             LoopPauseBanner(model: model)
+            if model.isOpening, !apiFailed {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Connexion à Hermes… préparation de la clé du profil")
+                        .accessibilityID(.conversationOpening)
+                }
+                .font(.callout)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .glassEffect(.regular, in: .capsule)
+                .padding(.top, 4)
+            }
+            if let error = model.openError {
+                NoticeCard(tint: .red, symbol: "exclamationmark.triangle.fill") {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Text(error).accessibilityID(.conversationError)
+                        Spacer(minLength: 0)
+                        Button("Réessayer") { model.retryOpen() }
+                            .buttonStyle(.glass)
+                            .accessibilityID(.bannerErrorRetry)
+                    }
+                }
+                .column()
+                .padding(.bottom, 8)
+            }
+            if model.compaction.isCompacted, !model.conversation.entries.isEmpty {
+                NoticeCard(tint: .blue, symbol: "rectangle.compress.vertical") {
+                    Text(model.compaction.source == .server ? CompatibilityStatus.compactedNotice : CompatibilityStatus.compactedEstimateNotice)
+                        .accessibilityID(.conversationCompacted)
+                }
+                .column()
+                .padding(.bottom, 8)
+            }
             transcript
             // sous le fil et non en `safeAreaInset` : posé au-dessus de la ScrollView, le champ et Envoyer n'étaient plus atteignables pour XCUITest
             ComposerView(model: model, bot: bot)
@@ -65,7 +101,15 @@ struct ConversationView: View {
                     .font(.system(.title3, design: .rounded, weight: .bold))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                ModelPicker(model: model)
+                HStack(spacing: 8) {
+                    ModelPicker(model: model)
+                    Text("fil unique")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(.quaternary.opacity(0.5), in: .capsule)
+                }
             }
             Spacer(minLength: 0)
         }
@@ -99,17 +143,17 @@ struct ConversationView: View {
     }
 
     @ViewBuilder private var placeholder: some View {
-        if model.isLoading {
+        if model.isLoading || (model.isOpening && !apiFailed) {
             ProgressView().controlSize(.small)
         } else if model.conversation.entries.isEmpty, !model.isBusy {
             VStack(spacing: 14) {
                 BotAvatar(bot: bot, size: 64)
                     .background { Aurora(colors: colors + [colors[0].opacity(0.4)]).clipShape(.circle).frame(width: 130, height: 130).blur(radius: 28).opacity(0.55) }
-                Text(bot.name)
+                Text(model.openError == nil ? CompatibilityStatus.uniqueChatTitle : CompatibilityStatus.waitingChatTitle)
                     .font(.system(.title2, design: .rounded, weight: .bold))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text("Nouvelle session : écrivez le premier message.")
+                Text(model.openError == nil ? CompatibilityStatus.uniqueChatBody : CompatibilityStatus.waitingChatBody)
                     .foregroundStyle(.secondary)
                     .accessibilityID(.conversationEmpty)
             }
@@ -133,7 +177,7 @@ struct ConversationView: View {
                             .accessibilityID(.conversationBusy)
                     } else {
                         TypingDots(tint: colors[0])
-                        Text("Le bot répond…").foregroundStyle(.secondary).accessibilityID(.conversationBusy)
+                        Text(CompatibilityStatus.thinkingLabel).foregroundStyle(.secondary).accessibilityID(.conversationBusy)
                     }
                 }
                 if let tool = model.currentTool {
@@ -206,7 +250,9 @@ private struct MessageRow: View {
     }
 
     @ViewBuilder private var text: some View {
-        if isStreaming {
+        if entry.role == .assistant {
+            MessageMarkdownView(source: entry.text, selectable: !isStreaming, streaming: isStreaming)
+        } else if isStreaming {
             Text(entry.text).lineSpacing(isLong ? 0 : 3)
         } else {
             Text(entry.text).lineSpacing(isLong ? 0 : 3).textSelection(.enabled)

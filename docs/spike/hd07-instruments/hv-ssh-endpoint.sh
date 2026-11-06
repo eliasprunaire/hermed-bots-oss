@@ -9,7 +9,7 @@
 # Aucun port 22 n'est publié sur le Mac : OrbStack route le nom <conteneur>.host.example vers le conteneur
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-SK=$HERE/../../../.cursor/skills/verify-hermed-bots/scripts
+SK=${HV_SKILL_SCRIPTS:-$HERE/../../../.local-skills/verify-hermed-bots/scripts}
 CT=hv-hermes-test
 IMAGE=hv-hermes:hd07
 HOST=$host.example

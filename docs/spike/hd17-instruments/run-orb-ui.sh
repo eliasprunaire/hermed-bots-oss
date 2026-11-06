@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -uo pipefail
-[ "$HOME" =  ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
+[ "$(id -un)" = hvtest ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
 EVD="$HOME/hermed-bots-work/evidence/hd17-orb-ui-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$EVD"
 {

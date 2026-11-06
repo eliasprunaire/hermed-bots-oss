@@ -30,7 +30,7 @@ struct ConnectingPill: View {
     let model: AppModel
 
     var body: some View {
-        if model.isCheckingAPI, model.tunnel.state.bannerMessage == nil, model.apiError == nil {
+        if (model.isCheckingAPI || model.conversation.isOpening), model.tunnel.state.bannerMessage == nil, model.apiError == nil, model.conversation.openError == nil {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text("Connexion à Hermes…").accessibilityID(.bannerWaiting)

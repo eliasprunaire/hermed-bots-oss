@@ -1,3 +1,4 @@
+import AppSettings
 import Darwin
 import os
 import XCTest
@@ -124,25 +125,66 @@ final class SSHTunnelConfigTests: XCTestCase {
             return secret
         }
 
-        let failed = try await fetches.fetch(profile: "cyber", into: &store, read: read)
-        XCTAssertNil(failed)
-        // le même refus ne relit pas
+        let recovered = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertEqual(recovered, secret)
+        XCTAssertEqual(reads, ["cyber", "cyber"])
+        XCTAssertEqual(try store.apiKey(profile: "cyber"), secret)
+        // le succès reste verrouillé jusqu'à settle ou reset
         let sameRefusal = try await fetches.fetch(profile: "cyber", into: &store, read: read)
         XCTAssertNil(sameRefusal)
-        XCTAssertEqual(reads, ["cyber"])
+        XCTAssertEqual(reads, ["cyber", "cyber"])
 
         fetches.reset()
         let retried = try await fetches.fetch(profile: "cyber", into: &store, read: read)
         XCTAssertEqual(retried, secret)
-        XCTAssertEqual(reads, ["cyber", "cyber"])
-        XCTAssertEqual(try store.apiKey(profile: "cyber"), secret)
+        XCTAssertEqual(reads, ["cyber", "cyber", "cyber"])
 
-        // un profil qui a répondu rouvre sa lecture sans toucher aux autres
         _ = try await fetches.fetch(profile: "sport", into: &store, read: read)
         fetches.settle("cyber")
         _ = try await fetches.fetch(profile: "cyber", into: &store, read: read)
         _ = try await fetches.fetch(profile: "sport", into: &store, read: read)
-        XCTAssertEqual(reads, ["cyber", "cyber", "sport", "cyber"])
+        XCTAssertEqual(reads, ["cyber", "cyber", "cyber", "sport", "cyber"])
+    }
+
+    @MainActor
+    func testAGenericFailureIsRereadUpToThreeTimesThenLocksUntilReset() async throws {
+        var store = InMemorySecretStore(apiKey: nil)
+        let fetches = APIKeyFetches()
+        var reads = 0
+        func read(_ name: String) async throws -> String? {
+            reads += 1
+            throw SSHFailure.unreachable("coupure")
+        }
+        let first = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(first)
+        XCTAssertEqual(reads, APIKeyFetches.retryCount)
+        let locked = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(locked)
+        XCTAssertEqual(reads, APIKeyFetches.retryCount)
+        fetches.reset()
+        let reopened = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertNil(reopened)
+        XCTAssertEqual(reads, APIKeyFetches.retryCount * 2)
+    }
+
+    @MainActor
+    func testASecondConcurrentFetchDoesNotStartAnotherRead() async throws {
+        let secret = "fetched-profile-key-VALUE"
+        var store = InMemorySecretStore(apiKey: nil)
+        let fetches = APIKeyFetches()
+        var reads = 0
+        var skipped: String? = secret
+        func read(_ name: String) async throws -> String? {
+            reads += 1
+            // la seconde demande arrive pendant la lecture de la première
+            var other = InMemorySecretStore(apiKey: nil)
+            skipped = try await fetches.fetch(profile: "cyber", into: &other, read: read)
+            return secret
+        }
+        let obtained = try await fetches.fetch(profile: "cyber", into: &store, read: read)
+        XCTAssertEqual(obtained, secret)
+        XCTAssertNil(skipped)
+        XCTAssertEqual(reads, 1)
     }
 
     func testAHeldKeyThatHermesRefusesIsNotReportedAsMissing() {
@@ -220,8 +262,8 @@ final class SSHTunnelConfigTests: XCTestCase {
         XCTAssertEqual(SSHFailure.classify(stderr: "Certificate invalid: expired", status: 255), .certificateExpired(""))
         XCTAssertEqual(SSHFailure.classify(stderr: "Host key verification failed.", status: 255), .hostKeyChanged(""))
         XCTAssertEqual(SSHFailure.classify(stderr: "@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@", status: 255), .hostKeyChanged(""))
-        XCTAssertEqual(SSHFailure.classify(stderr: "ssh: connect to host gateway.invalid port 22: Connection refused\n", status: 255), .unreachable("Échec SSH (code 255)"))
-        XCTAssertEqual(SSHFailure.classify(stderr: "", status: 255), .unreachable("Échec SSH (code 255)"))
+        XCTAssertEqual(SSHFailure.classify(stderr: "ssh: connect to host gateway.invalid port 22: Connection refused\n", status: 255), .unreachable(SSHExitClassification.hermesUnreachableMessage))
+        XCTAssertEqual(SSHFailure.classify(stderr: "", status: 255), .unreachable(SSHExitClassification.hermesUnreachableMessage))
         XCTAssertEqual(SSHFailure.classify(stderr: "Connection reset by peer", status: 255), .tunnelClosed)
         XCTAssertEqual(SSHFailure.classify(stderr: "", status: 1), .tunnelClosed)
         XCTAssertEqual(SSHFailure.classify(stderr: "gate-wrapper_failure=17\n", status: 255), .wrapperFailure(name: "gate-wrapper", code: "17"))
@@ -236,16 +278,17 @@ final class SSHTunnelConfigTests: XCTestCase {
     func testRawStderrNeverReachesTheShownError() {
         let refused = "ssh: connect to host gateway.invalid port 22: Connection refused\n"
         let shown = SSHFailure.classify(stderr: refused, status: 255).message
-        XCTAssertEqual(shown, "Hôte injoignable. Vérifie le réseau, puis réessaie.\nÉchec SSH (code 255)")
+        XCTAssertEqual(shown, "la machine Hermes ne répond pas")
         // sans sortie d'erreur, le message est le même : il ne dépend pas d'elle
         XCTAssertEqual(SSHFailure.classify(stderr: " \n\n", status: 255).message, shown)
         XCTAssertEqual(SSHFailure.classify(stderr: "", status: 255).message, shown)
+        XCTAssertEqual(SSHFailure.unreachable("délai dépassé").message, "la machine Hermes ne répond pas")
         XCTAssertEqual(SSHFailure.unreachable("").message, "Hôte injoignable. Vérifie le réseau, puis réessaie.")
         XCTAssertEqual(SSHFailure.classify(stderr: "boom", status: 7).message, "Hôte injoignable. Vérifie le réseau, puis réessaie.\nÉchec SSH (code 7)")
         // des mots courts ou longs, des caractères de contrôle, dix lignes : rien de tout cela ne paraît
         let noisy = (1...10).map { "ligne \($0)" }.joined(separator: "\n") + "\n" + String(repeating: "mot ", count: 1_250) + "boom\u{1B}[31m rouge\u{7}"
         let failure = SSHFailure.classify(stderr: noisy, status: 255)
-        XCTAssertEqual(failure, .unreachable("Échec SSH (code 255)"))
+        XCTAssertEqual(failure, .unreachable(SSHExitClassification.hermesUnreachableMessage))
         for text in [failure.message, "\(failure)", String(reflecting: failure), (failure as NSError).localizedDescription] {
             for fragment in ["ligne", "mot", "boom", "rouge", "\u{1B}"] { XCTAssertFalse(text.contains(fragment), text) }
         }
@@ -397,8 +440,9 @@ final class SSHTunnelConfigTests: XCTestCase {
         let refused = try await Spawn.run("/bin/sh", ["-c", noise + "; echo 'ssh: connect to host gateway.invalid port 22: Connection refused' >&2"], environment: ["PATH": "/usr/bin:/bin"], timeout: .seconds(10))
         // la cause se lit sur la fin de la sortie d'erreur, mais le message ne la reprend pas
         let failure = SSHFailure.classify(stderr: refused.stderr, status: 255)
-        XCTAssertEqual(failure, .unreachable("Échec SSH (code 255)"))
+        XCTAssertEqual(failure, .unreachable(SSHExitClassification.hermesUnreachableMessage))
         XCTAssertFalse(failure.message.contains("Connection refused"), failure.message)
+        XCTAssertEqual(failure.message, "la machine Hermes ne répond pas")
     }
 }
 
@@ -1300,7 +1344,7 @@ final class RemoteLoginShellTests: XCTestCase {
         do { _ = try await other.readProfileLocks(tunnel); XCTFail("sonde") } catch { XCTAssertEqual(error as? ProfileProbeFailure, .failed(status: 2)) }
         do { _ = try await other.readAPIKey(tunnel, profile: "cyber"); XCTFail("clé") } catch { XCTAssertEqual(error as? APIKeyReadFailure, .commandFailed(status: 2)) }
         do { _ = try await other.readProfileList(tunnel); XCTFail("liste") } catch { XCTAssertEqual(error as? RemoteCommandFailure, RemoteCommandFailure(status: 2)) }
-        // un code 255 reste une panne de ssh : « hôte injoignable » et le code, rien de plus
+        // un code 255 reste une panne de ssh : le texte générique, rien de la sortie d'erreur
         let refused = try await openedBackend(answering: "255 ", stderr: stderr)
         let target = tunnel
         for read in [
@@ -1309,8 +1353,8 @@ final class RemoteLoginShellTests: XCTestCase {
             { _ = try await refused.readProfileList(target) },
         ] as [() async throws -> Void] {
             do { try await read(); XCTFail("255") } catch {
-                XCTAssertEqual(error as? SSHFailure, .unreachable("Échec SSH (code 255)"))
-                XCTAssertEqual((error as? SSHFailure)?.message, "Hôte injoignable. Vérifie le réseau, puis réessaie.\nÉchec SSH (code 255)")
+                XCTAssertEqual(error as? SSHFailure, .unreachable(SSHExitClassification.hermesUnreachableMessage))
+                XCTAssertEqual((error as? SSHFailure)?.message, "la machine Hermes ne répond pas")
             }
         }
     }
@@ -1561,7 +1605,7 @@ final class RemoteLoginShellTests: XCTestCase {
             (ProfileProbeFailure.toolNotFound, "introuvable"),
             (ProfileProbeFailure.failed(status: 1), "la sonde a échoué (code 1)"),
             (ProfileProbeFailure.timedOut, "n'a pas répondu"),
-            (SSHFailure.unreachable("délai dépassé"), "délai dépassé"),
+            (SSHFailure.unreachable("délai dépassé"), "la machine Hermes ne répond pas"),
         ] {
             failure = error
             let read = await lock.refresh()

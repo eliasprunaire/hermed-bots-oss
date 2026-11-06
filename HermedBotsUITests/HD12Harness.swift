@@ -6,9 +6,19 @@ class HD12Harness: XCTestCase {
     var testProfileLocks = false
     let environment = ProcessInfo.processInfo.environment
 
-    override func setUp() {
+    override func setUpWithError() throws {
         continueAfterFailure = false
+        try XCTSkipIf(!Self.fakeServerReady(), "Ce scénario exige les contrôles du faux serveur (/_hv/ready)")
         FakeServer.reset()
+    }
+
+    /// `/_hv/ready` n'existe que sur hv-fake-hermes : la lane orb (Hermes réel) saute ces scénarios.
+    private static func fakeServerReady() -> Bool {
+        guard let base = ProcessInfo.processInfo.environment["HV_API_URL"],
+              let url = URL(string: base + "/_hv/ready"),
+              let data = try? Data(contentsOf: url),
+              (try? JSONSerialization.jsonObject(with: data)) != nil else { return false }
+        return true
     }
 
     override func tearDown() async throws {
@@ -56,7 +66,7 @@ class HD12Harness: XCTestCase {
         app.launchEnvironment["HV_TEST_MODE"] = "1"
         app.launchEnvironment["HV_PROFILE_LOCKS"] = testProfileLocks ? "1" : "0"
         app.launchEnvironment["HV_RESUME_SCOPE"] = UUID().uuidString
-        for key in ["HV_API_URL", "HV_TEST_API_KEY", "HV_TEST_API_KEYS"] { app.launchEnvironment[key] = environment[key] }
+        for key in ["HV_API_URL", "HV_TEST_API_KEY", "HV_TEST_API_KEYS", "HV_TEST_PROFILE_TABLE"] { app.launchEnvironment[key] = environment[key] }
         if wrongKey {
             app.launchEnvironment["HV_TEST_API_KEY"] = "intentionally-invalid-test-key"
             if let raw = environment["HV_TEST_API_KEYS"], let keys = try? JSONDecoder().decode([String: String].self, from: Data(raw.utf8)),

@@ -30,7 +30,7 @@ backend, proxy = free_port(), free_port()
 environment = {"PATH": os.environ["PATH"], "HD13_BACKEND": str(backend), "HD13_PORT": str(proxy)}
 processes = []
 try:
-    processes.append(subprocess.Popen([sys.executable, str(ROOT / ".cursor/skills/verify-hermed-bots/scripts/hv-fake-hermes.py"), "--port", str(backend)], env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
+    processes.append(subprocess.Popen([sys.executable, str(Path(os.environ.get("HV_SKILL_SCRIPTS", ROOT / ".local-skills/verify-hermed-bots/scripts")) / "hv-fake-hermes.py"), "--port", str(backend)], env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
     processes.append(subprocess.Popen([sys.executable, str(Path(__file__).with_name("cut-proxy.py"))], env=environment, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL))
     for port in (backend, proxy):
         for _ in range(100):

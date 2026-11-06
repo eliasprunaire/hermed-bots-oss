@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Lancer uniquement par le script de VM de test
 set -uo pipefail
-[ "$HOME" =  ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
-SK=.cursor/skills/verify-hermed-bots/scripts
+[ "$(id -un)" = hvtest ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
+SK=${HV_SKILL_SCRIPTS:-.local-skills/verify-hermed-bots/scripts}
 WORK=${HV_WORK:?}
 HV_EVIDENCE="$WORK/evidence/hd15-ui-$(date +%Y%m%d-%H%M%S)"
 export HV_EVIDENCE
