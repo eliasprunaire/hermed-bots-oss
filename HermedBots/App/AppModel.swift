@@ -5,6 +5,8 @@ import Observation
 import SwiftUI
 import UpdateCheck
 
+private struct KeyFetchGenerationMismatch: Error {}
+
 @Observable
 @MainActor
 final class AppModel {
@@ -116,7 +118,8 @@ final class AppModel {
     private let apiKeyFetches = APIKeyFetches()
     /// Une lecture en cours : un second refus du même profil attend la même lecture, il n'affiche pas un 401 pendant ce temps
     @ObservationIgnored private var keyFetching: Set<String> = []
-    @ObservationIgnored private var keyWaiters: [String: [CheckedContinuation<String?, Error>]] = [:]
+    @ObservationIgnored private var keyFetchGeneration: [String: Int] = [:]
+    @ObservationIgnored private var keyWaiters: [String: [(generation: Int, continuation: CheckedContinuation<String?, Error>)]] = [:]
     /// Le profil dont le refus affiche `apiError` : « Réessayer » relit sa clé, pas celle du profil à l'écran
     private var refusal: (profile: String, message: String)?
     /// Un test injecte la lecture de `API_SERVER_KEY` et la session HTTP ; l'app lit par SSH et par la session par défaut
@@ -644,26 +647,48 @@ final class AppModel {
     private func fetchRemoteAPIKey(_ profile: String) async throws -> String? {
         while true {
             if keyFetching.contains(profile) {
+                let joinGeneration = apiKeyFetches.generation
                 do {
-                    return try await withCheckedThrowingContinuation { keyWaiters[profile, default: []].append($0) }
+                    return try await withCheckedThrowingContinuation { continuation in
+                        keyWaiters[profile, default: []].append((joinGeneration, continuation))
+                    }
+                } catch is KeyFetchGenerationMismatch {
+                    continue
                 } catch is CancellationError {
                     guard !Task.isCancelled else { throw CancellationError() }
                     continue
                 }
             }
+            let fetchGeneration = apiKeyFetches.generation
             keyFetching.insert(profile)
+            keyFetchGeneration[profile] = fetchGeneration
             do {
                 let key = try await performKeyFetch(profile)
                 keyFetching.remove(profile)
-                let waiters = keyWaiters.removeValue(forKey: profile) ?? []
-                waiters.forEach { $0.resume(returning: key) }
+                resumeKeyWaiters(for: profile, startedGeneration: fetchGeneration, result: .success(key))
                 return key
             } catch {
                 if error is CancellationError { apiKeyFetches.settle(profile) }
                 keyFetching.remove(profile)
-                let waiters = keyWaiters.removeValue(forKey: profile) ?? []
-                waiters.forEach { $0.resume(throwing: error) }
+                resumeKeyWaiters(for: profile, startedGeneration: fetchGeneration, result: .failure(error))
                 throw error
+            }
+        }
+    }
+
+    /// Les attentes partagées portent la génération de leur jointure : une saisie ou un reset pendant la lecture les relance
+    private func resumeKeyWaiters(
+        for profile: String,
+        startedGeneration: Int,
+        result: Result<String?, Error>
+    ) {
+        keyFetchGeneration.removeValue(forKey: profile)
+        let waiters = keyWaiters.removeValue(forKey: profile) ?? []
+        for (joinGeneration, continuation) in waiters {
+            if joinGeneration == startedGeneration, joinGeneration == apiKeyFetches.generation {
+                continuation.resume(with: result)
+            } else {
+                continuation.resume(throwing: KeyFetchGenerationMismatch())
             }
         }
     }

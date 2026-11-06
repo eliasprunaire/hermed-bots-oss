@@ -1668,6 +1668,35 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertEqual(model.version, .known("0.22.1"))
     }
 
+    /// Lecture SSH de A suspendue, clé saisie pour B, rafraîchissement de A : l'attente partagée repart au lieu d'afficher « introuvable »
+    func testASuspendedSharedKeyReadOfAStartsFreshAfterKeyStoredForB() async throws {
+        let gate = GatedKeyRead()
+        var readsForA = 0
+        let reader: @MainActor (String) async throws -> String? = { profile in
+            guard profile == "hv-bot-a" else { return nil }
+            readsForA += 1
+            if readsForA == 1 { return try await gate.read(profile) }
+            return "key-a"
+        }
+        let model = keyModel(keys: [:], profiles: ["hv-bot-a", "hv-bot-b"], reads: KeyReads { _, _ in nil }, reader: reader) { request in
+            let path = request.url?.path ?? ""
+            let auth = request.value(forHTTPHeaderField: "Authorization")
+            if path.hasSuffix("/health") { return 200 }
+            return auth == "Bearer key-a" ? 200 : 401
+        }
+        await model.bots.refresh()
+        let firstRefresh = Task { await model.refreshVersion() }
+        await eventually { gate.started }
+        try await model.storeAPIKey("key-b", profile: "hv-bot-b")
+        let secondRefresh = Task { await model.refreshVersion() }
+        gate.finish(.success("key-a"))
+        await secondRefresh.value
+        _ = await firstRefresh.result
+        XCTAssertEqual(readsForA, 2, "l'attente périmée doit relancer une lecture SSH pour A")
+        XCTAssertNil(model.apiError)
+        XCTAssertEqual(model.version, .known("0.22.1"))
+    }
+
     /// Un modèle dont la lecture SSH attend `gate.finish`, sur un Trousseau simulé qui n'accepte que `manual-VALUE`
     private func suspendedReadModel() async throws -> (AppModel, FakeKeychainItems, SeenAuthorizations, GatedKeyRead) {
         let items = FakeKeychainItems()
