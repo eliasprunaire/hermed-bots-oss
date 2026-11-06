@@ -53,6 +53,7 @@ final class AppModel {
         },
         onAPIRecovered: { [unowned self] in self.apiError = nil },
         onAPIError: { [unowned self] error, profile in Task { await self.handleAPIError(error, profile: profile) } },
+        onRetryOpen: { [unowned self] in self.apiKeyFetches.reset() },
         notifyPause: { [unowned self] cause in await self.notifyPause(cause) }
     )
     @ObservationIgnored lazy var profileLock = ProfileLock(

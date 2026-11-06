@@ -118,6 +118,7 @@ final class ConversationModel {
     private let listedThread: @MainActor (String, String) -> (model: String?, read: Int)?
     private let startedReads: @MainActor () -> Int
     private let onAPIError: @MainActor (Error, String) -> Void
+    private let onRetryOpen: @MainActor () -> Void
     private let notifyPause: @Sendable (LoopGuard.Cause) async -> String
     private let approvalRetry: Duration
     let profileLock: ProfileLock?
@@ -140,6 +141,7 @@ final class ConversationModel {
         startRun: (@MainActor (String, String, String, String?, String) async throws -> String)? = nil,
         onAPIRecovered: @escaping @MainActor () -> Void = {},
         onAPIError: @escaping @MainActor (Error, String) -> Void = { _, _ in },
+        onRetryOpen: @escaping @MainActor () -> Void = {},
         notifyPause: @escaping @Sendable (LoopGuard.Cause) async -> String = { _ in "Notification indisponible." }
     ) {
         self.resumeStore = resumeStore
@@ -155,6 +157,7 @@ final class ConversationModel {
         self.profileLock = profileLock
         self.notifyPause = notifyPause
         self.onAPIError = onAPIError
+        self.onRetryOpen = onRetryOpen
     }
 
     #if DEBUG
@@ -287,8 +290,10 @@ final class ConversationModel {
         Task { await attachUniqueSession(bot: id, on: host) }
     }
 
+    /// « Réessayer » du bandeau en ligne rouvre aussi la lecture SSH de la clé que le refus précédent avait fermée
     func retryOpen() {
         guard let botID else { return }
+        onRetryOpen()
         isOpening = true
         openError = nil
         let host = connection()

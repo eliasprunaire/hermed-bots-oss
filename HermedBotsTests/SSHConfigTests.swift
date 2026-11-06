@@ -1547,6 +1547,37 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertNil(model.apiError)
     }
 
+    /// Refus, clé corrigée sur l'hôte, puis « Réessayer » du bandeau en ligne : la lecture SSH repart et l'ouverture réussit
+    func testInlineRetryAfterARefusedKeyReadsTheCorrectedKeyOverSSH() async {
+        final class Remote { var key = "stale-key" }
+        let remote = Remote()
+        let reads = KeyReads { _, _ in remote.key }
+        let model = keyModel(keys: ["hv-bot-a": "held-key"], profiles: ["hv-bot-a"], reads: reads) {
+            $0.value(forHTTPHeaderField: "Authorization")?.hasSuffix("fixed-key") == true ? 200 : 401
+        }
+        await model.bots.refresh()
+        func settle() async {
+            let deadline = Date().addingTimeInterval(10)
+            while Date() < deadline {
+                if !model.conversation.isOpening, !model.isCheckingAPI { break }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+        }
+        model.conversation.activate(bot: "hv-bot-a")
+        await settle()
+        XCTAssertTrue(model.conversation.openError?.contains("clé API") == true, model.conversation.openError ?? "")
+        XCTAssertNil(model.apiError)
+        let readsBeforeRetry = reads.profiles.count
+        XCTAssertGreaterThanOrEqual(readsBeforeRetry, 1)
+        remote.key = "fixed-key"
+        model.conversation.retryOpen()
+        await settle()
+        XCTAssertGreaterThan(reads.profiles.count, readsBeforeRetry)
+        XCTAssertNil(model.conversation.openError, model.conversation.openError ?? "")
+        XCTAssertNil(model.apiError)
+        XCTAssertTrue(KeyStubProtocol.probes.contains { $0.authorization?.hasSuffix("fixed-key") == true && $0.status == 200 })
+    }
+
     /// `/health` répond 200 : les sondes authentifiées reçoivent 401, la lecture de la clé part et l'outil manque sur l'hôte
     func testAMissingToolOnTheHostIsNamedWhenTheKeyCannotBeRead() async {
         let reads = KeyReads(failure: SSHFailure.remoteToolNotFound) { _, _ in nil }
