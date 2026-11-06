@@ -136,7 +136,7 @@ def guest(evidence: str, xctestrun: str) -> int:
         )
         log("UI plan=ui-core (SixActions LaunchTests HD12Video)")
     elif plan in ("ui-full", "none", ""):
-        log("UI plan=ui-full")
+        log("UI plan=ui-full (HermedBotsUITests HermedBotsTests)")
     else:
         log("HV_UI_PLAN inconnu : %s (ui-core ou ui-full)" % plan)
         return 2

@@ -294,20 +294,32 @@ function isInterfaceSwift(file) {
   return /^HermedBots\/.+\.swift$/.test(normalized) && !normalized.startsWith("HermedBots/Secrets/");
 }
 
+function mappedUiPlan(file, map) {
+  for (const feature of map.features) {
+    for (const entry of feature.paths) {
+      const glob = typeof entry === "string" ? entry : entry.glob;
+      if (!matchGlob(file, glob)) continue;
+      if (typeof entry !== "object" || entry == null) continue;
+      if (entry.ui_plan === "full") return "ui-full";
+      if (entry.ui_plan === "core") return "ui-core";
+    }
+  }
+  return null;
+}
+
 function selectUiPlan(files, map, needsUi) {
   if (!needsUi) return "none";
   let sawFull = false;
+  let sawCore = false;
   for (const file of files) {
     if (isInterfaceSwift(file)) sawFull = true;
-    for (const feature of map.features) {
-      for (const entry of feature.paths) {
-        const glob = typeof entry === "string" ? entry : entry.glob;
-        if (!matchGlob(file, glob)) continue;
-        if (typeof entry === "object" && entry && entry.ui_plan === "full") sawFull = true;
-      }
-    }
+    const plan = mappedUiPlan(file, map);
+    if (plan === "ui-full") sawFull = true;
+    if (plan === "ui-core") sawCore = true;
   }
-  return sawFull ? "ui-full" : "ui-core";
+  if (sawFull) return "ui-full";
+  if (sawCore) return "ui-core";
+  return "ui-full";
 }
 
 function onlyTestingArgs(plan) {

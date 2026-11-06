@@ -354,6 +354,32 @@ test("Feature Map : doute (autre test UI) choisit ui-full si ui_plan full, sinon
   assert.equal(parseOut(tunnel).ui_plan, "ui-core");
 });
 
+test("helper, sonde et fichier de test UI non cartographié forcent ui-full", () => {
+  for (const file of [
+    "HermedBotsUITests/FakeServer.swift",
+    "HermedBotsUITests/HD12Harness.swift",
+    "HermedBotsUITests/KillSwitchTests.swift",
+    "HermedBotsUITests/NouveauTest.swift",
+  ]) {
+    const res = run(["--dry-run", "--files", file]);
+    assert.equal(res.status, 0, res.stderr);
+    const json = parseOut(res);
+    assertSchema(json);
+    assert.equal(json.path, "ui", file);
+    assert.equal(json.ui_plan, "ui-full", file);
+  }
+});
+
+test("SixActions, LaunchTests et Errors gardent ui-core malgré le joker full", () => {
+  const res = run([
+    "--dry-run",
+    "--files",
+    "HermedBotsUITests/SixActions.swift,HermedBotsUITests/LaunchTests.swift,HermedBotsUITests/Errors.swift",
+  ]);
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(parseOut(res).ui_plan, "ui-core");
+});
+
 test("hv-run et hv-vm-ui filtrent ui-core par -only-testing", () => {
   const runSh = readFileSync(join(SKILL_ROOT, "scripts", "hv-run.sh"), "utf8");
   const vmUi = readFileSync(join(SKILL_ROOT, "scripts", "hv-vm-ui.py"), "utf8");
@@ -362,6 +388,7 @@ test("hv-run et hv-vm-ui filtrent ui-core par -only-testing", () => {
     assert.match(src, /-only-testing:HermedBotsUITests\/SixActions/);
     assert.match(src, /-only-testing:HermedBotsUITests\/LaunchTests/);
     assert.match(src, /-only-testing:HermedBotsUITests\/HD12Video/);
+    assert.match(src, /UI plan=ui-full \(HermedBotsUITests HermedBotsTests\)/);
   }
 });
 
@@ -372,8 +399,19 @@ test("plans XCTest : ui-core sélectionne SixActions LaunchTests HD12Video", () 
   assert.deepEqual([...selected].sort(), ["HD12Video", "LaunchTests", "SixActions"]);
   assert.equal(core.testTargets[0].parallelizable, false);
   assert.equal(full.testTargets[0].parallelizable, false);
-  assert.equal(full.testTargets[0].selectedTests, undefined);
+  const unit = full.testTargets.find((target) => target.target.name === "HermedBotsTests");
+  const ui = full.testTargets.find((target) => target.target.name === "HermedBotsUITests");
+  assert.equal(unit.target.identifier, "FBD2B6BC509D052C20634A38");
+  assert.equal(unit.parallelizable, false);
+  assert.equal(ui.selectedTests, undefined);
+  assert.equal(ui.parallelizable, false);
   for (const id of ["Piste1Shots", "ProfileKeys", "Compat", "VersionProfiles"]) {
     assert.ok(!selected.includes(id), id);
   }
+});
+
+test("UIFull garde la cible HermedBotsTests du scheme", () => {
+  const full = JSON.parse(readFileSync(join(SKILL_ROOT, "..", "..", "..", "TestPlans", "UIFull.xctestplan"), "utf8"));
+  const names = full.testTargets.map((target) => target.target.name).sort();
+  assert.deepEqual(names, ["HermedBotsTests", "HermedBotsUITests"]);
 });

@@ -159,9 +159,9 @@ Les plans versionnés `TestPlans/UICore.xctestplan` et `TestPlans/UIFull.xctestp
 | Plan | Classes |
 |---|---|
 | `ui-core` | `SixActions`, `LaunchTests`, `HD12Video` |
-| `ui-full` | toute la cible UI, sondes de perf toujours exclues |
+| `ui-full` | toute la cible UI (sondes de perf exclues) et la cible `HermedBotsTests` |
 
-`hv-classify.js` choisit `ui_plan` d’après la Feature Map (`ui_plan` sur chaque glob) et ces règles, **en cas de doute : `ui-full`** :
+`hv-classify.js` choisit `ui_plan` d’après la Feature Map (`ui_plan` sur chaque glob ; première entrée qui définit `ui_plan` pour le fichier) et ces règles, **en cas de doute : `ui-full`** :
 
 - **`ui-full`** si un fichier Swift d’interface est modifié (`HermedBots/**/*.swift` hors `Secrets/`), ou si une zone de captures / profils / compat visuelle est touchée (`Piste1Shots`, `DesignShots`, `ProfileKeys`, `Compat`, `VersionProfiles`, `baselines/**`, globs `ui_plan: "full"`).
 - **`ui-core`** si l’UI est requise sans ces déclencheurs (tests cœur, scripts de lane, etc.).

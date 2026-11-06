@@ -17,6 +17,14 @@
   "testTargets" : [
     {
       "parallelizable" : false,
+      "target" : {
+        "containerPath" : "container:HermedBots.xcodeproj",
+        "identifier" : "FBD2B6BC509D052C20634A38",
+        "name" : "HermedBotsTests"
+      }
+    },
+    {
+      "parallelizable" : false,
       "skippedTests" : [
         "ApprovalPerfProbe",
         "BannerPerfProbe",

@@ -165,7 +165,7 @@ PYKEYS
           UI_ONLY=(-only-testing:HermedBotsUITests/SixActions -only-testing:HermedBotsUITests/LaunchTests -only-testing:HermedBotsUITests/HD12Video)
           note "UI plan=ui-core (SixActions LaunchTests HD12Video)"
           ;;
-        ui-full|none|"") note "UI plan=ui-full" ;;
+        ui-full|none|"") note "UI plan=ui-full (HermedBotsUITests HermedBotsTests)" ;;
         *) note "HV_UI_PLAN inconnu : ${HV_UI_PLAN} (ui-core ou ui-full)"; worst 2; return ;;
       esac
       env "${TR_ENV[@]}" \

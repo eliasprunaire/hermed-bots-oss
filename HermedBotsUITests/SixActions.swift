@@ -18,11 +18,16 @@ final class SixActions: XCTestCase {
 
     // MARK: outils
 
-    /// Attend une condition XCUITest (`XCTNSPredicateExpectation`), sans `sleep`/`usleep` fixes.
+    /// Attend une condition : lecture immédiate, puis toutes les 50 ms sur le `RunLoop`. `XCTNSPredicateExpectation` ne sondait qu'après ~1 s et manquait un état transitoire.
     @discardableResult
     private func waitUntil(_ timeout: TimeInterval, _ condition: @escaping () -> Bool) -> Bool {
-        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
-        return XCTWaiter().wait(for: [expectation], timeout: timeout) == .completed
+        let deadline = Date().addingTimeInterval(timeout)
+        if condition() { return true }
+        while Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+            if condition() { return true }
+        }
+        return false
     }
 
     /// `isolated: false` relance l'app seulement si la classe n'a pas déjà un processus du mode par défaut.
