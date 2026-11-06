@@ -66,6 +66,7 @@ final class AccessibilityIDTests: XCTestCase {
         XCTAssertEqual(AccessibilityID.conversationEmpty.rawValue, "hd.conversation.empty")
         XCTAssertEqual(AccessibilityID.conversationBusy.rawValue, "hd.conversation.busy")
         XCTAssertEqual(AccessibilityID.conversationError.rawValue, "hd.conversation.error")
+        XCTAssertEqual(AccessibilityID.conversationErrorRetry.rawValue, "hd.conversation.error.retry")
         XCTAssertEqual(AccessibilityID.composerInput.rawValue, "hd.composer.input")
         XCTAssertEqual(AccessibilityID.composerSend.rawValue, "hd.composer.send")
         XCTAssertEqual(AccessibilityID.sessionNew.rawValue, "hd.session.new")

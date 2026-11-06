@@ -1530,6 +1530,23 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertFalse(model.isCheckingAPI)
     }
 
+    /// Une clé détenue refusée à l'ouverture du chat unique : `openError` seulement, pas `apiError`
+    func testARefusedKeyDuringOpenDoesNotSetTheGlobalBanner() async {
+        let reads = KeyReads { count, _ in count <= 3 ? "short-key" : nil }
+        let model = keyModel(keys: ["hv-bot-a": "held-key"], profiles: ["hv-bot-a"], reads: reads) { _ in 401 }
+        await model.bots.refresh()
+        model.conversation.activate(bot: "hv-bot-a")
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            if model.conversation.openError != nil, !model.conversation.isOpening, !model.isCheckingAPI { break }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(model.conversation.openError?.contains("clé API") == true, model.conversation.openError ?? "")
+        XCTAssertFalse(model.conversation.isOpening)
+        XCTAssertFalse(model.isCheckingAPI)
+        XCTAssertNil(model.apiError)
+    }
+
     /// `/health` répond 200 : les sondes authentifiées reçoivent 401, la lecture de la clé part et l'outil manque sur l'hôte
     func testAMissingToolOnTheHostIsNamedWhenTheKeyCannotBeRead() async {
         let reads = KeyReads(failure: SSHFailure.remoteToolNotFound) { _, _ in nil }

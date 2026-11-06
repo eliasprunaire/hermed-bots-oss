@@ -49,8 +49,9 @@ final class ProfileKeys: HD12Harness {
         app.launch()
         self.app = app
         click(AccessibilityID.botRow("cyber"))
-        XCTAssertTrue(element(AccessibilityID.bannerError.rawValue).waitForExistence(timeout: 20))
-        XCTAssertTrue(text(AccessibilityID.bannerError.rawValue).contains("clé API"))
+        XCTAssertTrue(element(AccessibilityID.conversationError.rawValue).waitForExistence(timeout: 20))
+        XCTAssertTrue(text(AccessibilityID.conversationError.rawValue).contains("clé API"))
+        XCTAssertFalse(element(AccessibilityID.bannerError.rawValue).exists)
         XCTAssertTrue(
             element(AccessibilityID.conversationOpening.rawValue).waitForNonExistence(timeout: 20),
             "hd.conversation.opening reste après l'échec définitif de la clé"
