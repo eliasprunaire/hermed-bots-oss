@@ -5,6 +5,8 @@ import Observation
 import SwiftUI
 import UpdateCheck
 
+private struct KeyFetchGenerationMismatch: Error {}
+
 @Observable
 @MainActor
 final class AppModel {
@@ -60,12 +62,15 @@ final class AppModel {
     @ObservationIgnored lazy var killSwitch = KillSwitch(
         endpoint: { [unowned self] in
             guard !self.isCheckingAPI, self.apiError == nil, self.capabilities != nil else { return nil }
-            let secrets = self.environment.secrets
-            return self.apiURL.map { KillSwitchAPI(baseURL: $0, apiKey: nil, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) }) }
+            return self.apiURL.map { KillSwitchAPI(baseURL: $0, apiKey: nil, apiKeyForProfile: Self.boundAPIKey(self.environment.secrets)) }
         },
         connection: { [unowned self] in self.connection },
         runs: { [unowned self] in self.conversation.runningTurns },
-        profiles: { [unowned self] in (self.bots.list.shown ?? []).map(\.id) },
+        profiles: { [unowned self] in
+            (self.bots.list.shown ?? []).map(\.id).filter { id in
+                (try? self.environment.secrets.resolvedAPIKey(profile: id)) != nil
+            }
+        },
         confirmed: { [unowned self] in self.conversation.confirmStopped($0, status: $1, on: $2) },
         pending: { [unowned self] in self.conversation.startingTurns() },
         setStopping: { [unowned self] in self.conversation.stopInProgress = $0 }
@@ -111,6 +116,10 @@ final class AppModel {
     private(set) var launchClient: SSHClientSettings?
     /// Une relecture SSH par profil et par 401/403, puis le message d'échec ; « Réessayer » la rouvre
     private let apiKeyFetches = APIKeyFetches()
+    /// Une lecture en cours : un second refus du même profil attend la même lecture, il n'affiche pas un 401 pendant ce temps
+    @ObservationIgnored private var keyFetching: Set<String> = []
+    @ObservationIgnored private var keyFetchGeneration: [String: Int] = [:]
+    @ObservationIgnored private var keyWaiters: [String: [(generation: Int, continuation: CheckedContinuation<String?, Error>)]] = [:]
     /// Le profil dont le refus affiche `apiError` : « Réessayer » relit sa clé, pas celle du profil à l'écran
     private var refusal: (profile: String, message: String)?
     /// Un test injecte la lecture de `API_SERVER_KEY` et la session HTTP ; l'app lit par SSH et par la session par défaut
@@ -217,13 +226,21 @@ final class AppModel {
 
     private func hermesClient() -> HermesClient? {
         guard let apiURL else { return nil }
-        let secrets = environment.secrets
-        return HermesClient(baseURL: apiURL, timeout: 15, configuration: urlConfiguration, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) })
+        return HermesClient(baseURL: apiURL, timeout: 15, configuration: urlConfiguration, apiKeyForProfile: Self.boundAPIKey(environment.secrets))
     }
 
     private func resumeAPI(_ apiURL: URL) -> ResumeAPI {
-        let secrets = environment.secrets
-        return ResumeAPI(baseURL: apiURL, apiKey: nil, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) })
+        ResumeAPI(baseURL: apiURL, apiKey: nil, apiKeyForProfile: Self.boundAPIKey(environment.secrets))
+    }
+
+    /// Rien ne part sans la clé de ce profil : pas de Bearer d'un autre profil, pas de requête anonyme
+    private static func boundAPIKey(_ secrets: SecretStore) -> @Sendable (String) throws -> String? {
+        { profile in
+            guard let key = try secrets.resolvedAPIKey(profile: profile) else {
+                throw HermesError.apiKeyMissing(profile)
+            }
+            return key
+        }
     }
 
     /// `list_profiles` : `hermes profile list` par un second canal ssh en lecture seule (décision S6)
@@ -442,6 +459,24 @@ final class AppModel {
         defer {
             if versionRequest == request { isCheckingAPI = false }
         }
+        if (try? environment.secrets.resolvedAPIKey(profile: profile)) == nil {
+            do {
+                guard try await fetchRemoteAPIKey(profile) != nil else {
+                    guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
+                    version = .unknown
+                    let message = HermesAPIKey.unauthorizedMessage(profile: profile, holdsKey: false)
+                    refusal = (profile, message)
+                    apiError = message
+                    return
+                }
+            } catch {
+                guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
+                version = .unknown
+                await handleAPIError(error, profile: profile)
+                return
+            }
+            guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
+        }
         do {
             let value = try await readVersionRecovering(baseURL, profile: profile)
             guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
@@ -451,8 +486,19 @@ final class AppModel {
             version = .unknown
             await handleAPIError(error, profile: profile)
         }
+        await acquireListedAPIKeys(except: profile)
+        guard versionRequest == request, self.apiURL == baseURL, versionProfile == profile, !Task.isCancelled else { return }
         isCheckingAPI = false
         await checkCapabilities()
+    }
+
+    /// Les sondes du coupe-circuit portent sur chaque profil listé : leur clé est lue avant qu'une requête parte
+    private func acquireListedAPIKeys(except current: String) async {
+        for id in (bots.list.shown ?? []).map(\.id) where id != current {
+            if (try? environment.secrets.resolvedAPIKey(profile: id)) == nil {
+                _ = try? await fetchRemoteAPIKey(id)
+            }
+        }
     }
 
     func checkCapabilities() async {
@@ -511,8 +557,7 @@ final class AppModel {
     }
 
     private func versionClient(_ baseURL: URL) -> HermesClient {
-        let secrets = environment.secrets
-        return HermesClient(baseURL: baseURL, timeout: 5, configuration: urlConfiguration, apiKeyForProfile: { try secrets.resolvedAPIKey(profile: $0) })
+        HermesClient(baseURL: baseURL, timeout: 5, configuration: urlConfiguration, apiKeyForProfile: Self.boundAPIKey(environment.secrets))
     }
 
     private func readVersionRecovering(_ baseURL: URL, profile: String) async throws -> String? {
@@ -569,6 +614,8 @@ final class AppModel {
                     return
                 }
             }
+        } catch is CancellationError {
+            return
         } catch let failure as APIKeyReadFailure {
             isCheckingAPI = false
             showUnreadableKey(failure, profile: profile)
@@ -598,6 +645,58 @@ final class AppModel {
     /// Une saisie de clé ou un nouvel essai pendant la lecture la périme : sa valeur et sa panne sont jetées, la clé du Trousseau reste
     @discardableResult
     private func fetchRemoteAPIKey(_ profile: String) async throws -> String? {
+        while true {
+            if keyFetching.contains(profile) {
+                let joinGeneration = apiKeyFetches.generation
+                do {
+                    return try await withCheckedThrowingContinuation { continuation in
+                        keyWaiters[profile, default: []].append((joinGeneration, continuation))
+                    }
+                } catch is KeyFetchGenerationMismatch {
+                    // une saisie ou un reset a périmé l'attente : reprendre la clé du Trousseau sans relancer SSH
+                    if let held = try? environment.secrets.resolvedAPIKey(profile: profile) { return held }
+                    continue
+                } catch is CancellationError {
+                    guard !Task.isCancelled else { throw CancellationError() }
+                    if let held = try? environment.secrets.resolvedAPIKey(profile: profile) { return held }
+                    continue
+                }
+            }
+            let fetchGeneration = apiKeyFetches.generation
+            keyFetching.insert(profile)
+            keyFetchGeneration[profile] = fetchGeneration
+            do {
+                let key = try await performKeyFetch(profile)
+                keyFetching.remove(profile)
+                resumeKeyWaiters(for: profile, startedGeneration: fetchGeneration, result: .success(key))
+                return key
+            } catch {
+                if error is CancellationError { apiKeyFetches.settle(profile) }
+                keyFetching.remove(profile)
+                resumeKeyWaiters(for: profile, startedGeneration: fetchGeneration, result: .failure(error))
+                throw error
+            }
+        }
+    }
+
+    /// Les attentes partagées portent la génération de leur jointure : une saisie ou un reset pendant la lecture les relance
+    private func resumeKeyWaiters(
+        for profile: String,
+        startedGeneration: Int,
+        result: Result<String?, Error>
+    ) {
+        keyFetchGeneration.removeValue(forKey: profile)
+        let waiters = keyWaiters.removeValue(forKey: profile) ?? []
+        for (joinGeneration, continuation) in waiters {
+            if joinGeneration == startedGeneration, joinGeneration == apiKeyFetches.generation {
+                continuation.resume(with: result)
+            } else {
+                continuation.resume(throwing: KeyFetchGenerationMismatch())
+            }
+        }
+    }
+
+    private func performKeyFetch(_ profile: String) async throws -> String? {
         let source: @MainActor (String) async throws -> String?
         if let apiKeyReader {
             source = apiKeyReader
@@ -622,8 +721,13 @@ final class AppModel {
         guard apiKeyFetches.generation == generation else { return try? environment.secrets.resolvedAPIKey(profile: profile) }
         if key != nil {
             environment.secrets = secrets
-            // un dépli parti avant la clé a gardé son 401 : on relit les fils de ce profil s'il est déplié
+            // un dépli parti avant la clé attendait : on relit les fils de ce profil s'il est déplié
             bots.reload(profile)
+            return key
+        }
+        if Task.isCancelled {
+            apiKeyFetches.settle(profile)
+            throw CancellationError()
         }
         return key
     }

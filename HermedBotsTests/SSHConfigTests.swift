@@ -1,4 +1,5 @@
 import AppSettings
+import Darwin
 import HermesAdapter
 import Security
 import XCTest
@@ -1490,12 +1491,19 @@ final class AppModelConnectTests: XCTestCase {
         await model.tunnel.stop()
     }
 
-    private func keyModel(keys: [String: String] = [:], profiles: [String], reads: KeyReads, serve: @escaping @Sendable (URLRequest) -> Int) -> AppModel {
+    private func keyModel(
+        keys: [String: String] = [:],
+        profiles: [String],
+        reads: KeyReads,
+        reader: (@MainActor (String) async throws -> String?)? = nil,
+        apiURL: String = "http://hermes.invalid",
+        serve: @escaping @Sendable (URLRequest) -> Int
+    ) -> AppModel {
         let table = (["Profile  Model  Gateway  Alias  Distribution"] + profiles.map { "  \($0)   hv-fake-1   running   —   —" }).joined(separator: "\n")
         let environment = AppEnvironment.resolve(
             [
                 "HV_TEST_MODE": "1",
-                "HV_API_URL": "http://hermes.invalid",
+                "HV_API_URL": apiURL,
                 "HV_TEST_PROFILE_TABLE": table,
                 "HV_TEST_API_KEYS": String(decoding: try! JSONEncoder().encode(keys), as: UTF8.self),
             ],
@@ -1503,9 +1511,10 @@ final class AppModelConnectTests: XCTestCase {
             keychain: { InMemorySecretStore(apiKey: nil) }
         )
         KeyStubProtocol.serve = serve
+        KeyStubProtocol.probes = []
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [KeyStubProtocol.self]
-        return AppModel(environment: environment, apiKeyReader: reads.read, urlConfiguration: configuration)
+        return AppModel(environment: environment, apiKeyReader: reader ?? reads.read, urlConfiguration: configuration)
     }
 
     private func refusal(_ status: Int = 401) -> HermesError { .http(contract: "list_sessions", status: status, detail: nil) }
@@ -1659,6 +1668,72 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertEqual(model.version, .known("0.22.1"))
     }
 
+    /// Lecture SSH de A suspendue, clé saisie pour B, rafraîchissement de A : l'attente partagée repart au lieu d'afficher « introuvable »
+    func testASuspendedSharedKeyReadOfAStartsFreshAfterKeyStoredForB() async throws {
+        let gate = GatedKeyRead()
+        var readsForA = 0
+        let reader: @MainActor (String) async throws -> String? = { profile in
+            guard profile == "hv-bot-a" else { return nil }
+            readsForA += 1
+            if readsForA == 1 { return try await gate.read(profile) }
+            return "key-a"
+        }
+        let model = keyModel(keys: [:], profiles: ["hv-bot-a", "hv-bot-b"], reads: KeyReads { _, _ in nil }, reader: reader) { request in
+            let path = request.url?.path ?? ""
+            let auth = request.value(forHTTPHeaderField: "Authorization")
+            if path.hasSuffix("/health") { return 200 }
+            return auth == "Bearer key-a" ? 200 : 401
+        }
+        await model.bots.refresh()
+        let firstRefresh = Task { await model.refreshVersion() }
+        await eventually { gate.started }
+        try await model.storeAPIKey("key-b", profile: "hv-bot-b")
+        let secondRefresh = Task { await model.refreshVersion() }
+        gate.finish(.success("key-a"))
+        await secondRefresh.value
+        _ = await firstRefresh.result
+        XCTAssertEqual(readsForA, 2, "l'attente périmée doit relancer une lecture SSH pour A")
+        XCTAssertNil(model.apiError)
+        XCTAssertEqual(model.version, .known("0.22.1"))
+    }
+
+    /// Deux lecteurs concurrents sur le même profil : une clé saisie pendant la lecture ne doit pas être effacée par une seconde lecture SSH relancée via une attente périmée
+    func testConcurrentSharedWaitersKeepManualKeyWithoutSecondSSHRead() async throws {
+        let gate = GatedKeyRead()
+        var readsForA = 0
+        let reader: @MainActor (String) async throws -> String? = { profile in
+            guard profile == "hv-bot-a" else { return nil }
+            readsForA += 1
+            if readsForA == 1 { return try await gate.read(profile) }
+            XCTFail("une seconde lecture SSH ne doit pas partir quand la clé est déjà saisie pour ce profil")
+            return "host-overwrite"
+        }
+        let items = FakeKeychainItems()
+        let table = "Profile  Model  Gateway  Alias  Distribution\n  hv-bot-a   hv-fake-1   running   —   —"
+        let environment = AppEnvironment(
+            secrets: items.store, baseURL: URL(string: "http://hermes.invalid"), ssh: nil, isTestMode: true,
+            defaults: isolatedDefaults(), testProfileTable: table
+        )
+        KeyStubProtocol.serve = { request in
+            request.url?.path.hasSuffix("/health") == true || request.value(forHTTPHeaderField: "Authorization") == "Bearer manual-VALUE" ? 200 : 401
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [KeyStubProtocol.self]
+        let model = AppModel(environment: environment, apiKeyReader: reader, urlConfiguration: configuration)
+        await model.bots.refresh()
+        let firstRefresh = Task { await model.refreshVersion() }
+        await eventually { gate.started }
+        let secondRefresh = Task { await model.refreshVersion() }
+        try await model.storeAPIKey("manual-VALUE", profile: "hv-bot-a")
+        gate.finish(.success("host-overwrite"))
+        await secondRefresh.value
+        await firstRefresh.value
+        XCTAssertEqual(readsForA, 1, "l'attente périmée ne doit pas relancer SSH quand la clé est déjà saisie")
+        XCTAssertEqual(items.values["\(KeychainSecretStore.account):hv-bot-a"], Data("manual-VALUE".utf8))
+        XCTAssertNil(model.apiError)
+        XCTAssertEqual(model.version, .known("0.22.1"))
+    }
+
     /// Un modèle dont la lecture SSH attend `gate.finish`, sur un Trousseau simulé qui n'accepte que `manual-VALUE`
     private func suspendedReadModel() async throws -> (AppModel, FakeKeychainItems, SeenAuthorizations, GatedKeyRead) {
         let items = FakeKeychainItems()
@@ -1758,7 +1833,7 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertEqual(reads.profiles, [])
     }
 
-    /// Un dépli lance `list_sessions` avant que la clé soit en cache : les fils restent en échec tant que rien ne les relit
+    /// Un dépli avant la clé n'envoie pas `list_sessions` : les fils restent en chargement jusqu'à la lecture de la clé
     func testThreadsExpandedBeforeTheKeyIsCachedAreReadAgainOnceTheKeyIsFetched() async {
         let reads = KeyReads { _, _ in "key-a" }
         let model = keyModel(profiles: ["hv-bot-a"], reads: reads) { request in
@@ -1767,15 +1842,35 @@ final class AppModelConnectTests: XCTestCase {
         }
         await model.bots.refresh()
         model.bots.toggle("hv-bot-a")
-        await eventually {
-            if case .failed? = model.bots.threads["hv-bot-a"] { return true }
-            return false
-        }
+        await eventually { model.bots.threads["hv-bot-a"] != nil }
         XCTAssertEqual(reads.profiles, [])
+        XCTAssertFalse(KeyStubProtocol.probes.contains { $0.path.contains("/p/hv-bot-a/") && $0.status == 401 })
         await model.refreshVersion()
         XCTAssertEqual(reads.profiles, ["hv-bot-a"])
         await eventually { model.bots.threads["hv-bot-a"] == .loaded([]) }
         XCTAssertNil(model.apiError)
+    }
+
+    /// Après une récupération de clé définitivement infructueuse, déplier le profil affiche l'échec
+    func testExpandingAProfileAfterItsKeyRecoveryFailedShowsAnError() async {
+        let reads = KeyReads { _, _ in nil }
+        let model = keyModel(keys: ["hv-bot-a": "key-a"], profiles: ["hv-bot-a", "hv-bot-b"], reads: reads) { request in
+            let path = request.url?.path ?? ""
+            let auth = request.value(forHTTPHeaderField: "Authorization")
+            if path.hasSuffix("/health") { return 200 }
+            if path.contains("/p/hv-bot-a/") { return auth == "Bearer key-a" ? 200 : 401 }
+            return 401
+        }
+        await model.bots.refresh()
+        await model.refreshVersion()
+        XCTAssertEqual(model.versionProfile, "hv-bot-a")
+        model.bots.toggle("hv-bot-b")
+        await eventually {
+            if case .failed? = model.bots.threads["hv-bot-b"] { return true }
+            return false
+        }
+        XCTAssertEqual(model.bots.threads["hv-bot-b"], .failed(HermesAPIKey.missingMessage(profile: "hv-bot-b")))
+        if case .loading? = model.bots.threads["hv-bot-b"] { XCTFail("les fils restent en chargement après un échec définitif sans clé") }
     }
 
     /// Un bot replié n'est pas lu : la clé récupérée ne déplie rien
@@ -1790,6 +1885,186 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertEqual(reads.profiles, ["hv-bot-a"])
         try? await Task.sleep(for: .milliseconds(50))
         XCTAssertNil(model.bots.threads["hv-bot-a"])
+    }
+
+    /// Clic sur un autre profil : la clé n'est pas encore en cache, `/health` est public, `list_sessions` part sans Bearer
+    func testSwitchingProfileDoesNotSendWithoutTheNewKeyOrShowATransient401() async {
+        let reads = KeyReads(delay: .milliseconds(40)) { _, profile in profile == "hv-bot-b" ? "key-b" : "key-a" }
+        let model = keyModel(keys: ["hv-bot-a": "key-a"], profiles: ["hv-bot-a", "hv-bot-b"], reads: reads) { request in
+            let path = request.url?.path ?? ""
+            let auth = request.value(forHTTPHeaderField: "Authorization")
+            if path.contains("/p/hv-bot-a/") {
+                return auth == "Bearer key-a" || path.hasSuffix("/health") ? 200 : 401
+            }
+            return auth == "Bearer key-b" ? 200 : 401
+        }
+        await model.bots.refresh()
+        await model.refreshVersion()
+        XCTAssertNil(model.apiError)
+        XCTAssertEqual(model.versionProfile, "hv-bot-a")
+
+        var banner: String?
+        var thread401 = false
+        let watch = Task { @MainActor in
+            while !Task.isCancelled {
+                if model.apiError != nil { banner = model.apiError }
+                if case .failed(let message)? = model.bots.threads["hv-bot-b"], message.contains("401") { thread401 = true }
+                try? await Task.sleep(for: .milliseconds(1))
+            }
+        }
+        model.conversation.select(bot: "hv-bot-b")
+        model.bots.toggle("hv-bot-b")
+        await model.refreshVersion()
+        await eventually { model.bots.threads["hv-bot-b"] == .loaded([]) }
+        watch.cancel()
+
+        XCTAssertNil(banner, "le bandeau a montré un refus pendant le changement de profil")
+        XCTAssertFalse(thread401, "la liste des fils a montré un 401 pendant le chargement de la clé")
+        XCTAssertNil(model.apiError)
+        XCTAssertEqual(model.versionProfile, "hv-bot-b")
+        let probes = KeyStubProtocol.probes.filter { $0.path.contains("/p/hv-bot-b/") }
+        XCTAssertFalse(probes.isEmpty, "aucune requête du nouveau profil")
+        XCTAssertTrue(probes.allSatisfy { $0.authorization == "Bearer key-b" }, "une requête du nouveau profil est partie sans sa clé")
+        XCTAssertFalse(probes.contains { $0.status == 401 }, "une requête du nouveau profil a reçu 401")
+    }
+
+    /// Deux profils listés : la clé du second n'est pas encore en cache, un troisième n'en a pas. KillSwitch ne part pas sans Bearer.
+    func testKillSwitchAcquiresListedKeysAndNeverSendsWithoutOne() async throws {
+        let recorder = try KillSwitchProbeRecorder()
+        addTeardownBlock { recorder.stop() }
+        let reads = KeyReads { _, profile in
+            switch profile {
+            case "hv-bot-b": return "key-b"
+            case "hv-bot-a": return "key-a"
+            default: return nil
+            }
+        }
+        let model = keyModel(
+            keys: ["hv-bot-a": "key-a"],
+            profiles: ["hv-bot-a", "hv-bot-b", "hv-bot-c"],
+            reads: reads,
+            apiURL: recorder.url.absoluteString
+        ) { request in
+            let path = request.url?.path ?? ""
+            let auth = request.value(forHTTPHeaderField: "Authorization")
+            if path.hasSuffix("/health") { return 200 }
+            if path.contains("/p/hv-bot-a/") { return auth == "Bearer key-a" ? 200 : 401 }
+            if path.contains("/p/hv-bot-b/") { return auth == "Bearer key-b" ? 200 : 401 }
+            return 401
+        }
+        await model.bots.refresh()
+        await model.refreshVersion()
+        XCTAssertNil(model.apiError)
+        XCTAssertNotNil(model.capabilities)
+        XCTAssertEqual(Set(reads.profiles), ["hv-bot-b", "hv-bot-c"])
+        await model.killSwitch.checkSupport()
+        let probes = recorder.probes.filter { $0.path.contains("/v1/capabilities") }
+        XCTAssertTrue(probes.contains { $0.path.contains("/p/hv-bot-a/") && $0.authorization == "Bearer key-a" })
+        XCTAssertTrue(probes.contains { $0.path.contains("/p/hv-bot-b/") && $0.authorization == "Bearer key-b" })
+        XCTAssertFalse(probes.contains { $0.path.contains("/p/hv-bot-c/") }, "une sonde est partie pour un profil sans clé")
+        XCTAssertTrue(probes.allSatisfy { $0.authorization != nil }, "une sonde KillSwitch est partie sans clé")
+        XCTAssertFalse(model.killSwitch.isDisabled)
+    }
+
+    /// Changement A vers B pendant la lecture anticipée de B : la clé de B est utilisable sans Réessayer
+    func testSwitchingProfileDuringListedKeyPrefetchStillFindsTheNewKey() async {
+        final class Hold: @unchecked Sendable { var beganB = false }
+        let hold = Hold()
+        let reads = KeyReads { _, profile in profile == "hv-bot-b" ? "key-b" : nil }
+        let reader: @MainActor (String) async throws -> String? = { profile in
+            if profile == "hv-bot-b" {
+                hold.beganB = true
+                try await Task.sleep(for: .milliseconds(400))
+            }
+            return try await reads.read(profile)
+        }
+        let model = keyModel(
+            keys: ["hv-bot-a": "key-a"],
+            profiles: ["hv-bot-a", "hv-bot-b"],
+            reads: reads,
+            reader: reader
+        ) { request in
+            let path = request.url?.path ?? ""
+            let auth = request.value(forHTTPHeaderField: "Authorization")
+            if path.hasSuffix("/health") { return 200 }
+            if path.contains("/p/hv-bot-a/") { return auth == "Bearer key-a" ? 200 : 401 }
+            return auth == "Bearer key-b" ? 200 : 401
+        }
+        await model.bots.refresh()
+        XCTAssertEqual(model.versionProfile, "hv-bot-a")
+        let prefetch = Task { await model.refreshVersion() }
+        await eventually { hold.beganB }
+        model.conversation.select(bot: "hv-bot-b")
+        prefetch.cancel()
+        await model.refreshVersion()
+        _ = await prefetch.result
+        XCTAssertEqual(model.versionProfile, "hv-bot-b")
+        XCTAssertEqual(model.version, .known("0.22.1"), "la version de B reste en chargement après les deux tâches")
+        XCTAssertNil(model.apiError, "la clé de B est restée introuvable jusqu'à Réessayer")
+        XCTAssertFalse(model.isCheckingAPI)
+        let probes = KeyStubProtocol.probes.filter { $0.path.contains("/p/hv-bot-b/") && !$0.path.hasSuffix("/health") }
+        XCTAssertTrue(probes.contains { $0.authorization == "Bearer key-b" }, "aucune requête authentifiée du profil B")
+        XCTAssertTrue(probes.allSatisfy { $0.authorization == "Bearer key-b" }, "une requête du profil B est partie sans sa clé")
+        XCTAssertFalse(probes.contains { $0.status == 401 }, "une requête du profil B a reçu 401")
+    }
+
+    /// Le rafraîchissement annulé de A ne reprend pas après la lecture anticipée : B finit en version connue
+    func testACancelledRefreshOfAStopsBeforeTouchingTheStateOfB() async {
+        final class Hold: @unchecked Sendable { var beganB = false }
+        let hold = Hold()
+        let reads = KeyReads { _, profile in profile == "hv-bot-b" ? "key-b" : "key-a" }
+        let reader: @MainActor (String) async throws -> String? = { profile in
+            if profile == "hv-bot-b" {
+                hold.beganB = true
+                try await Task.sleep(for: .milliseconds(400))
+            }
+            return try await reads.read(profile)
+        }
+        let model = keyModel(
+            keys: ["hv-bot-a": "key-a"],
+            profiles: ["hv-bot-a", "hv-bot-b"],
+            reads: reads,
+            reader: reader
+        ) { request in
+            let path = request.url?.path ?? ""
+            let auth = request.value(forHTTPHeaderField: "Authorization")
+            if path.hasSuffix("/health") { return 200 }
+            if path.contains("/p/hv-bot-a/") { return auth == "Bearer key-a" ? 200 : 401 }
+            return auth == "Bearer key-b" ? 200 : 401
+        }
+        await model.bots.refresh()
+        let refreshA = Task { await model.refreshVersion() }
+        await eventually { hold.beganB }
+        model.conversation.select(bot: "hv-bot-b")
+        refreshA.cancel()
+        let refreshB = Task { await model.refreshVersion() }
+        await eventually { model.version == .loading }
+        await refreshB.value
+        _ = await refreshA.result
+        XCTAssertEqual(model.versionProfile, "hv-bot-b")
+        XCTAssertEqual(model.version, .known("0.22.1"))
+        XCTAssertFalse(model.isCheckingAPI)
+        XCTAssertNil(model.apiError)
+    }
+
+    /// Clé du profil chargé puis refusée par Hermes : le 401 reste affiché
+    func testAReal401OnTheSelectedProfileStaysVisible() async {
+        let reads = KeyReads { _, profile in profile == "hv-bot-b" ? "bad-b" : "key-a" }
+        let model = keyModel(keys: ["hv-bot-a": "key-a"], profiles: ["hv-bot-a", "hv-bot-b"], reads: reads) { request in
+            let path = request.url?.path ?? ""
+            let auth = request.value(forHTTPHeaderField: "Authorization")
+            if path.contains("/p/hv-bot-a/") {
+                return auth == "Bearer key-a" || path.hasSuffix("/health") ? 200 : 401
+            }
+            if path.hasSuffix("/health") { return 200 }
+            return 401
+        }
+        await model.bots.refresh()
+        await model.refreshVersion()
+        model.conversation.select(bot: "hv-bot-b")
+        await model.refreshVersion()
+        XCTAssertEqual(model.apiError, HermesAPIKey.unauthorizedMessage(profile: "hv-bot-b", holdsKey: true))
+        XCTAssertFalse(model.isCheckingAPI)
     }
 
     private func eventually(_ condition: () async -> Bool) async {
@@ -1845,14 +2120,17 @@ private final class KeyReads {
     private(set) var profiles: [String] = []
     private let answer: (Int, String) -> String?
     private let failure: Error
+    private let delay: Duration?
 
     /// Une réponse nil échoue avec `failure`
-    init(failure: Error = SSHFailure.unreachable("simulé"), _ answer: @escaping (Int, String) -> String?) {
+    init(failure: Error = SSHFailure.unreachable("simulé"), delay: Duration? = nil, _ answer: @escaping (Int, String) -> String?) {
         self.failure = failure
+        self.delay = delay
         self.answer = answer
     }
 
     func read(_ profile: String) async throws -> String? {
+        if let delay { try? await Task.sleep(for: delay) }
         profiles.append(profile)
         guard let key = answer(profiles.count, profile) else { throw failure }
         return key
@@ -1877,13 +2155,21 @@ private final class GatedKeyRead {
 }
 
 private final class KeyStubProtocol: URLProtocol, @unchecked Sendable {
+    struct Probe: Equatable, Sendable {
+        var path: String
+        var authorization: String?
+        var status: Int
+    }
+
     nonisolated(unsafe) static var serve: (@Sendable (URLRequest) -> Int)?
+    nonisolated(unsafe) static var probes: [Probe] = []
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
     override func startLoading() {
         let status = Self.serve?(request) ?? 500
+        Self.probes.append(Probe(path: request.url?.path ?? "", authorization: request.value(forHTTPHeaderField: "Authorization"), status: status))
         guard let url = request.url, let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: nil) else { return }
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(#"{"version":"0.22.1","data":[]}"#.utf8))
@@ -1891,5 +2177,94 @@ private final class KeyStubProtocol: URLProtocol, @unchecked Sendable {
     }
 
     override func stopLoading() {}
+}
+
+/// Socket local : les sondes KillSwitchAPI n'utilisent pas la session injectée, elles doivent être lues sur le fil
+private final class KillSwitchProbeRecorder: @unchecked Sendable {
+    struct Probe: Equatable, Sendable {
+        var path: String
+        var authorization: String?
+    }
+
+    private let descriptor: Int32
+    private let lock = NSLock()
+    private var stored: [Probe] = []
+    private var acceptSource: DispatchSourceRead?
+    private var stopped = false
+    let url: URL
+
+    init() throws {
+        let socketDescriptor = socket(AF_INET, SOCK_STREAM, 0)
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        let size = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(socketDescriptor, $0, size) }
+        }
+        var length = size
+        let named = withUnsafeMutablePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(socketDescriptor, $0, &length) }
+        }
+        guard socketDescriptor >= 0, bound == 0, named == 0, listen(socketDescriptor, 8) == 0 else {
+            let code = POSIXErrorCode(rawValue: errno) ?? .EIO
+            close(socketDescriptor)
+            throw POSIXError(code)
+        }
+        descriptor = socketDescriptor
+        url = URL(string: "http://127.0.0.1:\(UInt16(bigEndian: address.sin_port))")!
+        let source = DispatchSource.makeReadSource(fileDescriptor: socketDescriptor, queue: .global())
+        source.setEventHandler { [weak self] in self?.acceptOne() }
+        source.resume()
+        acceptSource = source
+    }
+
+    deinit { stop() }
+
+    func stop() {
+        lock.lock()
+        if stopped {
+            lock.unlock()
+            return
+        }
+        stopped = true
+        let source = acceptSource
+        acceptSource = nil
+        lock.unlock()
+        source?.cancel()
+        close(descriptor)
+    }
+
+    var probes: [Probe] {
+        lock.lock()
+        defer { lock.unlock() }
+        return stored
+    }
+
+    private func acceptOne() {
+        let client = accept(descriptor, nil, nil)
+        guard client >= 0 else { return }
+        defer { close(client) }
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        let readCount = recv(client, &buffer, buffer.count, 0)
+        guard readCount > 0 else { return }
+        let text = String(decoding: buffer.prefix(readCount), as: UTF8.self)
+        let lines = text.split(whereSeparator: \.isNewline)
+        let path = lines.first.flatMap { line -> String? in
+            let parts = line.split(separator: " ")
+            guard parts.count >= 2 else { return nil }
+            return String(parts[1])
+        } ?? ""
+        let authorization = lines.first { $0.lowercased().hasPrefix("authorization:") }.map {
+            $0.drop { $0 != ":" }.dropFirst().trimmingCharacters(in: .whitespaces)
+        }
+        lock.lock()
+        stored.append(Probe(path: path, authorization: authorization))
+        lock.unlock()
+        let body = #"{"features":{"run_stop":true}}"#
+        let reply = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
+        _ = reply.withCString { send(client, $0, strlen($0), 0) }
+    }
 }
 #endif
