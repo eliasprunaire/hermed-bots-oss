@@ -56,6 +56,8 @@ final class CompatibilityStatusTests: XCTestCase {
         XCTAssertEqual(CompatibilityStatus.footerLabel(status: .failed, tunnelFailed: true), "Tunnel en échec")
         XCTAssertEqual(CompatibilityStatus.footerLabel(status: .ready, tunnelFailed: true), "Prêt")
         XCTAssertEqual(CompatibilityStatus.composerUnavailable, "Indisponible : la clé API est refusée")
+        XCTAssertEqual(CompatibilityStatus.composerMissingKey, "Indisponible : la clé API est introuvable")
+        XCTAssertNotEqual(CompatibilityStatus.composerUnavailable, CompatibilityStatus.composerMissingKey)
         XCTAssertEqual(CompatibilityStatus.waitingChatBody, "Réessayez la connexion pour ouvrir le fil.")
         XCTAssertFalse(CompatibilityStatus.waitingChatBody.contains("backoff"))
         XCTAssertFalse(CompatibilityStatus.waitingChatBody.contains("relecture"))

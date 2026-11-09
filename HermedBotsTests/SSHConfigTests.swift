@@ -1541,10 +1541,35 @@ final class AppModelConnectTests: XCTestCase {
             if model.conversation.openError != nil, !model.conversation.isOpening, !model.isCheckingAPI { break }
             try? await Task.sleep(for: .milliseconds(20))
         }
-        XCTAssertTrue(model.conversation.openError?.contains("clé API") == true, model.conversation.openError ?? "")
+        XCTAssertEqual(model.conversation.openError, HermesAPIKey.unauthorizedMessage(profile: "hv-bot-a", holdsKey: true))
+        XCTAssertFalse(model.conversation.openError?.contains("introuvable") == true, model.conversation.openError ?? "")
         XCTAssertFalse(model.conversation.isOpening)
         XCTAssertFalse(model.isCheckingAPI)
         XCTAssertNil(model.apiError)
+        XCTAssertEqual(model.conversation.composerUnavailableText, CompatibilityStatus.composerUnavailable)
+        XCTAssertFalse(model.conversation.canSend)
+    }
+
+    /// Clé absente à l'ouverture : un seul bandeau « introuvable », pas de refus mélangé, compositeur inactif
+    func testAMissingKeyDuringOpenDoesNotMixARefusedBanner() async {
+        let failure = APIKeyReadFailure.keyNotSet
+        let reads = KeyReads(failure: failure) { _, _ in nil }
+        let model = keyModel(profiles: ["hv-bot-a"], reads: reads) { _ in 401 }
+        await model.bots.refresh()
+        model.conversation.activate(bot: "hv-bot-a")
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            if model.conversation.openError != nil, !model.conversation.isOpening, !model.isCheckingAPI { break }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertEqual(model.conversation.openError, HermesAPIKey.missingMessage(profile: "hv-bot-a"))
+        XCTAssertFalse(model.conversation.openError?.contains("refusée") == true, model.conversation.openError ?? "")
+        XCTAssertNil(model.apiError)
+        XCTAssertFalse((model.apiError ?? "").contains("refusée"))
+        XCTAssertEqual(model.conversation.composerUnavailableText, CompatibilityStatus.composerMissingKey)
+        XCTAssertFalse(model.conversation.canSend)
+        XCTAssertFalse(model.conversation.isOpening)
+        XCTAssertFalse(model.isCheckingAPI)
     }
 
     /// Refus, clé corrigée sur l'hôte, puis « Réessayer » du bandeau en ligne : la lecture SSH repart et l'ouverture réussit
@@ -1608,7 +1633,7 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertFalse(model.isCheckingAPI)
     }
 
-    /// La lecture SSH échoue avec une cause (source de secrets en échec) : la bannière la dit au lieu de « introuvable »
+    /// La lecture SSH échoue sans clé détenue : le bandeau global dit « introuvable », jamais « refusée »
     func testTheReasonOfAnUnreadableKeyIsShownInTheBanner() async {
         let failure = APIKeyReadFailure.keyNotSet
         let reads = KeyReads(failure: failure) { _, _ in nil }
@@ -1616,16 +1641,17 @@ final class AppModelConnectTests: XCTestCase {
         await model.bots.refresh()
         await model.refreshVersion()
         XCTAssertEqual(reads.profiles, ["hv-bot-a"])
-        XCTAssertEqual(model.apiError, failure.message(profile: "hv-bot-a", holdsKey: false))
-        XCTAssertTrue(model.apiError?.contains("source de secrets") == true)
+        XCTAssertEqual(model.apiError, HermesAPIKey.missingMessage(profile: "hv-bot-a"))
+        XCTAssertFalse(model.apiError?.contains("refusée") == true)
+        XCTAssertNil(model.conversation.openError)
         // un second refus du même profil ne relit pas et garde la cause
         await model.handleAPIError(refusal(), profile: "hv-bot-a")
         XCTAssertEqual(reads.profiles, ["hv-bot-a"])
-        XCTAssertEqual(model.apiError, failure.message(profile: "hv-bot-a", holdsKey: false))
+        XCTAssertEqual(model.apiError, HermesAPIKey.missingMessage(profile: "hv-bot-a"))
         // « Réessayer » relit une fois
         await model.retryAPI()
         XCTAssertEqual(reads.profiles, ["hv-bot-a", "hv-bot-a"])
-        XCTAssertEqual(model.apiError, failure.message(profile: "hv-bot-a", holdsKey: false))
+        XCTAssertEqual(model.apiError, HermesAPIKey.missingMessage(profile: "hv-bot-a"))
         XCTAssertFalse(model.isCheckingAPI)
     }
 
@@ -1635,9 +1661,11 @@ final class AppModelConnectTests: XCTestCase {
         let model = keyModel(keys: ["hv-bot-a": "held-key"], profiles: ["hv-bot-a"], reads: reads) { $0.url?.path.hasSuffix("/health") == true ? 200 : 401 }
         await model.bots.refresh()
         await model.refreshVersion()
-        XCTAssertEqual(model.apiError, failure.message(profile: "hv-bot-a", holdsKey: true))
+        XCTAssertEqual(model.apiError, HermesAPIKey.unauthorizedMessage(profile: "hv-bot-a", holdsKey: true))
         XCTAssertTrue(model.apiError?.contains("refusée") == true)
+        XCTAssertFalse(model.apiError?.contains("introuvable") == true)
         XCTAssertFalse(model.apiError?.contains("held-key") == true)
+        XCTAssertNil(model.conversation.openError)
     }
 
     /// Une clé saisie dans les réglages va au Trousseau, remplace la précédente et part avec les requêtes suivantes

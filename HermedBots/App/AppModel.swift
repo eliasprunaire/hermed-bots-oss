@@ -54,6 +54,10 @@ final class AppModel {
         onAPIRecovered: { [unowned self] in self.apiError = nil },
         onAPIError: { [unowned self] error, profile in Task { await self.handleAPIError(error, profile: profile) } },
         onRetryOpen: { [unowned self] in self.apiKeyFetches.reset() },
+        unauthorizedOpenMessage: { [unowned self] profile in
+            let holdsKey = (try? self.environment.secrets.resolvedAPIKey(profile: profile)) != nil
+            return HermesAPIKey.unauthorizedMessage(profile: profile, holdsKey: holdsKey)
+        },
         notifyPause: { [unowned self] cause in await self.notifyPause(cause) }
     )
     @ObservationIgnored lazy var profileLock = ProfileLock(
@@ -603,6 +607,7 @@ final class AppModel {
                 isCheckingAPI = false
                 if apiError != nil { return }
                 if obtained {
+                    guard (try? environment.secrets.resolvedAPIKey(profile: profile)) != nil else { return }
                     apiError = nil
                     await recheckAPI()
                     return
@@ -629,24 +634,31 @@ final class AppModel {
         isCheckingAPI = false
         if apiError != nil { return }
         let holdsKey = (try? environment.secrets.resolvedAPIKey(profile: profile)) != nil
-        let message = HermesAPIKey.unauthorizedMessage(profile: profile, holdsKey: holdsKey)
-        refusal = (profile, message)
-        // le chat unique dit déjà ce refus : le bandeau global ne le reprend pas
-        if holdsKey, conversationPresentsRefusedKey(profile) { return }
-        apiError = message
+        presentKeyFailure(HermesAPIKey.unauthorizedMessage(profile: profile, holdsKey: holdsKey), profile: profile)
     }
 
-    /// Le bandeau en ligne du bot à l'écran porte ce refus, pendant l'ouverture ou après les essais
-    private func conversationPresentsRefusedKey(_ profile: String) -> Bool {
+    /// Le bandeau en ligne du bot à l'écran porte déjà la panne de clé, pendant l'ouverture ou après les essais
+    private func conversationPresentsKeyFailure(_ profile: String) -> Bool {
         conversation.botID == profile && (conversation.isOpening || conversation.openError != nil)
     }
 
-    /// La cause de la lecture ratée remplace « introuvable » ; « Réessayer » relit la clé de ce profil
+    /// Une seule cause à l'écran : le chat unique en ouverture, sinon le bandeau global
+    private func presentKeyFailure(_ message: String, profile: String) {
+        refusal = (profile, message)
+        if conversationPresentsKeyFailure(profile) {
+            if conversation.openError != nil {
+                conversation.presentOpenError(message, profile: profile)
+            }
+            apiError = nil
+            return
+        }
+        apiError = message
+    }
+
+    /// La cause de la lecture ratée : introuvable, ou refusée si une clé est déjà détenue
     private func showUnreadableKey(_ failure: APIKeyReadFailure, profile: String) {
         let holdsKey = (try? environment.secrets.resolvedAPIKey(profile: profile)) != nil
-        let message = failure.message(profile: profile, holdsKey: holdsKey)
-        refusal = (profile, message)
-        apiError = message
+        presentKeyFailure(failure.message(profile: profile, holdsKey: holdsKey), profile: profile)
     }
 
     /// Une lecture SSH par profil et par refus : le Trousseau est mis à jour, la valeur n'est pas journalisée
@@ -828,7 +840,7 @@ final class AppModel {
         case .error:
             testTunnelFailed = true
             bots.seedShown([bot])
-            conversation.seedShot(bot: bot.id, session: nil, isOpening: false, openError: "Impossible d'ouvrir shot-bot. Après 3 essais : la clé API du profil est refusée.")
+            conversation.seedShot(bot: bot.id, session: nil, isOpening: false, openError: HermesAPIKey.unauthorizedMessage(profile: bot.id, holdsKey: true))
         case .emptyHome:
             bots.seedShown([])
         case .emptyConversation:

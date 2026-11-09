@@ -21,13 +21,13 @@ final class ConversationModelTests: XCTestCase {
     /// `reachable: false` : aucun client, comme quand le tunnel n'est pas ouvert
     /// `bots`, `listedThread` et `startedReads` sont ce que la barre latérale sait : les profils actifs, ce que la liste des fils dit d'un fil (son modèle, le numéro de la lecture), et le numéro de la dernière lecture partie
     /// `approvalRetry` est l'attente entre deux essais d'une décision qui ne part pas
-    private func makeModel(reachable: Bool = true, bots: @escaping @MainActor () -> [Bot] = { [] }, listedThread: @escaping @MainActor (String, String) -> (model: String?, read: Int)? = { _, _ in nil }, startedReads: @escaping @MainActor () -> Int = { 0 }, approvalRetry: Duration = .milliseconds(20), resumeStore: ResumeStore? = nil, onAPIError: @escaping @MainActor (Error, String) -> Void = { _, _ in }) -> ConversationModel {
+    private func makeModel(reachable: Bool = true, bots: @escaping @MainActor () -> [Bot] = { [] }, listedThread: @escaping @MainActor (String, String) -> (model: String?, read: Int)? = { _, _ in nil }, startedReads: @escaping @MainActor () -> Int = { 0 }, approvalRetry: Duration = .milliseconds(20), resumeStore: ResumeStore? = nil, onAPIError: @escaping @MainActor (Error, String) -> Void = { _, _ in }, unauthorizedOpenMessage: @escaping @MainActor (String) -> String = { HermesAPIKey.unauthorizedMessage(profile: $0, holdsKey: true) }) -> ConversationModel {
         GateProtocol.reset()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [GateProtocol.self]
         // hôte factice en `.invalid` (RFC 6761) : il ne se résout jamais, GateProtocol répond à sa place
         let client = HermesClient(baseURL: URL(string: "http://hermes.invalid")!, configuration: configuration)
-        return ConversationModel(client: { reachable ? client : nil }, bots: bots, listedThread: listedThread, startedReads: startedReads, approvalRetry: approvalRetry, resumeStore: resumeStore, onAPIError: onAPIError)
+        return ConversationModel(client: { reachable ? client : nil }, bots: bots, listedThread: listedThread, startedReads: startedReads, approvalRetry: approvalRetry, resumeStore: resumeStore, onAPIError: onAPIError, unauthorizedOpenMessage: unauthorizedOpenMessage)
     }
 
     /// L'état d'un fil du bot de test, qu'il soit à l'écran ou non
@@ -1907,7 +1907,22 @@ final class ConversationModelTests: XCTestCase {
             try await held(attempt, "GET", "/api/sessions").reply(#"{"error":"Invalid gateway API key"}"#, status: 401)
         }
         await eventually("erreur après tentatives", timeout: 8) { model.openError != nil && !model.isOpening }
-        XCTAssertTrue(model.openError?.contains("3 essais") == true, model.openError ?? "")
+        XCTAssertEqual(model.openError, HermesAPIKey.unauthorizedMessage(profile: bot, holdsKey: true))
+        XCTAssertFalse(model.openError?.contains("introuvable") == true, model.openError ?? "")
+        XCTAssertEqual(model.composerUnavailableText, CompatibilityStatus.composerUnavailable)
+        XCTAssertFalse(model.canSend)
+    }
+
+    func testActivateUnauthorizedListSessionsCanShowAMissingKeyWithoutMixingRefusal() async throws {
+        let model = makeModel(unauthorizedOpenMessage: { HermesAPIKey.missingMessage(profile: $0) })
+        model.activate(bot: bot)
+        for attempt in 0..<ProfileOpenRetry.attemptCount {
+            try await held(attempt, "GET", "/api/sessions").reply(#"{"error":"Invalid gateway API key"}"#, status: 401)
+        }
+        await eventually("erreur après tentatives", timeout: 8) { model.openError != nil && !model.isOpening }
+        XCTAssertEqual(model.openError, HermesAPIKey.missingMessage(profile: bot))
+        XCTAssertFalse(model.openError?.contains("refusée") == true, model.openError ?? "")
+        XCTAssertEqual(model.composerUnavailableText, CompatibilityStatus.composerMissingKey)
         XCTAssertFalse(model.canSend)
     }
 

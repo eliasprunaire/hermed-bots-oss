@@ -13,6 +13,7 @@ public enum CompatibilityStatus: Equatable, Sendable {
     public static let refusedLabel = "Clé refusée"
     public static let tunnelFailedLabel = "Tunnel en échec"
     public static let composerUnavailable = "Indisponible : la clé API est refusée"
+    public static let composerMissingKey = "Indisponible : la clé API est introuvable"
     public static let thinkingLabel = "Le bot réfléchit…"
     public static let compactedNotice = "Contexte compacté — résumé des tours plus anciens. Le transcript reste visible ; le modèle reçoit le résumé + la queue récente."
     public static let compactedEstimateNotice = "Estimation du contexte (Hermes n'a pas envoyé l'usage) — un résumé des tours anciens est probable. Le transcript reste visible."

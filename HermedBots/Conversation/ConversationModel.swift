@@ -119,6 +119,7 @@ final class ConversationModel {
     private let startedReads: @MainActor () -> Int
     private let onAPIError: @MainActor (Error, String) -> Void
     private let onRetryOpen: @MainActor () -> Void
+    private let unauthorizedOpenMessage: @MainActor (String) -> String
     private let notifyPause: @Sendable (LoopGuard.Cause) async -> String
     private let approvalRetry: Duration
     let profileLock: ProfileLock?
@@ -142,6 +143,7 @@ final class ConversationModel {
         onAPIRecovered: @escaping @MainActor () -> Void = {},
         onAPIError: @escaping @MainActor (Error, String) -> Void = { _, _ in },
         onRetryOpen: @escaping @MainActor () -> Void = {},
+        unauthorizedOpenMessage: @escaping @MainActor (String) -> String = { HermesAPIKey.unauthorizedMessage(profile: $0, holdsKey: true) },
         notifyPause: @escaping @Sendable (LoopGuard.Cause) async -> String = { _ in "Notification indisponible." }
     ) {
         self.resumeStore = resumeStore
@@ -158,6 +160,7 @@ final class ConversationModel {
         self.notifyPause = notifyPause
         self.onAPIError = onAPIError
         self.onRetryOpen = onRetryOpen
+        self.unauthorizedOpenMessage = unauthorizedOpenMessage
     }
 
     #if DEBUG
@@ -207,6 +210,19 @@ final class ConversationModel {
     private(set) var isOpening = false
     /// Erreur d'ouverture après les tentatives ; nil pendant les essais
     private(set) var openError: String?
+    /// Placeholder du compositeur : la même cause que le bandeau d'ouverture, jamais un mélange introuvable / refusée
+    var composerUnavailableText: String {
+        guard let botID, let openError else { return CompatibilityStatus.composerUnavailable }
+        return openError == HermesAPIKey.missingMessage(profile: botID)
+            ? CompatibilityStatus.composerMissingKey
+            : CompatibilityStatus.composerUnavailable
+    }
+
+    /// La relecture de clé corrige le bandeau d'ouverture sans relancer le fil
+    func presentOpenError(_ message: String, profile: String) {
+        guard botID == profile else { return }
+        openError = message
+    }
     var compaction: ContextCompaction {
         if let key = shownRun, let tokens = lastServerTokens[key] {
             return .server(usedTokens: tokens)
@@ -333,7 +349,7 @@ final class ConversationModel {
             }
             guard host == connection(), botID == bot else { return }
             if !opened {
-                openError = String(localized: "Impossible d'ouvrir \(bot). Après \(ProfileOpenRetry.attemptCount) essais : la clé API du profil est refusée.")
+                openError = unauthorizedOpenMessage(bot)
             }
         } catch {
             guard host == connection(), botID == bot else { return }
