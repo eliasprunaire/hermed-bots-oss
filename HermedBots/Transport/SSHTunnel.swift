@@ -755,6 +755,10 @@ final class SSHTunnel {
         case open(localPort: Int)
         case reopening(attempt: Int)
         case failed(SSHFailure)
+
+        var failureMessage: String? {
+            if case .failed(let failure) = self { failure.message } else { nil }
+        }
     }
 
     /// Échecs consécutifs, depuis la dernière ouverture réussie, après lesquels le superviseur s'arrête sur la dernière erreur

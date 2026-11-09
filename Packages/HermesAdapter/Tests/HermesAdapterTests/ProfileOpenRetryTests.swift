@@ -34,7 +34,7 @@ final class CompatibilityStatusTests: XCTestCase {
     func testACompatibleKnownVersionIsReadyWithoutABanner() throws {
         let map = CapabilityMap(version: "0.22.2", states: [:])
         XCTAssertFalse(map.showsBanner)
-        XCTAssertEqual(CompatibilityStatus.of(map: map, checking: false, hasError: false), .ready)
+        XCTAssertEqual(CompatibilityStatus.of(map: map, checking: false, failure: nil), .ready)
         XCTAssertEqual(CompatibilityStatus.ready.footerLabel, "Prêt")
         XCTAssertEqual(CompatibilityStatus.thinkingLabel, "Le bot réfléchit…")
     }
@@ -43,22 +43,23 @@ final class CompatibilityStatusTests: XCTestCase {
         let map = CapabilityMap(version: "0.22.5", states: [:])
         XCTAssertNotNil(map.versionNotice)
         XCTAssertFalse(map.showsBanner)
-        XCTAssertEqual(CompatibilityStatus.of(map: map, checking: false, hasError: false), .untested)
+        XCTAssertEqual(CompatibilityStatus.of(map: map, checking: false, failure: nil), .untested)
         XCTAssertEqual(CompatibilityStatus.untested.footerLabel, "Compatibilité · voir Réglages")
     }
 
     func testADefinitiveErrorWinsOverAConnectingCheck() {
-        XCTAssertEqual(CompatibilityStatus.of(map: nil, checking: true, hasError: true), .failed)
-        XCTAssertEqual(CompatibilityStatus.of(map: nil, checking: true, hasError: false), .connecting)
+        let missing = "Clé API introuvable sur l'hôte pour le profil hv-bot-b."
+        let failed = CompatibilityStatus.of(map: nil, checking: true, failure: missing)
+        XCTAssertEqual(failed, .failed(missing))
+        XCTAssertEqual(failed.footerLabel, missing)
+        XCTAssertFalse(failed.footerLabel.contains("refusée"))
+        XCTAssertEqual(CompatibilityStatus.of(map: nil, checking: true, failure: nil), .connecting)
         XCTAssertEqual(CompatibilityStatus.connecting.footerLabel, "Connexion…")
-        XCTAssertEqual(CompatibilityStatus.failed.footerLabel, "Clé refusée")
-        XCTAssertFalse(
-            CompatibilityStatus.failed.footerLabel.contains("refusée"),
-            "Clé API introuvable sur l'hôte pour le profil hv-bot-b."
-        )
-        XCTAssertEqual(CompatibilityStatus.footerLabel(status: .failed, tunnelFailed: false), "Clé refusée")
-        XCTAssertEqual(CompatibilityStatus.footerLabel(status: .failed, tunnelFailed: true), "Tunnel en échec")
-        XCTAssertEqual(CompatibilityStatus.footerLabel(status: .ready, tunnelFailed: true), "Prêt")
+        let refused = "La clé API est refusée pour le profil hv-bot-a."
+        XCTAssertTrue(CompatibilityStatus.of(map: nil, checking: false, failure: refused).footerLabel.contains("refusée"))
+        let ready = CapabilityMap(version: "0.22.2", states: [:])
+        XCTAssertEqual(CompatibilityStatus.of(map: ready, checking: false, failure: ""), .ready)
+        XCTAssertEqual(CompatibilityStatus.of(map: nil, checking: true, failure: ""), .connecting)
         XCTAssertEqual(CompatibilityStatus.composerUnavailable, "Indisponible : la clé API est refusée")
         XCTAssertEqual(CompatibilityStatus.composerMissingKey, "Indisponible : la clé API est introuvable")
         XCTAssertNotEqual(CompatibilityStatus.composerUnavailable, CompatibilityStatus.composerMissingKey)

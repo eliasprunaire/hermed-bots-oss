@@ -137,6 +137,7 @@ final class VersionProfiles: HD12Harness {
         let compat = text(AccessibilityID.statusCompat.rawValue)
         XCTAssertEqual(compat, text(banner.identifier), "le pied dit la phrase du bandeau")
         XCTAssertFalse(compat.contains("refusée"))
+        XCTAssertEqual(element(AccessibilityID.statusVersion.rawValue).label, "Version de Hermes")
         HVShot.capture("issue58-version-missing-key", app)
         // Clé absente : refus local (apiKeyMissing) sans requête /health 401
         XCTAssertFalse(request("/_hv/log").contains { $0["p"] as? String == "/p/\(b)/health" && ($0["t"] as? Double ?? 0) >= started }, "sans clé du profil, aucune requête ne part")

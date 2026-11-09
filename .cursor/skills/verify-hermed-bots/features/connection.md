@@ -49,6 +49,7 @@ Section **Clé API d'un profil** sur l'onglet Connexion. La saisie enregistre la
 - Uniquement la clé du profil demandé (`hermes -p <profil> …`). Pas de repli sur `default`. Cache Trousseau `WhenUnlockedThisDeviceOnly`. Jamais affichée ni journalisée.
 - Échec sans clé détenue : bandeau `Clé API introuvable sur l'hôte pour le profil <id>`. Un profil nommé sans clé n'envoie jamais la clé de `default`.
 - Clé détenue mais refusée par Hermes : bandeau `La clé API est refusée pour le profil <id>`.
+- Le pied `hd.status.compat` reprend la même phrase de clé que le bandeau.
 - Le profil relu est celui de la requête refusée, pas celui du bot à l'écran : un 401 d'un bot en arrière-plan relit la clé de ce bot.
 - Une lecture par profil et par refus. « Réessayer » relit la clé du profil refusé, pas celle du bot à l'écran, et le bandeau reste tant que cette lecture échoue. La connexion et une réponse authentifiée (les sondes de capacités, pas `/health` qui est public) rouvrent aussi la lecture.
 

@@ -6,7 +6,7 @@ import XCTest
 final class Piste1Shots: XCTestCase {
     /// Même identifiants que `ShotScene.rawValue`.
     private let scenes = [
-        "footer-ready", "footer-connecting", "footer-untested", "footer-failed", "footer-tunnel",
+        "footer-ready", "footer-connecting", "footer-untested", "footer-failed", "footer-missing-key", "footer-tunnel",
         "banner-degraded", "connection", "error", "empty-home", "empty-conversation",
         "markdown", "markdown-streaming", "compacted",
         "about-connecting", "about-ready", "about-untested", "about-failed",

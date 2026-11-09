@@ -20,10 +20,6 @@ extension SSHTunnel.State {
         case .idle, .opening, .open: nil
         }
     }
-
-    var failureMessage: String? {
-        if case .failed(let failure) = self { failure.message } else { nil }
-    }
 }
 
 /// L'alias du tunnel, les champs déduits de `ssh -G`, et la saisie de la clé API d'un profil
