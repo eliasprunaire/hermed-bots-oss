@@ -292,11 +292,17 @@ struct ConversationMachine: Equatable {
             return effects + [.run(saved, message: message, model: thread.model)]
 
         case .rebound(let key, let session):
-            guard var thread = threads[key], key.session != nil, thread.step == .sending else { return [] }
+            guard let thread = threads[key], key.session != nil, thread.step == .sending else { return [] }
             let saved = Key(bot: key.bot, thread: .session(session))
+            let accepted = thread.conversation.entries.last(where: { $0.role == .user })?.text
             threads[key] = nil
             if screen == key { screen = saved }
-            threads[saved] = thread
+            // fil API neuf : le message déjà accepté seulement, sans transcript étranger ni choix de modèle en vol
+            var fresh = ThreadState()
+            fresh.step = .sending
+            fresh.turns = thread.turns
+            if let accepted { _ = fresh.conversation.begin(accepted) }
+            threads[saved] = fresh
             return [.threadsChanged(bot: key.bot)]
 
         case .streamed(let key, let reply):

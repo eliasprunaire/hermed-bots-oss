@@ -1,19 +1,18 @@
 import Foundation
-import HermesAdapter
 
 /// Échecs classés de `start_run` HTTP 409 : jamais un code HTTP brut à l'écran
-enum StartRunConflict {
-    static let foreignSession = String(localized: "Ce fil appartient à une autre surface. Hermed Bots ne peut pas y écrire. Ouvre une nouvelle session.")
-    static let idempotency = String(localized: "Ce message n'a pas pu partir : un autre envoi utilise déjà cette clé. Réessaie.")
-    static let generic = String(localized: "Le serveur a refusé cet envoi (conflit). Réessaie.")
+public enum StartRunConflict {
+    public static let foreignSession = "Ce fil appartient à une autre surface. Hermed Bots ne peut pas y écrire. Ouvre une nouvelle session."
+    public static let idempotency = "Ce message n'a pas pu partir : un autre envoi utilise déjà cette clé. Réessaie."
+    public static let generic = "Le serveur a refusé cet envoi (conflit). Réessaie."
 
-    static func isForeignSession(_ error: Error) -> Bool {
-        guard case HermesError.http(_, 409, let detail) = error as? HermesError else { return false }
+    public static func isForeignSession(_ error: Error) -> Bool {
+        guard let hermes = error as? HermesError, case .http(_, 409, let detail) = hermes else { return false }
         return token(detail) == "permission_denied"
     }
 
-    static func message(for error: Error) -> String? {
-        guard case HermesError.http(_, 409, let detail) = error as? HermesError else { return nil }
+    public static func message(for error: Error) -> String? {
+        guard let hermes = error as? HermesError, case .http(_, 409, let detail) = hermes else { return nil }
         switch token(detail) {
         case "permission_denied": return foreignSession
         case "idempotency_key_conflict", "idempotency_replay_unavailable": return idempotency

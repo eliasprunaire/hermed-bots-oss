@@ -1785,8 +1785,8 @@ final class ConversationModelTests: XCTestCase {
         try await held(0, "GET", "/api/sessions").reply(#"{"data":[{"id":"cli-1","source":"cli"}]}"#)
         await eventually("aucun fil étranger attaché") { !model.isOpening }
         XCTAssertNil(model.sessionID)
-        XCTAssertTrue(model.canSend)
         model.draft = "nouveau"
+        XCTAssertTrue(model.canSend)
         model.send()
         try await held(1, "POST", "/api/sessions").reply(#"{"session":{"id":"api-new","source":"api_server"}}"#)
         let run = try await held(2, "POST", "/v1/runs")

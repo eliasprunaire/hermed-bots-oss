@@ -21,7 +21,6 @@
 		C0C0D9B1C2E3F40596A7C801 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C802 /* Conversation.swift */; };
 		C0C0D9B1C2E3F40596A7C811 /* ConversationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C812 /* ConversationModel.swift */; };
 		C0C0D9B1C2E3F40596A7C831 /* ConversationMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C832 /* ConversationMachine.swift */; };
-		C0C0D9B1C2E3F40596A7C841 /* StartRunConflict.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C842 /* StartRunConflict.swift */; };
 		C0C0D9B1C2E3F40596A7C821 /* MainThreadWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C822 /* MainThreadWatch.swift */; };
 		E2E2F1D4A5B6C70829384A01 /* ApprovalParams.swift in Sources */ = {isa = PBXBuildFile; fileRef = E2E2F1D4A5B6C70829384A02 /* ApprovalParams.swift */; };
 		F12100000000000000000001 /* LoopGuard in Frameworks */ = {isa = PBXBuildFile; productRef = F12100000000000000000003 /* LoopGuard */; };
@@ -66,7 +65,6 @@
 		C0C0D9B1C2E3F40596A7C802 /* Conversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conversation.swift; sourceTree = "<group>"; };
 		C0C0D9B1C2E3F40596A7C812 /* ConversationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationModel.swift; sourceTree = "<group>"; };
 		C0C0D9B1C2E3F40596A7C832 /* ConversationMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationMachine.swift; sourceTree = "<group>"; };
-		C0C0D9B1C2E3F40596A7C842 /* StartRunConflict.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StartRunConflict.swift; sourceTree = "<group>"; };
 		C0C0D9B1C2E3F40596A7C822 /* MainThreadWatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainThreadWatch.swift; sourceTree = "<group>"; };
 		E2E2F1D4A5B6C70829384A02 /* ApprovalParams.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApprovalParams.swift; sourceTree = "<group>"; };
 		F14400000000000000000002 /* ProfileLock.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileLock.swift; sourceTree = "<group>"; };
@@ -240,7 +238,6 @@
 				C0C0D9B1C2E3F40596A7C802 /* Conversation.swift */,
 				C0C0D9B1C2E3F40596A7C812 /* ConversationModel.swift */,
 				C0C0D9B1C2E3F40596A7C832 /* ConversationMachine.swift */,
-				C0C0D9B1C2E3F40596A7C842 /* StartRunConflict.swift */,
 			);
 			path = Conversation;
 			sourceTree = "<group>";
@@ -437,7 +434,6 @@
 				C0C0D9B1C2E3F40596A7C801 /* Conversation.swift in Sources */,
 				C0C0D9B1C2E3F40596A7C811 /* ConversationModel.swift in Sources */,
 				C0C0D9B1C2E3F40596A7C831 /* ConversationMachine.swift in Sources */,
-				C0C0D9B1C2E3F40596A7C841 /* StartRunConflict.swift in Sources */,
 				C0C0D9B1C2E3F40596A7C821 /* MainThreadWatch.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
