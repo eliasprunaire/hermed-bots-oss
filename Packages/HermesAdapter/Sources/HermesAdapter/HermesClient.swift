@@ -238,7 +238,11 @@ public struct HermesClient: @unchecked Sendable {
         if contract == .profileServed, status == 404, let profile = variables["profile"] { return .profileNotServed(profile) }
         var detail: String?
         if let object = JSONObject(body) {
-            detail = object.string("error") ?? object.object("error")?.string("message")
+            if status == 409 {
+                detail = object.object("error")?.string("code") ?? object.string("error") ?? object.object("error")?.string("message")
+            } else {
+                detail = object.string("error") ?? object.object("error")?.string("message")
+            }
         }
         return .http(contract: contract.rawValue, status: status, detail: detail)
     }

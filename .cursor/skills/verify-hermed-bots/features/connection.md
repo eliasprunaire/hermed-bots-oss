@@ -86,6 +86,9 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 | Lecture de clé dont le hostname, l'utilisateur ou le port diffère du tunnel | Aucun bandeau propre. `APIKeyFetches.fetch` avale `routeMismatch`. Le bandeau 401 ou « clé introuvable » reste. La clé n'est pas stockée. |
 | Clé API absente sur l'hôte | Clé API introuvable sur l'hôte pour le profil … |
 | Clé API détenue et refusée par Hermes | La clé API est refusée pour le profil … |
+| `start_run` HTTP 409, fil d'une autre surface (`permission_denied`) | Ce fil appartient à une autre surface. Hermed Bots ne peut pas y écrire. Ouvre une nouvelle session. |
+| `start_run` HTTP 409, conflit d'idempotence (`idempotency_key_conflict`, `idempotency_replay_unavailable`) | Ce message n'a pas pu partir : un autre envoi utilise déjà cette clé. Réessaie. |
+| `start_run` HTTP 409, autre conflit | Le serveur a refusé cet envoi (conflit). Réessaie. |
 
 ## Vérification unitaire
 
@@ -103,6 +106,7 @@ Le listener multiplexé de l'API server Hermes (`APIServerAdapter` dans `gateway
 - Échec temporaire de la lecture SSH, puis « Réessayer » : la lecture repart et la clé est récupérée (`APIKeyFetches`).
 - `AppModel` avec deux profils : un 401 d'un bot en arrière-plan, échec temporaire de la lecture, puis « Réessayer » relit ce bot et pas celui de l'écran. Une clé trop courte qui reste refusée ne coûte qu'une lecture SSH, malgré un `/health` valide.
 - Deux bots refusés en même temps : chaque refus nomme son bot, pas celui à l'écran (`onAPIError`).
+- `start_run` HTTP 409 : jamais « start_run : réponse HTTP 409 ». Un fil d'une autre surface est repris par un fil API (chat unique) ou, s'il était déjà ouvert, le message part sur un fil API neuf. Un vrai conflit d'idempotence ou un autre 409 affiche le message de la table.
 - Aperçu SSH en lecture seule, sans secret. Saisie de la clé API d'un profil dans la section dédiée.
 - Connect ne lit pas le Trousseau. Un faux magasin qui échoue s'il est appelé reste silencieux. `SystemSSHBackend.open` lance `/usr/bin/ssh` avec l'alias. Mode test : pas de `SecItem*`.
 - Course aperçu/lancement (`AppModelConnectTests.testRefreshPreviewDuringConnectKeepsEphemeralLaunchIdentity`) : `ssh -G` est suspendu, `refreshPreview` part pendant cette attente, puis Identité reste `agent SSH` et le client lancé `ephemeralAgent`. Échec si `preview=fichier` avec `launch=ephemeralAgent`.

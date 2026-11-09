@@ -23,6 +23,7 @@ import HermesAdapter
 /// | loaded(lignes)       | loading                       | ready, transcript, fin du dernier tour gardée   | aucun                           |
 /// | created(session)     | creating                      | ready, le fil prend son identifiant Hermes      | threadsChanged                  |
 /// | created(session)     | sending                       | sending, le fil prend son identifiant Hermes    | run, threadsChanged             |
+/// | rebound(session)     | sending, fil déjà identifié   | sending, le fil prend un identifiant API neuf   | threadsChanged                  |
 /// | streamed(texte)      | sending                       | sending, la réponse grandit                     | aucun                           |
 /// | ended(fin)           | sending                       | ready, fin annoncée par Hermes                  | reread si à l'écran, threadsChanged |
 /// | reread(tour, lignes) | ready, même tour              | ready, lignes numérotées par Hermes             | aucun                           |
@@ -145,6 +146,8 @@ struct ConversationMachine: Equatable {
         // Hermes : chaque résultat porte le fil qui a lancé l'opération
         case loaded(Key, [Line])
         case created(Key, session: String, message: String?)
+        /// `start_run` a refusé le fil (surface étrangère) : le tour continue sur un fil API neuf, le message déjà accepté reste
+        case rebound(Key, session: String)
         case stopped(Key, run: String, end: TurnEnd)
         case streamed(Key, String)
         /// `end` vaut nil pour un flux qui s'arrête sans état terminal
@@ -287,6 +290,14 @@ struct ConversationMachine: Equatable {
             }
             threads[saved] = thread
             return effects + [.run(saved, message: message, model: thread.model)]
+
+        case .rebound(let key, let session):
+            guard var thread = threads[key], key.session != nil, thread.step == .sending else { return [] }
+            let saved = Key(bot: key.bot, thread: .session(session))
+            threads[key] = nil
+            if screen == key { screen = saved }
+            threads[saved] = thread
+            return [.threadsChanged(bot: key.bot)]
 
         case .streamed(let key, let reply):
             guard threads[key]?.step == .sending else { return [] }

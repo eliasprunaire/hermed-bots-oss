@@ -18,7 +18,7 @@ final class DecodingTests: XCTestCase {
         for fixture in try fixtures() {
             for fields in [false, true] {
                 let session = try Session.decode(fixture.response("new_session", fields: fields))
-                XCTAssertEqual(session, Session(id: "api_1_abc", title: nil), "\(fixture.version) fields=\(fields)")
+                XCTAssertEqual(session, Session(id: "api_1_abc", title: nil, source: "api_server"), "\(fixture.version) fields=\(fields)")
             }
         }
     }

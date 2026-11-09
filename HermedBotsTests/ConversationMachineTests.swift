@@ -74,6 +74,19 @@ final class ConversationMachineTests: XCTestCase {
         XCTAssertEqual(h.apply(.send("bonjour")), [.run(key(a, "t"), message: "bonjour")])
     }
 
+    func testAReboundKeepsTheAcceptedMessageOnANewAPIThread() throws {
+        var h = Harness()
+        h.apply(.open(session: "foreign", bot: a))
+        h.resolveAll()
+        XCTAssertEqual(h.apply(.send("bonjour")), [.run(key(a, "foreign"), message: "bonjour")])
+        XCTAssertEqual(h.apply(.rebound(key(a, "foreign"), session: "api-new")), [])
+        XCTAssertEqual(h.machine.screen, key(a, "api-new"))
+        XCTAssertNil(h.machine.threads[key(a, "foreign")])
+        XCTAssertEqual(h.machine.shown.step, .sending)
+        XCTAssertEqual(h.machine.shown.conversation.entries.map(\.text), ["bonjour"])
+        XCTAssertEqual(h.threadsChanged.last, a)
+    }
+
     func testADoubleSendStartsOneTurn() {
         var h = Harness()
         h.apply(.select(bot: a))
