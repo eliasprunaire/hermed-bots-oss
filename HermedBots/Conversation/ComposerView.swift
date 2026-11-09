@@ -10,7 +10,7 @@ struct ComposerView: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            TextField(model.openError == nil ? "Écrire à \(bot.name)…" : CompatibilityStatus.composerUnavailable, text: $model.draft, axis: .vertical)
+            TextField(model.openError == nil ? "Écrire à \(bot.name)…" : model.composerUnavailableText, text: $model.draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...8)
                 .focused($focused)

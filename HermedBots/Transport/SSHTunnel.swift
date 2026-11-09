@@ -662,16 +662,9 @@ enum APIKeyReadFailure: Error, Equatable, Sendable {
         self = stderr.contains(HermesAPIKey.keyNotSetMarker) ? .keyNotSet : .commandFailed(status: status)
     }
 
-    /// `holdsKey` : le Trousseau a une clé que Hermes refuse ; le refus passe avant l'échec de la relecture
+    /// Une seule cause à l'écran, comme la fiche connexion : introuvable, ou refusée si une clé est déjà détenue
     func message(profile: String, holdsKey: Bool) -> String {
-        let head = holdsKey
-            ? String(localized: "La clé API est refusée pour le profil \(profile) et sa relecture sur l'hôte a échoué.")
-            : String(localized: "La clé API du profil \(profile) n'a pas pu être lue sur l'hôte.")
-        let cause = switch self {
-        case .keyNotSet: String(localized: "Hermes ne la trouve ni dans le .env du profil ni dans une source de secrets.")
-        case .commandFailed(let status): String(localized: "La commande hermes a rendu le code \(status).")
-        }
-        return head + "\n" + cause
+        HermesAPIKey.unauthorizedMessage(profile: profile, holdsKey: holdsKey)
     }
 }
 

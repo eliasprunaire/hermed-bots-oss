@@ -1192,7 +1192,7 @@ final class RemoteLoginShellTests: XCTestCase {
         } catch let failure as APIKeyReadFailure {
             XCTAssertEqual(failure, .keyNotSet)
             let message = failure.message(profile: "cyber", holdsKey: false)
-            XCTAssertEqual(message, "La clé API du profil cyber n'a pas pu être lue sur l'hôte.\nHermes ne la trouve ni dans le .env du profil ni dans une source de secrets.")
+            XCTAssertEqual(message, HermesAPIKey.missingMessage(profile: "cyber"))
             for raw in ["helper failed", "no secrets applied", "Command helper", "Config key not set"] { XCTAssertFalse(message.contains(raw), message) }
         }
         // sans diagnostic de source, la cause reste nommée
@@ -1224,9 +1224,9 @@ final class RemoteLoginShellTests: XCTestCase {
 
     func testAKeyReadFailureNamesTheHeldKeyThatHermesRefuses() {
         let failure = APIKeyReadFailure.keyNotSet
-        let held = failure.message(profile: "cyber", holdsKey: true)
-        XCTAssertTrue(held.contains("clé API est refusée pour le profil cyber"), held)
-        XCTAssertTrue(held.contains("source de secrets"), held)
+        XCTAssertEqual(failure.message(profile: "cyber", holdsKey: true), HermesAPIKey.unauthorizedMessage(profile: "cyber", holdsKey: true))
+        XCTAssertEqual(failure.message(profile: "cyber", holdsKey: false), HermesAPIKey.missingMessage(profile: "cyber"))
+        XCTAssertFalse(failure.message(profile: "cyber", holdsKey: true).contains("introuvable"))
         XCTAssertFalse(failure.message(profile: "cyber", holdsKey: false).contains("refusée"))
     }
 
