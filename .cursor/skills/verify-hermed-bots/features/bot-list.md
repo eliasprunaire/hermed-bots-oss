@@ -6,7 +6,7 @@ La barre latérale liste les profils Hermes actifs (jamais les décommissionnés
 
 - `bots-list` : profils actifs lus dans Hermes. Aucune route HTTP ne liste les profils (S6). Décision S6 de l'issue #6 : un second canal SSH en lecture seule lit `hermes profile list`, et un profil au Gateway `stopped` (décommissionné) est exclu de la liste. Le contrat `list_profiles` reproduit cette lecture.
 - `bots-change` : un changement de liste n'est affiché qu'après validation (A3).
-- `unique-chat` : un fil par bot, repris au clic ; `list_sessions` sert à l'attacher, pas à l'afficher.
+- `unique-chat` : un fil par bot, repris au clic ; `list_sessions` sert à l'attacher, pas à l'afficher. Seul un fil `source=api_server` (ou sans `source`) est repris : un fil d'une autre surface (CLI, TUI, Desktop, messagerie) n'est pas lié ; le premier envoi crée un fil API.
 
 ## How to get to it (user POV)
 

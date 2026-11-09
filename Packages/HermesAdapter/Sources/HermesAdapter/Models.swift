@@ -18,11 +18,19 @@ public struct Session: Equatable, Sendable {
     public let title: String?
     /// Le modèle verrouillé sur ce fil par `set_model`, tel que Hermes l'écrit ; nil quand le fil suit le modèle du profil
     public let model: String?
+    /// Surface qui possède le fil (`api_server`, `cli`, `tui`, …) ; nil si Hermes ne l'envoie pas
+    public let source: String?
 
-    init(id: String, title: String?, model: String? = nil) {
+    init(id: String, title: String?, model: String? = nil, source: String? = nil) {
         self.id = id
         self.title = title
         self.model = model
+        self.source = source
+    }
+
+    /// `POST /v1/runs` ne peut lier qu'un fil de l'API. Sans `source`, le fil est traité comme pouvant être lié (fixtures anciennes).
+    public var canBindFromAPI: Bool {
+        source == nil || source == "api_server"
     }
 }
 

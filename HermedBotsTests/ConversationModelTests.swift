@@ -1770,6 +1770,97 @@ final class ConversationModelTests: XCTestCase {
         XCTAssertNil(model.approval)
     }
 
+    func testActivateSkipsAForeignSessionAndOpensTheLatestAPISession() async throws {
+        let model = makeModel()
+        model.activate(bot: bot)
+        try await held(0, "GET", "/api/sessions").reply(#"{"data":[{"id":"desktop-1","source":"desktop","title":"Bureau"},{"id":"api-1","source":"api_server","title":"API"}]}"#)
+        try await held(1, "GET", "/api/sessions/api-1/messages").reply(transcript((1, "user", "ok")))
+        await eventually("fil API ouvert") { model.sessionID == "api-1" && !model.isOpening && !model.isLoading }
+        XCTAssertEqual(model.conversation.entries.map(\.text), ["ok"])
+    }
+
+    func testActivateLeavesAnUnsavedThreadWhenOnlyForeignSessionsExist() async throws {
+        let model = makeModel()
+        model.activate(bot: bot)
+        try await held(0, "GET", "/api/sessions").reply(#"{"data":[{"id":"cli-1","source":"cli"}]}"#)
+        await eventually("aucun fil étranger attaché") { !model.isOpening }
+        XCTAssertNil(model.sessionID)
+        model.draft = "nouveau"
+        XCTAssertTrue(model.canSend)
+        model.send()
+        try await held(1, "POST", "/api/sessions").reply(#"{"session":{"id":"api-new","source":"api_server"}}"#)
+        let run = try await held(2, "POST", "/v1/runs")
+        XCTAssertEqual(run.json?["session_id"] as? String, "api-new")
+        XCTAssertEqual(run.json?["input"] as? String, "nouveau")
+        run.reply(#"{"run_id":"r1"}"#)
+        try await held(3, "GET", "/v1/runs/r1/events").reply(completedTurn("reçu"))
+        await eventually("tour livré") { model.conversation.end == .completed }
+        XCTAssertEqual(model.conversation.entries.map(\.text), ["nouveau", "reçu"])
+        XCTAssertFalse((model.conversation.failure ?? "").contains("HTTP 409"))
+    }
+
+    func testAForeignSession409CreatesAnAPIThreadAndDeliversTheMessage() async throws {
+        let model = makeModel()
+        try await openEmptyThread(model, session: "desktop-1")
+        model.draft = "bonjour"
+        model.send()
+        try await held(1, "POST", "/v1/runs").reply(#"{"error":{"code":"permission_denied","message":"session owned by another surface"}}"#, status: 409)
+        try await held(2, "POST", "/api/sessions").reply(#"{"session":{"id":"api-new"}}"#)
+        let run = try await held(3, "POST", "/v1/runs")
+        XCTAssertEqual(run.json?["session_id"] as? String, "api-new")
+        XCTAssertEqual(run.json?["input"] as? String, "bonjour")
+        run.reply(#"{"run_id":"r1"}"#)
+        try await held(4, "GET", "/v1/runs/r1/events").reply(completedTurn("reçu"))
+        await eventually("livraison après rebond") { model.conversation.end == .completed }
+        XCTAssertEqual(model.sessionID, "api-new")
+        XCTAssertEqual(model.conversation.entries.map(\.text), ["bonjour", "reçu"])
+        XCTAssertNil(model.conversation.failure)
+        XCTAssertFalse(model.conversation.entries.contains { $0.text.contains("HTTP 409") })
+    }
+
+    /// Un fil étranger dont le modèle n'est pas celui du profil : les deux premiers envois du fil API neuf partent sans `model`
+    func testAfterAReboundBothSendsLeaveWithoutTheForeignThreadModel() async throws {
+        let model = makeModel(
+            bots: profiles(["profil-m"]),
+            listedThread: { bot, session in bot == "hv-bot" && session == "desktop-1" ? (model: "modèle-étranger", read: 1) : nil }
+        )
+        try await openEmptyThread(model, session: "desktop-1")
+        XCTAssertEqual(model.shownModel, "modèle-étranger")
+        XCTAssertNotEqual(model.shownModel, "profil-m")
+        model.draft = "bonjour"
+        model.send()
+        try await held(1, "POST", "/v1/runs").reply(#"{"error":{"code":"permission_denied","message":"session owned by another surface"}}"#, status: 409)
+        try await held(2, "POST", "/api/sessions").reply(#"{"session":{"id":"api-new"}}"#)
+        let first = try await held(3, "POST", "/v1/runs")
+        XCTAssertEqual(first.json?["session_id"] as? String, "api-new")
+        XCTAssertEqual(first.json?["input"] as? String, "bonjour")
+        XCTAssertNil(first.json?["model"], "le fil API neuf suit le modèle du profil")
+        first.reply(#"{"run_id":"r1"}"#)
+        try await held(4, "GET", "/v1/runs/r1/events").reply(completedTurn("reçu"))
+        let reread = try await held(5, "GET", "/api/sessions/api-new/messages")
+        await eventually("premier tour livré") { model.conversation.end == .completed }
+        XCTAssertEqual(model.shownModel, "profil-m")
+        model.draft = "suite"
+        XCTAssertTrue(model.canSend)
+        model.send()
+        reread.reply(transcript((1, "user", "bonjour"), (2, "assistant", "reçu")))
+        let second = try await held(6, "POST", "/v1/runs")
+        XCTAssertEqual(second.json?["session_id"] as? String, "api-new")
+        XCTAssertEqual(second.json?["input"] as? String, "suite")
+        XCTAssertNil(second.json?["model"], "le fil API neuf suit le modèle du profil")
+    }
+
+    func testAStartRun409ShowsTheClassifiedConflictAndNeverARawHTTPCode() async throws {
+        let model = makeModel()
+        try await openEmptyThread(model, session: "t")
+        model.draft = "bonjour"
+        model.send()
+        try await held(1, "POST", "/v1/runs").reply(#"{"error":"idempotency_key_conflict"}"#, status: 409)
+        await eventually("conflit classé") { model.conversation.failure == StartRunConflict.idempotency }
+        XCTAssertFalse((model.conversation.failure ?? "").contains("HTTP 409"))
+        XCTAssertFalse((model.conversation.failure ?? "").contains("start_run"))
+    }
+
     func testActivateOpensTheLatestSessionAsTheUniqueChat() async throws {
         let model = makeModel()
         model.activate(bot: bot)

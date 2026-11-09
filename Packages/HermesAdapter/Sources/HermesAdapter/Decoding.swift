@@ -42,7 +42,7 @@ extension Session {
         guard let session = try root(data, .newSession).object("session"), let id = nonEmpty(session.string("id")) else {
             throw HermesError.decoding(contract: Contract.newSession.rawValue, detail: "session.id absent")
         }
-        return Session(id: id, title: session.string("title"), model: nonEmpty(session.string("model")))
+        return Session(id: id, title: session.string("title"), model: nonEmpty(session.string("model")), source: nonEmpty(session.string("source")))
     }
 }
 
@@ -63,7 +63,7 @@ extension Session {
         }
         let sessions: [Session] = entries.compactMap { entry in
             guard let entry = (entry as? [String: Any]).map(JSONObject.init), let id = nonEmpty(entry.string("id")) else { return nil }
-            return Session(id: id, title: nonEmpty(entry.string("title")), model: nonEmpty(entry.string("model")))
+            return Session(id: id, title: nonEmpty(entry.string("title")), model: nonEmpty(entry.string("model")), source: nonEmpty(entry.string("source")))
         }
         return SessionPage(sessions: sessions, entries: entries.count, hasMore: body.raw["has_more"] as? Bool ?? false)
     }

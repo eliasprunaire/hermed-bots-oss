@@ -145,15 +145,22 @@ final class ListingTests: XCTestCase {
         for fixture in try fixtures() {
             XCTAssertEqual(
                 try Session.decodePage(fixture.response("list_sessions")).sessions,
-                [Session(id: "s-past-1", title: "Fil passé 1"), Session(id: "s-open", title: "Fil courant")],
+                [Session(id: "s-past-1", title: "Fil passé 1", source: "api_server"), Session(id: "s-open", title: "Fil courant", source: "api_server")],
                 "\(fixture.version)"
             )
             XCTAssertEqual(
                 try Session.decodePage(fixture.response("list_sessions", fields: true)).sessions,
-                [Session(id: "s-past-1", title: nil), Session(id: "s-open", title: nil)],
+                [Session(id: "s-past-1", title: nil, source: "api_server"), Session(id: "s-open", title: nil, source: "api_server")],
                 "\(fixture.version) fields"
             )
         }
+    }
+
+    func testASessionSourceTellsWhetherTheAPIMayBindTheThread() throws {
+        let body = Data(#"{"data":[{"id":"api","source":"api_server"},{"id":"cli","source":"cli"},{"id":"tui","source":"tui"},{"id":"legacy"}]}"#.utf8)
+        let sessions = try Session.decodePage(body).sessions
+        XCTAssertEqual(sessions.map(\.source), ["api_server", "cli", "tui", nil])
+        XCTAssertEqual(sessions.map(\.canBindFromAPI), [true, false, false, true])
     }
 
     func testAnEmptyOrNullTitleIsNoTitleAndAnEntryWithoutIdIsSkipped() throws {
@@ -192,7 +199,7 @@ final class ListingTests: XCTestCase {
         let fixture = try Fixture.load(.current)
         StubProtocol.reset { _ in .http(200, try! fixture.response("list_sessions")) }
         let list = try await client().listSessions(profile: "hv-bot-a")
-        XCTAssertEqual(list, .sessions([Session(id: "s-past-1", title: "Fil passé 1"), Session(id: "s-open", title: "Fil courant")]))
+        XCTAssertEqual(list, .sessions([Session(id: "s-past-1", title: "Fil passé 1", source: "api_server"), Session(id: "s-open", title: "Fil courant", source: "api_server")]))
         XCTAssertEqual(StubProtocol.seen.map { "\($0.method) \($0.path)" }, ["GET /p/hv-bot-a/api/sessions"])
         XCTAssertEqual(StubProtocol.seen.first?.query, "limit=200")
         XCTAssertEqual(StubProtocol.seen.first?.authorization, "Bearer \(key)")

@@ -318,7 +318,7 @@ final class ConversationModel {
                         return true
                     case .sessions(let sessions):
                         guard host == connection(), botID == bot else { return true }
-                        if let latest = sessions.first {
+                        if let latest = sessions.first(where: \.canBindFromAPI) {
                             apply(.open(session: latest.id, bot: bot, model: latest.model, read: startedReads() + 1), on: host)
                         }
                         return true
@@ -488,7 +488,7 @@ final class ConversationModel {
         } catch { if host == connection() { onAPIError(error, bot) } }
     }
 
-    private func run(_ key: ConversationMachine.Key, message: String, model: String?, on connection: String) async {
+    private func run(_ key: ConversationMachine.Key, message: String, model: String?, on connection: String, rebindOnForeign: Bool = true) async {
         guard await permits(key, on: connection), let session = key.session else { return }
         let admission = RunAdmission()
         do {
@@ -517,6 +517,26 @@ final class ConversationModel {
             catch { if connection == self.connection() { onAPIError(error, key.bot) } }
             guard connection == self.connection() else { return apply(.failed(key, Self.unreachable), on: connection) }
             await follow(key, run: run, on: connection)
+        } catch {
+            if rebindOnForeign, StartRunConflict.isForeignSession(error) {
+                await rebindForeignSession(key, message: message, on: connection)
+                return
+            }
+            if connection == self.connection() { reportAPIError(error, bot: key.bot) }
+            apply(.failed(key, Self.message(error)), on: connection)
+        }
+    }
+
+    /// Un fil d'une autre surface est un 409 `permission_denied` : le message déjà accepté part sur un fil API neuf
+    /// Le premier envoi de ce fil, comme les suivants, part sans `model` : le fil suit le modèle du profil, pas celui du fil étranger
+    private func rebindForeignSession(_ key: ConversationMachine.Key, message: String, on connection: String) async {
+        do {
+            guard let client = client(connection) else { throw HermesError.unreachable(url: "", reason: Self.unreachable) }
+            let session = try await client.newSession(profile: key.bot).id
+            apply(.rebound(key, session: session), on: connection)
+            let saved = ConversationMachine.Key(bot: key.bot, thread: .session(session))
+            startIDs[RunKey(connection: connection, thread: saved)] = startIDs.removeValue(forKey: RunKey(connection: connection, thread: key))
+            await run(saved, message: message, model: nil, on: connection, rebindOnForeign: false)
         } catch {
             if connection == self.connection() { reportAPIError(error, bot: key.bot) }
             apply(.failed(key, Self.message(error)), on: connection)
@@ -764,6 +784,7 @@ final class ConversationModel {
     }
 
     private static func message(_ error: Error) -> String {
+        if let conflict = StartRunConflict.message(for: error) { return conflict }
         if case HermesError.unreachable(let url, _) = error, url.isEmpty { return unreachable }
         return "\(error)"
     }
