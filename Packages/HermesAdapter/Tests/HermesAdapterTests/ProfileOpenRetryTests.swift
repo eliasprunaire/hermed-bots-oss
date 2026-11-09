@@ -52,6 +52,10 @@ final class CompatibilityStatusTests: XCTestCase {
         XCTAssertEqual(CompatibilityStatus.of(map: nil, checking: true, hasError: false), .connecting)
         XCTAssertEqual(CompatibilityStatus.connecting.footerLabel, "Connexion…")
         XCTAssertEqual(CompatibilityStatus.failed.footerLabel, "Clé refusée")
+        XCTAssertFalse(
+            CompatibilityStatus.failed.footerLabel.contains("refusée"),
+            "Clé API introuvable sur l'hôte pour le profil hv-bot-b."
+        )
         XCTAssertEqual(CompatibilityStatus.footerLabel(status: .failed, tunnelFailed: false), "Clé refusée")
         XCTAssertEqual(CompatibilityStatus.footerLabel(status: .failed, tunnelFailed: true), "Tunnel en échec")
         XCTAssertEqual(CompatibilityStatus.footerLabel(status: .ready, tunnelFailed: true), "Prêt")
