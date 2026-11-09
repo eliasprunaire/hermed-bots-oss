@@ -1818,6 +1818,38 @@ final class ConversationModelTests: XCTestCase {
         XCTAssertFalse(model.conversation.entries.contains { $0.text.contains("HTTP 409") })
     }
 
+    /// Un fil étranger dont le modèle n'est pas celui du profil : les deux premiers envois du fil API neuf partent sans `model`
+    func testAfterAReboundBothSendsLeaveWithoutTheForeignThreadModel() async throws {
+        let model = makeModel(
+            bots: profiles(["profil-m"]),
+            listedThread: { bot, session in bot == "hv-bot" && session == "desktop-1" ? (model: "modèle-étranger", read: 1) : nil }
+        )
+        try await openEmptyThread(model, session: "desktop-1")
+        XCTAssertEqual(model.shownModel, "modèle-étranger")
+        XCTAssertNotEqual(model.shownModel, "profil-m")
+        model.draft = "bonjour"
+        model.send()
+        try await held(1, "POST", "/v1/runs").reply(#"{"error":{"code":"permission_denied","message":"session owned by another surface"}}"#, status: 409)
+        try await held(2, "POST", "/api/sessions").reply(#"{"session":{"id":"api-new"}}"#)
+        let first = try await held(3, "POST", "/v1/runs")
+        XCTAssertEqual(first.json?["session_id"] as? String, "api-new")
+        XCTAssertEqual(first.json?["input"] as? String, "bonjour")
+        XCTAssertNil(first.json?["model"], "le fil API neuf suit le modèle du profil")
+        first.reply(#"{"run_id":"r1"}"#)
+        try await held(4, "GET", "/v1/runs/r1/events").reply(completedTurn("reçu"))
+        let reread = try await held(5, "GET", "/api/sessions/api-new/messages")
+        await eventually("premier tour livré") { model.conversation.end == .completed }
+        XCTAssertEqual(model.shownModel, "profil-m")
+        model.draft = "suite"
+        XCTAssertTrue(model.canSend)
+        model.send()
+        reread.reply(transcript((1, "user", "bonjour"), (2, "assistant", "reçu")))
+        let second = try await held(6, "POST", "/v1/runs")
+        XCTAssertEqual(second.json?["session_id"] as? String, "api-new")
+        XCTAssertEqual(second.json?["input"] as? String, "suite")
+        XCTAssertNil(second.json?["model"], "le fil API neuf suit le modèle du profil")
+    }
+
     func testAStartRun409ShowsTheClassifiedConflictAndNeverARawHTTPCode() async throws {
         let model = makeModel()
         try await openEmptyThread(model, session: "t")

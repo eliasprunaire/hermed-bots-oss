@@ -519,7 +519,7 @@ final class ConversationModel {
             await follow(key, run: run, on: connection)
         } catch {
             if rebindOnForeign, StartRunConflict.isForeignSession(error) {
-                await rebindForeignSession(key, message: message, model: model, on: connection)
+                await rebindForeignSession(key, message: message, on: connection)
                 return
             }
             if connection == self.connection() { reportAPIError(error, bot: key.bot) }
@@ -528,14 +528,15 @@ final class ConversationModel {
     }
 
     /// Un fil d'une autre surface est un 409 `permission_denied` : le message déjà accepté part sur un fil API neuf
-    private func rebindForeignSession(_ key: ConversationMachine.Key, message: String, model: String?, on connection: String) async {
+    /// Le premier envoi de ce fil, comme les suivants, part sans `model` : le fil suit le modèle du profil, pas celui du fil étranger
+    private func rebindForeignSession(_ key: ConversationMachine.Key, message: String, on connection: String) async {
         do {
             guard let client = client(connection) else { throw HermesError.unreachable(url: "", reason: Self.unreachable) }
             let session = try await client.newSession(profile: key.bot).id
             apply(.rebound(key, session: session), on: connection)
             let saved = ConversationMachine.Key(bot: key.bot, thread: .session(session))
             startIDs[RunKey(connection: connection, thread: saved)] = startIDs.removeValue(forKey: RunKey(connection: connection, thread: key))
-            await run(saved, message: message, model: model, on: connection, rebindOnForeign: false)
+            await run(saved, message: message, model: nil, on: connection, rebindOnForeign: false)
         } catch {
             if connection == self.connection() { reportAPIError(error, bot: key.bot) }
             apply(.failed(key, Self.message(error)), on: connection)
