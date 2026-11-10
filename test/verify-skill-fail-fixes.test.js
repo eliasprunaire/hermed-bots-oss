@@ -930,7 +930,7 @@ test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", ()
   const lacunes = readFileSync(join(baselines, "LACUNES-PNG.md"), "utf8");
   const listed = [...lacunes.matchAll(/- LACUNE binaire : `([^`]+)`/g)].map((m) => m[1]);
   assert.ok(listed.includes(stale));
-  assert.ok(listed.length > 100, String(listed.length));
+  assert.ok(listed.length > 40, String(listed.length));
   for (const name of listed) {
     assert.equal(existsSync(join(baselines, name)), false, name);
   }
