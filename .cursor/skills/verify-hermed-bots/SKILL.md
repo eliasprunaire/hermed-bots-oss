@@ -140,7 +140,7 @@ Le script `scripts/hv-classify.js --dry-run` lit la Feature Map versionnée `fea
 
 | Champ | Valeurs |
 |---|---|
-| `path` | `fast` (aucun fichier UI), `ui` (au moins un fichier UI), `fast_suspended` (UI requise mais VM UI indisponible) |
+| `path` | `fast` (aucun fichier UI et aucun label `needs-ui`), `ui` (au moins un fichier UI, label `needs-ui`, ou Feature Map absente/illisible/invalide), `fast_suspended` (UI requise mais VM UI indisponible) |
 | `needs_ui` | booléen |
 | `features` | identifiants de la carte qui matchent |
 | `mode` | `light` si `--same-patch-id` et `--pr-pass` ; sinon `full`. Le label `needs-full-verify` force `full`. |
@@ -150,7 +150,9 @@ Le script `scripts/hv-classify.js --dry-run` lit la Feature Map versionnée `fea
 
 VM UI indisponible : `--ui-unavailable`, ou `HV_UI_UNAVAILABLE=1`, ou `HV_UI_AVAILABLE=0`.
 
-Sans Feature Map : code de sortie ≠ 0, `ok=false`, erreur `feature map absente`.
+Le label `needs-ui` force `path=ui` (`ui-full` en cas de doute). Il ne change pas `mode`. Le label `needs-full-verify` reste inchangé.
+
+Sans Feature Map, ou carte illisible ou invalide : code de sortie ≠ 0, `ok=false`, `path=ui`, `ui_plan=ui-full`, erreur `feature map absente` / `illisible` / `invalide`. Jamais `path=fast`.
 
 ### Plans de test UI (`ui-core` / `ui-full`)
 
