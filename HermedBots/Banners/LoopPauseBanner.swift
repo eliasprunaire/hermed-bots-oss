@@ -6,7 +6,7 @@ struct LoopPauseBanner: View {
     let notice: LoopNotice?
     let close: () -> Void
     #if DEBUG
-    let pauseDecisionTime: TimeInterval? = nil
+    let pauseDecisionTime: TimeInterval?
     #endif
 
     var body: some View {
