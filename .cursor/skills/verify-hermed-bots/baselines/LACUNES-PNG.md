@@ -2,7 +2,7 @@
 
 Les captures `baselines/*.png` se produisent sur le Mac, dans la VM du circuit de vérification (`hv-regen-baselines.sh`). Elles ne peuvent pas être générées sur une VM Linux.
 
-Les 27 PNG déjà versionnés dans `UIReferences/` ont été recopiés ici : ce sont des captures Mac existantes, pas des images inventées. Les noms ci-dessous n'ont toujours pas de binaire. Les produire puis les promouvoir :
+Les 26 PNG déjà versionnés dans `UIReferences/` (hors `issue58-version-missing-key.png`, qui montre encore le bandeau global) ont été recopiés ici : ce sont des captures Mac existantes, pas des images inventées. Les noms ci-dessous n'ont toujours pas de binaire. Les produire puis les promouvoir :
 
 1. Passe VM de la suite ordinaire `ui fake` (voir le README de ce dossier)
 2. Examiner `reference-shots/` et `diffs/` dans le dossier annoncé par `HV-UI`
@@ -93,6 +93,7 @@ Noms encore absents :
 - LACUNE binaire : `hd15-trunk-no-button.png`
 - LACUNE binaire : `issue56-hv-bot-a.png`
 - LACUNE binaire : `issue56-hv-bot-b.png`
+- LACUNE binaire : `issue58-version-missing-key.png`
 - LACUNE binaire : `piste1-about-connecting-large-dark.png`
 - LACUNE binaire : `piste1-about-connecting-large-light.png`
 - LACUNE binaire : `piste1-about-connecting-standard-dark.png`

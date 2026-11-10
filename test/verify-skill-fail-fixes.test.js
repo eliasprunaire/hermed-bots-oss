@@ -921,13 +921,15 @@ test("hv-shotdiff fails when image dimensions differ", () => {
 test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", () => {
   const refs = join(ROOT, "UIReferences");
   const baselines = join(ROOT, ".cursor/skills/verify-hermed-bots/baselines");
+  const stale = "issue58-version-missing-key.png";
   const pngs = readdirSync(refs).filter((name) => name.endsWith(".png"));
   assert.equal(pngs.length, 27);
   for (const name of pngs) {
-    assert.equal(existsSync(join(baselines, name)), true, name);
+    assert.equal(existsSync(join(baselines, name)), name !== stale, name);
   }
   const lacunes = readFileSync(join(baselines, "LACUNES-PNG.md"), "utf8");
   const listed = [...lacunes.matchAll(/- LACUNE binaire : `([^`]+)`/g)].map((m) => m[1]);
+  assert.ok(listed.includes(stale));
   assert.ok(listed.length > 100, String(listed.length));
   for (const name of listed) {
     assert.equal(existsSync(join(baselines, name)), false, name);
