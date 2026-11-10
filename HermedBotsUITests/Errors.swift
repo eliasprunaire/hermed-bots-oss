@@ -51,6 +51,7 @@ final class Errors: HD12Harness {
         send("HV_LOOP go")
         XCTAssertTrue(element("hd.banner.loop-pause").waitForExistence(timeout: 15))
         XCTAssertTrue(text("hd.banner.loop-pause").contains("répété"))
+        assertNoLoopCalibration()
         XCTAssertFalse(element("hd.composer.send").isEnabled)
         XCTAssertTrue(element("hd.loop.notification").waitForExistence(timeout: 10))
         HVShot.capture("hd12-loop-pause", app)
@@ -58,6 +59,7 @@ final class Errors: HD12Harness {
         XCTAssertTrue(element("hd.banner.loop-pause").waitForNonExistence(timeout: 10))
         send("Bonjour après la pause")
         completed()
+        assertNoLoopCalibration()
         XCTAssertFalse(request("/_hv/log").contains { ($0["p"] as? String)?.hasSuffix("/stop") == true })
         HVShot.capture("hd12-after-pause", app)
     }

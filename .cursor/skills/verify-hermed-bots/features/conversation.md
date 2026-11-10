@@ -29,3 +29,4 @@ Envoyer un message à un bot, voir la réponse rendue en Markdown, l'attente « 
 - La compaction UI s'aligne sur les seuils Hermes Agent (50 % / 85 %) ; `session.compress` n'est pas appelé par l'app.
 - Si le flux porte `usage.total_tokens`, le bandeau `hd.conversation.compacted` et le pied utilisent ce signal serveur. Sinon l'UI estime d'après la taille du transcript : le bandeau dit « Estimation du contexte » et le pied ajoute « (estimation) ». Ne pas présenter une estimation comme un relevé Hermes.
 - Un envoi légitime n'affiche pas « start_run : réponse HTTP 409 ». Le chat unique n'attache pas un fil d'une autre surface. Un 409 restant montre le message classé de la fiche connexion.
+- Sous le sélecteur de modèle, le chat n'affiche ni calibrage ni compteur de tours. La carte n'apparaît que lorsqu'un tour est en pause. `hd.loop.tokens` s'affiche si le flux n'a pas de relevé.

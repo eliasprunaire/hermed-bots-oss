@@ -1,62 +1,58 @@
 import LoopGuard
-import HermesAdapter
 import SwiftUI
 import UserNotifications
 
-/// Le garde-fou de boucle : la carte de pause quand il a suspendu le fil, puis une ligne discrète sur son calibrage et le signal des tokens
 struct LoopPauseBanner: View {
-    let model: ConversationModel
+    let notice: LoopNotice?
+    let close: () -> Void
+    #if DEBUG
+    let pauseDecisionTime: TimeInterval? = nil
+    #endif
 
     var body: some View {
-        if model.pauseCause != nil || model.tokenSignal != nil {
+        if let notice {
             VStack(alignment: .leading, spacing: 8) {
-                if let cause = model.pauseCause {
-                    NoticeCard(tint: .orange, symbol: "pause.circle.fill") {
-                        Text("Boucle en pause : \(cause.message)").fontWeight(.semibold).accessibilityID(.bannerLoopPause)
-                        Text("L'affichage et l'envoi sont suspendus. Hermes peut continuer sur le serveur. Utilisez le kill switch pour l'arrêter.")
-                        if let approval = model.pausedApproval {
-                            Text("Approbation en attente sur Hermes : \(approval.request.tool ?? "inconnu"). La lecture suspendue empêche de répondre ici.")
-                        }
-                        Button("Fermer ce fil et ouvrir une nouvelle session") { model.closePausedThread() }
-                            .buttonStyle(.glass)
-                            .accessibilityID(.loopClose)
-                        #if DEBUG
-                        if let time = model.pauseDecisionTime {
-                            Color.clear.frame(width: 1, height: 1).accessibilityElement()
-                                .accessibilityLabel(String(time)).accessibilityID(.perfLoopPause)
-                        }
-                        #endif
-                        if let status = model.notificationStatus { Text(status).foregroundStyle(.secondary).accessibilityID(.loopNotification) }
-                    }
+                switch notice {
+                case .tokensDisabled:
+                    tokenCaption
+                case .paused(let pause):
+                    pauseCard(pause)
+                case .pausedAndTokensDisabled(let pause):
+                    pauseCard(pause)
+                    tokenCaption
                 }
-                VStack(alignment: .leading, spacing: 2) {
-                    if let thresholds = model.loopThresholds {
-                        switch thresholds.basis {
-                        case .coldStart(let turns): Text("Garde non calibré : \(turns)/20 tours observés pour ce bot.")
-                        case .history(let turns): Text("Garde fondé sur \(turns) tours observés pour ce bot. Seuils non mesurés.")
-                        }
-                    }
-                    if case .disabled? = model.tokenSignal {
-                        Text("Signal des tokens désactivé : Hermes ne fournit aucun relevé dans le flux.")
-                            .accessibilityID(.loopTokens)
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
             }
             .column()
             .padding(.bottom, 8)
         }
     }
-}
 
-extension LoopGuard.Cause {
-    var message: String {
-        switch self {
-        case .repeatedToolCall(let count): "Appel d'outil répété \(count) fois."
-        case .toolCount(let count, let limit): "\(count) appels d'outils dépassent la limite de \(limit)."
-        case .tokens(let total, let limit): "\(total) tokens dépassent la limite de \(limit)."
-        case .silence(let seconds, let limit): "Silence de \(seconds) secondes au-delà de \(limit)."
+    private var tokenCaption: some View {
+        Text(LoopNotice.tokensDisabledCaption)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .accessibilityID(.loopTokens)
+    }
+
+    private func pauseCard(_ pause: LoopNotice.Pause) -> some View {
+        NoticeCard(tint: .orange, symbol: "pause.circle.fill") {
+            Text(pause.title).fontWeight(.semibold).accessibilityID(.bannerLoopPause)
+            Text("L'affichage et l'envoi sont suspendus. Hermes peut continuer sur le serveur. Utilisez le kill switch pour l'arrêter.")
+            if let approval = pause.approval {
+                Text(approval)
+            }
+            Button("Fermer ce fil et ouvrir une nouvelle session") { close() }
+                .buttonStyle(.glass)
+                .accessibilityID(.loopClose)
+            #if DEBUG
+            if let time = pauseDecisionTime {
+                Color.clear.frame(width: 1, height: 1).accessibilityElement()
+                    .accessibilityLabel(String(time)).accessibilityID(.perfLoopPause)
+            }
+            #endif
+            if let status = pause.notification {
+                Text(status).foregroundStyle(.secondary).accessibilityID(.loopNotification)
+            }
         }
     }
 }

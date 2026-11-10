@@ -24,7 +24,11 @@ struct ConversationView: View {
                 .column()
                 .padding(.bottom, 8)
             }
-            LoopPauseBanner(model: model)
+            #if DEBUG
+            LoopPauseBanner(notice: model.loopNotice, close: { model.closePausedThread() }, pauseDecisionTime: model.pauseDecisionTime)
+            #else
+            LoopPauseBanner(notice: model.loopNotice, close: { model.closePausedThread() })
+            #endif
             if model.isOpening, !apiFailed {
                 HStack(spacing: 8) {
                     ProgressView().controlSize(.small)

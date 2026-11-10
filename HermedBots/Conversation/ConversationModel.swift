@@ -104,9 +104,20 @@ final class ConversationModel {
         return cause
     }
     var tokenSignal: LoopGuard.TokenSignal? { shownRun.flatMap { loopReports[$0]?.tokenSignal } }
-    var loopThresholds: LoopGuard.Thresholds? { shownRun.flatMap { loopReports[$0]?.thresholds } }
     var pausedApproval: ConversationMachine.Approval? { pauseCause == nil ? nil : machine.shown.pendingApproval }
-    var notificationStatus: String? { shownRun.flatMap { notifications[$0] } }
+    var loopNotice: LoopNotice? {
+        guard let key = shownRun, let report = loopReports[key] else { return nil }
+        let tokensOff: Bool
+        switch report.tokenSignal {
+        case .disabled: tokensOff = true
+        case .active: tokensOff = false
+        }
+        guard case .pause(let cause, _) = report.verdict else {
+            return tokensOff ? .tokensDisabled : nil
+        }
+        let pause = LoopNotice.Pause(cause: cause, approval: pausedApproval, notification: notifications[key])
+        return tokensOff ? .pausedAndTokensDisabled(pause) : .paused(pause)
+    }
 
     private var drafts: [String: String] = [:]
     private var support: [SupportKey: RouteSupport] = [:]
@@ -803,6 +814,42 @@ final class ConversationModel {
         if let conflict = StartRunConflict.message(for: error) { return conflict }
         if case HermesError.unreachable(let url, _) = error, url.isEmpty { return unreachable }
         return "\(error)"
+    }
+}
+
+enum LoopNotice: Equatable {
+    case tokensDisabled
+    case paused(Pause)
+    case pausedAndTokensDisabled(Pause)
+
+    static let tokensDisabledCaption =
+        "Signal des tokens désactivé : Hermes ne fournit aucun relevé dans le flux."
+
+    struct Pause: Equatable {
+        var title: String
+        var approval: String?
+        var notification: String?
+    }
+}
+
+extension LoopGuard.Cause {
+    var message: String {
+        switch self {
+        case .repeatedToolCall(let count): "Appel d'outil répété \(count) fois."
+        case .toolCount(let count, let limit): "\(count) appels d'outils dépassent la limite de \(limit)."
+        case .tokens(let total, let limit): "\(total) tokens dépassent la limite de \(limit)."
+        case .silence(let seconds, let limit): "Silence de \(seconds) secondes au-delà de \(limit)."
+        }
+    }
+}
+
+extension LoopNotice.Pause {
+    init(cause: LoopGuard.Cause, approval: ConversationMachine.Approval?, notification: String?) {
+        title = "Boucle en pause : \(cause.message)"
+        self.approval = approval.map {
+            "Approbation en attente sur Hermes : \($0.request.tool ?? "inconnu"). La lecture suspendue empêche de répondre ici."
+        }
+        self.notification = notification
     }
 }
 
