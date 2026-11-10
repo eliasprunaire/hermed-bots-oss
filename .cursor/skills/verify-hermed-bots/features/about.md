@@ -7,7 +7,7 @@ Le titre affiché est « À propos ». L'identifiant reste `hd.settings.updates`
 
 Une valeur absente ou vide s'affiche `inconnue`, sans erreur.
 L'onglet n'affiche ni le build (`CFBundleVersion`) ni un canal de mise à jour.
-Dans le pied, la valeur de `hd.status.version` reste le jeton nu. Elle vaut `inconnue` tant que la version Hermes n'est pas lue. La ligne visible affiche « Version Hermes » puis ce jeton.
+Dans le pied, la valeur de `hd.status.version` reste le jeton nu. Elle vaut `…` tant que la version Hermes n'est pas lue, et `inconnue` si la lecture échoue. La ligne visible affiche « Version Hermes » puis ce jeton.
 
 | Contrôle | Identifiant | Source |
 | --- | --- | --- |
