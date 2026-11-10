@@ -35,6 +35,20 @@ def load_keys():
 KEYS = load_keys()
 KEY = os.environ.get("HV_TEST_API_KEY")
 LOG, INJ, LOCK = [], [], threading.Lock()
+
+def log_sse(ev):
+    """Heure d'émission SSE : la sonde HD-09 lit /_hv/sse/message.delta sous le texte du delta."""
+    name = ev.get("event")
+    entry = None
+    if name == "approval.request":
+        entry = {"t": time.time(), "m": "SSE", "p": "/_hv/sse/approval.request"}
+    elif name == "message.delta":
+        entry = {"t": time.time(), "m": "SSE", "p": "/_hv/sse/message.delta", "body": ev.get("delta") or ""}
+    if entry is None:
+        return
+    with LOCK:
+        LOG.append(entry)
+
 CUT_UNTIL = [0.0]
 RUNS = set()
 MODEL, MSGS = {}, {}  # verrou de modèle et nombre de messages par session
@@ -330,9 +344,7 @@ class H(BaseHTTPRequestHandler):
                 if i <= last:
                     continue
                 ev = dict(ev, seq=i, timestamp=time.time())
-                if ev.get("event") == "approval.request":
-                    with LOCK:
-                        LOG.append({"t": time.time(), "m": "SSE", "p": "/_hv/sse/approval.request"})
+                log_sse(ev)
                 self.wfile.write(("id: %d\ndata: %s\n\n" % (i, json.dumps(ev, ensure_ascii=False))).encode()); self.wfile.flush()
                 time.sleep(pace)
             self.wfile.write(b": stream closed\n\n"); self.wfile.flush()
@@ -405,6 +417,7 @@ class H(BaseHTTPRequestHandler):
                             i += 1
                             continue
                         ev = dict(strip_usage(ev), seq=i, timestamp=time.time())
+                        log_sse(ev)
                         self.wfile.write(("id: %d\ndata: %s\n\n" % (i, json.dumps(ev, ensure_ascii=False))).encode()); self.wfile.flush()
                         i += 1
                         time.sleep(pace)
@@ -415,9 +428,7 @@ class H(BaseHTTPRequestHandler):
                         i += 1
                         continue
                     ev = dict(strip_usage(ev), seq=i, timestamp=time.time())
-                    if ev.get("event") == "approval.request":
-                        with LOCK:
-                            LOG.append({"t": time.time(), "m": "SSE", "p": "/_hv/sse/approval.request"})
+                    log_sse(ev)
                     self.wfile.write(("id: %d\ndata: %s\n\n" % (i, json.dumps(ev, ensure_ascii=False))).encode()); self.wfile.flush()
                     i += 1
                     time.sleep(pace)
@@ -462,6 +473,7 @@ class H(BaseHTTPRequestHandler):
                         i += 1
                         continue
                     ev = dict(strip_usage(ev), seq=i, timestamp=time.time())
+                    log_sse(ev)
                     self.wfile.write(("id: %d\ndata: %s\n\n" % (i, json.dumps(ev, ensure_ascii=False))).encode()); self.wfile.flush()
                     i += 1
                     time.sleep(pace)
@@ -488,6 +500,7 @@ class H(BaseHTTPRequestHandler):
                       "runtime": {"provider": "custom", "model": "hv-fake-1", "route_source": "global"}}, pace),
                 ):
                     ev = dict(strip_usage(ev), seq=seq, timestamp=time.time())
+                    log_sse(ev)
                     self.wfile.write(("id: %d\ndata: %s\n\n" % (seq, json.dumps(ev, ensure_ascii=False))).encode()); self.wfile.flush()
                     seq += 1
                     time.sleep(wait)

@@ -59,6 +59,8 @@ Elle ne lance aucune UI sur l'hôte.
 Une passe ne promeut jamais automatiquement ses propres captures.
 Les références couvrent la suite ordinaire `ui fake` et les deux captures LiveTunnel.
 Les lanes spécialisées gardent leurs captures comme preuves, avec leur propre environnement.
+Les 27 PNG déjà versionnés sous `UIReferences/` sont aussi dans ce dossier (copies, pas d'images inventées).
+Les noms encore absents sont listés dans [LACUNES-PNG.md](LACUNES-PNG.md). Un agent Linux ne les fabrique pas.
 
 ## Rejouer les tests réactivés
 
