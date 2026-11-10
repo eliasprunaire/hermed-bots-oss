@@ -6,8 +6,9 @@ final class BotListUnavailableTests: XCTestCase {
     func testAFailedProfileListShowsAFixedCopyAndRecordsTheRawErrorInTheJournal() async {
         XCTAssertEqual(
             BotsModel.listUnavailableMessage,
-            "Liste des bots indisponible. Réessayez quand la liaison est rétablie."
+            "Liste des bots indisponible. Réessayez plus tard."
         )
+        XCTAssertFalse(BotsModel.listUnavailableMessage.contains("quand la liaison est rétablie"))
         XCTAssertFalse(BotsModel.listUnavailableMessage.contains("Error Domain"))
         XCTAssertFalse(BotsModel.listUnavailableMessage.contains("NSURLError"))
 

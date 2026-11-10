@@ -23,5 +23,5 @@ Dans le pied, la valeur de `hd.status.version` reste le jeton nu. Elle vaut `…
 | Rechercher les mises à jour… | `hd.updates.check` | Démarre la recherche Sparkle. Dernier contrôle de l'onglet, sous les versions. Désactivé tant qu'une recherche n'est pas possible. |
 | Mettre à jour | `hd.updates.install` | Visible seulement quand une mise à jour est disponible. Installe la version proposée. |
 
-Sous le formulaire, une ligne d'état reprend le résultat Sparkle : à jour, recherche en cours, version disponible, ou échec.
+Dans la carte, sous « Rechercher les mises à jour… », une ligne d'état n'apparaît qu'après une recherche Sparkle : à jour (couleur secondaire), recherche en cours, version disponible, ou échec. Avant toute recherche réussie, rien : le libellé « Hermed Bots est à jour. » ne s'affiche pas à l'ouverture de l'onglet.
 Le même libellé « Rechercher les mises à jour… » existe aussi dans le menu de l'app.

@@ -7,20 +7,20 @@ struct UpdatesSettingsView: View {
     let model: AppModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Form {
-                LabeledContent(AboutVersionSnapshot.appVersionTitle) {
-                    Text(verbatim: snapshot.displayedAppVersion).accessibilityID(.aboutAppVersion)
-                }
-                LabeledContent(AboutVersionSnapshot.hermesCLITitle) {
-                    Text(verbatim: snapshot.displayedHermesCLI).accessibilityID(.aboutHermes)
-                }
-                LabeledContent(AboutVersionSnapshot.macOSTitle) {
-                    Text(verbatim: snapshot.displayedMacOS).accessibilityID(.aboutMacOS)
-                }
-                LabeledContent("Compatibilité Hermes") {
-                    Text(compatibilityDetail).accessibilityID(.aboutCompat)
-                }
+        Form {
+            LabeledContent(AboutVersionSnapshot.appVersionTitle) {
+                Text(verbatim: snapshot.displayedAppVersion).accessibilityID(.aboutAppVersion)
+            }
+            LabeledContent(AboutVersionSnapshot.hermesCLITitle) {
+                Text(verbatim: snapshot.displayedHermesCLI).accessibilityID(.aboutHermes)
+            }
+            LabeledContent(AboutVersionSnapshot.macOSTitle) {
+                Text(verbatim: snapshot.displayedMacOS).accessibilityID(.aboutMacOS)
+            }
+            LabeledContent("Compatibilité Hermes") {
+                Text(compatibilityDetail).accessibilityID(.aboutCompat)
+            }
+            VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Button(SettingsCopy.checkForUpdates) { model.checkForUpdates() }
                         .disabled(!model.canCheckForUpdates)
@@ -31,21 +31,21 @@ struct UpdatesSettingsView: View {
                             .accessibilityID(.updatesInstall)
                     }
                 }
+                statusRow
             }
-            .formStyle(.grouped)
-
-            statusRow
-                .padding(.horizontal, 20)
         }
+        .formStyle(.grouped)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder
     private var statusRow: some View {
         switch model.updateState {
+        case .idle:
+            EmptyView()
         case .upToDate:
             Text(UpdateCheckCopy.upToDate)
-                .foregroundStyle(.green)
+                .foregroundStyle(.secondary)
         case .checking:
             HStack(spacing: 8) {
                 ProgressView()
