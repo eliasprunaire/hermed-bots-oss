@@ -1,5 +1,6 @@
 import HermesAdapter
 import Observation
+import os
 import SwiftUI
 
 /// Les bots de la barre latérale et leurs fils passés
@@ -51,6 +52,11 @@ final class BotsModel {
     var threads: [String: Threads] { shown.threads }
     var expanded: Set<String> { shown.expanded }
 
+    static let listUnavailableMessage = String(localized: "Liste des bots indisponible. Réessayez quand la liaison est rétablie.")
+
+    private static let journal = Logger(subsystem: Bundle.main.bundleIdentifier ?? "HermedBots", category: "bots")
+    static let journalSink = OSAllocatedUnfairLock<@Sendable (String) -> Void>(initialState: { journal.error("\($0, privacy: .public)") })
+
     private let readProfiles: @MainActor () async throws -> [Profile]
     private let client: @MainActor () -> HermesClient?
     private let connection: @MainActor () -> String
@@ -101,7 +107,10 @@ final class BotsModel {
             if Task.isCancelled { return }
             hosts[host, default: Host()].toolMissing = (error as? SSHFailure) == .remoteToolNotFound
             // une liste déjà affichée reste : la panne passagère d'une relecture ne la remplace pas
-            if hosts[host, default: Host()].list.shown == nil { hosts[host, default: Host()].phase = Self.failure(error) }
+            if hosts[host, default: Host()].list.shown == nil {
+                hosts[host, default: Host()].phase = Self.failure(error)
+                if case .failed = hosts[host, default: Host()].phase { Self.recordListFailure(error) }
+            }
         }
     }
 
@@ -158,6 +167,11 @@ final class BotsModel {
         guard read == hosts[host, default: Host()].issued[id] else { return }
         hosts[host, default: Host()].threads[id] = result
         if case .loaded = result { hosts[host, default: Host()].reads[id] = read }
+    }
+
+    private static func recordListFailure(_ error: Error) {
+        let write = journalSink.withLock { $0 }
+        write("liste des bots : \(error)")
     }
 
     private static func failure(_ error: Error) -> Phase {
