@@ -6,6 +6,7 @@ enum ShotScene: String, CaseIterable {
     case footerConnecting = "footer-connecting"
     case footerUntested = "footer-untested"
     case footerFailed = "footer-failed"
+    case footerMissingKey = "footer-missing-key"
     case footerTunnel = "footer-tunnel"
     case bannerDegraded = "banner-degraded"
     case connection

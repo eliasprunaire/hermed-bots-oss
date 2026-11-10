@@ -1543,6 +1543,8 @@ final class AppModelConnectTests: XCTestCase {
         }
         XCTAssertEqual(model.conversation.openError, HermesAPIKey.unauthorizedMessage(profile: "hv-bot-a", holdsKey: true))
         XCTAssertFalse(model.conversation.openError?.contains("introuvable") == true, model.conversation.openError ?? "")
+        XCTAssertTrue(model.compatibility.footerLabel.contains("refusée"))
+        XCTAssertFalse(model.compatibility.footerLabel.contains("introuvable"))
         XCTAssertFalse(model.conversation.isOpening)
         XCTAssertFalse(model.isCheckingAPI)
         XCTAssertNil(model.apiError)
@@ -1563,6 +1565,9 @@ final class AppModelConnectTests: XCTestCase {
             try? await Task.sleep(for: .milliseconds(20))
         }
         XCTAssertEqual(model.conversation.openError, HermesAPIKey.missingMessage(profile: "hv-bot-a"))
+        XCTAssertEqual(model.compatibility, .failed(HermesAPIKey.missingMessage(profile: "hv-bot-a")))
+        XCTAssertEqual(model.compatibility.footerLabel, model.conversation.openError)
+        XCTAssertFalse(model.compatibility.footerLabel.contains("refusée"))
         XCTAssertFalse(model.conversation.openError?.contains("refusée") == true, model.conversation.openError ?? "")
         XCTAssertNil(model.apiError)
         XCTAssertFalse((model.apiError ?? "").contains("refusée"))
@@ -1570,6 +1575,9 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertFalse(model.conversation.canSend)
         XCTAssertFalse(model.conversation.isOpening)
         XCTAssertFalse(model.isCheckingAPI)
+        model.tunnel.refuse(.tunnelClosed)
+        XCTAssertEqual(model.compatibility.footerLabel, SSHFailure.tunnelClosed.message)
+        XCTAssertFalse(model.compatibility.footerLabel.contains("introuvable"))
     }
 
     /// Refus, clé corrigée sur l'hôte, puis « Réessayer » du bandeau en ligne : la lecture SSH repart et l'ouverture réussit
@@ -1642,6 +1650,8 @@ final class AppModelConnectTests: XCTestCase {
         await model.refreshVersion()
         XCTAssertEqual(reads.profiles, ["hv-bot-a"])
         XCTAssertEqual(model.apiError, HermesAPIKey.missingMessage(profile: "hv-bot-a"))
+        XCTAssertEqual(model.compatibility.footerLabel, model.apiError)
+        XCTAssertFalse(model.compatibility.footerLabel.contains("refusée"))
         XCTAssertFalse(model.apiError?.contains("refusée") == true)
         XCTAssertNil(model.conversation.openError)
         // un second refus du même profil ne relit pas et garde la cause

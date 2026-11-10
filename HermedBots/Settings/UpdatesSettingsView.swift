@@ -84,7 +84,7 @@ struct UpdatesSettingsView: View {
 
     private var compatibilityDetail: String {
         if model.isCheckingAPI { return CompatibilityStatus.connectingLabel }
-        if let error = model.apiError { return error }
+        if case .failed(let message) = model.compatibility { return message }
         if let map = model.capabilities {
             if map.hasDisabledFeature {
                 return map.entries.compactMap {

@@ -11,6 +11,14 @@ extension View {
 }
 
 extension AppModel.Version {
+    var token: String {
+        switch self {
+        case .loading: "…"
+        case .known(let version): version
+        case .unknown: String(localized: "inconnue")
+        }
+    }
+
     var text: Text {
         switch self {
         case .loading: Text(verbatim: "…")
@@ -144,9 +152,13 @@ private struct SidebarFooter: View {
                         .help(footerLabel)
                         .accessibilityID(.statusCompat)
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        model.version.text
+                        Text(verbatim: "Version Hermes")
+                            .accessibilityHidden(true)
+                        Text(verbatim: model.version.token)
                             .fixedSize(horizontal: false, vertical: true)
                             .lineLimit(2)
+                            .accessibilityLabel(Text("Version de Hermes"))
+                            .accessibilityValue(model.version.token)
                             .accessibilityID(.statusVersion)
                         if let port = model.displayedPort {
                             Text(verbatim: port.statusText).accessibilityID(.statusPort)
@@ -169,20 +181,9 @@ private struct SidebarFooter: View {
         .background(.bar)
     }
 
-    private var status: CompatibilityStatus {
-        CompatibilityStatus.of(
-            map: model.capabilities,
-            checking: model.isCheckingAPI || model.conversation.isOpening,
-            hasError: model.apiError != nil || model.conversation.openError != nil || {
-                if case .failed = model.tunnel.state { return true }
-                return false
-            }()
-        )
-    }
-
     private var footerLabel: String {
-        var label = CompatibilityStatus.footerLabel(status: status, tunnelFailed: tunnelFailed)
-        if status == .ready, model.conversation.compaction.percent > 0 {
+        var label = model.compatibility.footerLabel
+        if model.compatibility == .ready, model.conversation.compaction.percent > 0 {
             let compaction = model.conversation.compaction
             label += " · contexte \(compaction.percent) %"
             if compaction.source == .estimate { label += " (estimation)" }
@@ -190,18 +191,9 @@ private struct SidebarFooter: View {
         return label
     }
 
-    private var tunnelFailed: Bool {
-        if case .failed = model.tunnel.state { return true }
-        #if DEBUG
-        return model.testTunnelFailed
-        #else
-        return false
-        #endif
-    }
-
     /// Vert : prêt ; bleu info : version non testée ; rouge : échec ; orange : connexion
     private var health: Color {
-        switch status {
+        switch model.compatibility {
         case .ready: .green
         case .untested: .blue
         case .failed: .red

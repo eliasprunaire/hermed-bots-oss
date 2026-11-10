@@ -112,9 +112,13 @@ final class AppModel {
     var testDarkAppearance: Bool { environment.testDarkAppearance }
     var testWindowSize: CGSize? { environment.testWindowSize }
     var isShotPreview: Bool { environment.testShotScene != nil }
-    #if DEBUG
-    private(set) var testTunnelFailed = false
-    #endif
+    var compatibility: CompatibilityStatus {
+        CompatibilityStatus.of(
+            map: capabilities,
+            checking: isCheckingAPI || conversation.isOpening,
+            failure: tunnel.state.failureMessage ?? apiError ?? conversation.openError
+        )
+    }
     // de quoi lire la liste des profils par un second ssh : le même alias que le tunnel
     private var sshBackend: SystemSSHBackend?
     private var sshConfig: SSHTunnelConfig?
@@ -826,10 +830,13 @@ final class AppModel {
             bots.seedShown([bot])
             apiError = HermesAPIKey.unauthorizedMessage(profile: bot.id, holdsKey: true)
             version = .unknown
+        case .footerMissingKey:
+            bots.seedShown([bot])
+            apiError = HermesAPIKey.missingMessage(profile: bot.id)
+            version = .unknown
         case .footerTunnel:
             bots.seedShown([bot])
-            testTunnelFailed = true
-            apiError = String(localized: "Hermes ne répond pas. Vérifiez la liaison puis réessayez.")
+            apiError = SSHFailure.tunnelClosed.message
             version = .unknown
         case .bannerDegraded:
             bots.seedShown([bot])
@@ -838,7 +845,6 @@ final class AppModel {
         case .connection:
             bots.seedShown([])
         case .error:
-            testTunnelFailed = true
             bots.seedShown([bot])
             conversation.seedShot(bot: bot.id, session: nil, isOpening: false, openError: HermesAPIKey.unauthorizedMessage(profile: bot.id, holdsKey: true))
         case .emptyHome:
