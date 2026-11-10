@@ -4,8 +4,10 @@ const assert = require("node:assert/strict");
 const { spawn, spawnSync } = require("node:child_process");
 const {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -107,6 +109,41 @@ test("profile health and session messages match HermesAdapter", async () => {
     const roles = data.map((row) => row.role);
     assert.ok(roles.includes("user") && roles.includes("assistant"));
     assert.ok(data.every((row) => typeof row.id === "number" && row.content));
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("SSE log records message.delta text at emit time", async () => {
+  const port = await freePort();
+  const child = await waitReady(port, { HV_TEST_API_KEY: "probe-delta-key" });
+  try {
+    const injected = await request(port, "/_hv/inject", {
+      method: "POST",
+      body: JSON.stringify({ event: "message.delta", delta: " d00" }),
+    });
+    assert.equal(injected.status, 200);
+    const started = await request(port, "/p/hv-bot-a/v1/runs", {
+      method: "POST",
+      headers: { Authorization: "Bearer probe-delta-key" },
+      body: JSON.stringify({ input: "HV_PACE_100 delta" }),
+    });
+    assert.equal(started.status, 202, started.raw);
+    const runId = started.json && started.json.run_id;
+    assert.ok(runId);
+    const events = await request(port, `/p/hv-bot-a/v1/runs/${runId}/events`, {
+      headers: { Authorization: "Bearer probe-delta-key" },
+    });
+    assert.equal(events.status, 200);
+    assert.match(events.raw, / d00/);
+    const log = await request(port, "/_hv/log");
+    assert.equal(log.status, 200);
+    const deltas = (log.json || []).filter((row) => row.p === "/_hv/sse/message.delta");
+    assert.ok(deltas.length >= 1, JSON.stringify(log.json));
+    assert.ok(
+      deltas.some((row) => row.body === " d00" && typeof row.t === "number"),
+      JSON.stringify(deltas),
+    );
   } finally {
     child.kill("SIGTERM");
   }
@@ -879,6 +916,24 @@ test("hv-shotdiff fails when image dimensions differ", () => {
   assert.match(run.stdout, /DIFF/);
   assert.match(run.stdout, /size/);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", () => {
+  const refs = join(ROOT, "UIReferences");
+  const baselines = join(ROOT, ".cursor/skills/verify-hermed-bots/baselines");
+  const stale = "issue58-version-missing-key.png";
+  const pngs = readdirSync(refs).filter((name) => name.endsWith(".png"));
+  assert.equal(pngs.length, 27);
+  for (const name of pngs) {
+    assert.equal(existsSync(join(baselines, name)), name !== stale, name);
+  }
+  const lacunes = readFileSync(join(baselines, "LACUNES-PNG.md"), "utf8");
+  const listed = [...lacunes.matchAll(/- LACUNE binaire : `([^`]+)`/g)].map((m) => m[1]);
+  assert.ok(listed.includes(stale));
+  assert.ok(listed.length > 100, String(listed.length));
+  for (const name of listed) {
+    assert.equal(existsSync(join(baselines, name)), false, name);
+  }
 });
 
 test("hv-daily-lanes isolates HOME per lane", () => {
