@@ -15,6 +15,7 @@ const REQUIRED_SKILL_FILES = [
   "scripts/hv-classify.js",
 ];
 const FULL_VERIFY_LABEL = "needs-full-verify";
+const NEEDS_UI_LABEL = "needs-ui";
 
 function usage() {
   return [
@@ -352,14 +353,15 @@ function classifyFiles(files, map) {
 
 function classify(opts) {
   const mode = classifyMode(opts);
+  const forceUi = opts.labels.includes(NEEDS_UI_LABEL);
   const failed = (errors) => result({
-    path: "fast",
-    needs_ui: false,
+    path: "ui",
+    needs_ui: true,
     features: [],
     mode,
     ok: false,
     errors,
-    ui_plan: "none",
+    ui_plan: "ui-full",
   });
   try {
     const loaded = loadFeatureMap(opts.featureMap);
@@ -367,16 +369,17 @@ function classify(opts) {
       return failed(loaded.errors || [loaded.error]);
     }
     const hit = classifyFiles(opts.files, loaded.map);
+    const needsUi = hit.needs_ui || forceUi;
     let classifyPath = "fast";
-    if (hit.needs_ui) classifyPath = opts.uiUnavailable ? "fast_suspended" : "ui";
+    if (needsUi) classifyPath = opts.uiUnavailable ? "fast_suspended" : "ui";
     return result({
       path: classifyPath,
-      needs_ui: hit.needs_ui,
+      needs_ui: needsUi,
       features: hit.features,
       mode,
       ok: true,
       errors: [],
-      ui_plan: classifyPath === "fast" ? "none" : hit.ui_plan,
+      ui_plan: classifyPath === "fast" ? "none" : selectUiPlan(opts.files, loaded.map, needsUi),
     });
   } catch (err) {
     return failed([`classement impossible: ${err && err.message ? err.message : err}`]);
@@ -421,13 +424,13 @@ function main(argv = process.argv.slice(2)) {
     return printResult(classify(opts), schema, true);
   } catch (err) {
     return printResult(result({
-      path: "fast",
-      needs_ui: false,
+      path: "ui",
+      needs_ui: true,
       features: [],
       mode: "full",
       ok: false,
       errors: [`classement impossible: ${err && err.message ? err.message : err}`],
-      ui_plan: "none",
+      ui_plan: "ui-full",
     }), schema, false);
   }
 }
@@ -452,6 +455,8 @@ module.exports = {
   DEFAULT_MAP,
   DEFAULT_SCHEMA,
   SKILL_ROOT,
+  FULL_VERIFY_LABEL,
+  NEEDS_UI_LABEL,
 };
 
 if (require.main === module) {

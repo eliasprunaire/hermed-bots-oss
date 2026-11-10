@@ -143,8 +143,9 @@ test("carte paths:[{}] : ok=false, erreur explicite, pas de classement fast", ()
     const json = parseOut(res);
     assertSchema(json);
     assert.equal(json.ok, false);
-    assert.equal(json.path, "fast");
-    assert.equal(json.needs_ui, false);
+    assert.equal(json.path, "ui");
+    assert.equal(json.needs_ui, true);
+    assert.equal(json.ui_plan, "ui-full");
     assert.match(json.errors.join("\n"), /glob manquant/);
   } finally {
     rmSync(tmp.dir, { recursive: true, force: true });
@@ -169,26 +170,107 @@ test("fonctionnalité nulle : JSON ok=false, pas d'exception", () => {
     const json = parseOut(res);
     assertSchema(json);
     assert.equal(json.ok, false);
+    assert.equal(json.path, "ui");
+    assert.equal(json.needs_ui, true);
+    assert.equal(json.ui_plan, "ui-full");
     assert.match(json.errors.join("\n"), /fonctionnalité nulle/);
   } finally {
     rmSync(tmp.dir, { recursive: true, force: true });
   }
 });
 
-test("feature map absente: exit ≠ 0, ok=false, erreur explicite", () => {
-  const res = run([
+test("carte absente, puis carte illisible : path=ui", () => {
+  const missing = run([
     "--dry-run",
     "--files",
     "Packages/HermesAdapter/Sources/HermesAdapter/Contract.swift",
     "--feature-map",
     join(FIXTURES, "missing", "map.v1.json"),
   ]);
-  assert.notEqual(res.status, 0);
+  assert.notEqual(missing.status, 0);
+  const missingJson = parseOut(missing);
+  assertSchema(missingJson);
+  assert.equal(missingJson.ok, false);
+  assert.equal(missingJson.path, "ui");
+  assert.equal(missingJson.needs_ui, true);
+  assert.equal(missingJson.ui_plan, "ui-full");
+  assert.match(missingJson.errors.join("\n"), /feature map absente/);
+
+  const dir = mkdtempSync(join(tmpdir(), "hv-classify-unreadable-"));
+  const file = join(dir, "map.v1.json");
+  try {
+    writeFileSync(file, "{ pas du json\n");
+    const unreadable = run([
+      "--dry-run",
+      "--files",
+      "README.md",
+      "--feature-map",
+      file,
+    ]);
+    assert.notEqual(unreadable.status, 0);
+    const json = parseOut(unreadable);
+    assertSchema(json);
+    assert.equal(json.ok, false);
+    assert.equal(json.path, "ui");
+    assert.equal(json.needs_ui, true);
+    assert.equal(json.ui_plan, "ui-full");
+    assert.match(json.errors.join("\n"), /feature map illisible/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("label needs-ui sur un diff documentaire : path=ui", () => {
+  const res = run([
+    "--dry-run",
+    "--files",
+    "README.md,docs/distribution.md",
+    "--label",
+    "needs-ui",
+  ]);
+  assert.equal(res.status, 0, res.stderr);
   const json = parseOut(res);
   assertSchema(json);
-  assert.equal(json.ok, false);
+  assert.equal(json.path, "ui");
+  assert.equal(json.needs_ui, true);
+  assert.equal(json.ok, true);
+  assert.equal(json.ui_plan, "ui-full");
+  assert.equal(json.mode, "full");
+});
+
+test("cas #123 sans label : Swift d'interface et docs → path=ui", () => {
+  const res = run([
+    "--dry-run",
+    "--files",
+    [
+      "HermedBots/Settings/ConnectionView.swift",
+      "HermedBots/Settings/UpdatesSettingsView.swift",
+      "HermedBots/App/AppModel.swift",
+      "HermedBots/App/HermedBotsApp.swift",
+      "HermedBots/Shared/ShotScene.swift",
+      "HermedBots/Transport/SSHTunnel.swift",
+      "README.md",
+    ].join(","),
+  ]);
+  assert.equal(res.status, 0, res.stderr);
+  const json = parseOut(res);
+  assertSchema(json);
+  assert.equal(json.path, "ui");
+  assert.equal(json.needs_ui, true);
+  assert.equal(json.ok, true);
+  assert.equal(json.ui_plan, "ui-full");
+});
+
+test("diff documentaire pur, carte valide, sans label : path=fast", () => {
+  const res = run(["--dry-run", "--files", "README.md,docs/distribution.md"]);
+  assert.equal(res.status, 0, res.stderr);
+  const json = parseOut(res);
+  assertSchema(json);
   assert.equal(json.path, "fast");
-  assert.match(json.errors.join("\n"), /feature map absente/);
+  assert.equal(json.needs_ui, false);
+  assert.equal(json.ok, true);
+  assert.equal(json.ui_plan, "none");
+  assert.deepEqual(json.errors, []);
 });
 
 test("la sortie dry-run valide le schéma v1", () => {
