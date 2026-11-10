@@ -52,5 +52,6 @@ struct SettingsWindow: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(minWidth: SettingsLayout.defaultWidth)
+        .preferredColorScheme(model.testDarkAppearance ? .dark : nil)
     }
 }

@@ -930,8 +930,34 @@ test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", ()
   const lacunes = readFileSync(join(baselines, "LACUNES-PNG.md"), "utf8");
   const listed = [...lacunes.matchAll(/- LACUNE binaire : `([^`]+)`/g)].map((m) => m[1]);
   assert.ok(listed.includes(stale));
+  assert.ok(listed.includes("unreachable.png"));
   assert.ok(listed.length > 40, String(listed.length));
+  assert.match(
+    lacunes,
+    /`unreachable\.png` — montrait une erreur brute ; à recapturer après correctif/,
+  );
+  const settingsDark = [
+    "piste1-about-connecting-large-dark.png",
+    "piste1-about-connecting-standard-dark.png",
+    "piste1-about-failed-large-dark.png",
+    "piste1-about-failed-standard-dark.png",
+    "piste1-about-ready-large-dark.png",
+    "piste1-about-ready-standard-dark.png",
+    "piste1-about-untested-large-dark.png",
+    "piste1-about-untested-standard-dark.png",
+    "piste1-connection-large-dark.png",
+    "piste1-connection-standard-dark.png",
+  ];
+  for (const name of settingsDark) {
+    assert.ok(listed.includes(name), name);
+    const line = lacunes.split("\n").find((row) => row.includes("`" + name + "`"));
+    assert.match(String(line), /réglages à fond clair/);
+  }
   for (const name of listed) {
+    if (name === "unreachable.png") {
+      assert.equal(existsSync(join(baselines, name)), true, name);
+      continue;
+    }
     assert.equal(existsSync(join(baselines, name)), false, name);
   }
 });
