@@ -936,7 +936,11 @@ test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", ()
     lacunes,
     /`unreachable\.png` — montrait une erreur brute ; à recapturer après correctif/,
   );
-  const settingsDark = [
+  const settingsDarkConnection = [
+    "piste1-connection-large-dark.png",
+    "piste1-connection-standard-dark.png",
+  ];
+  const settingsDarkAbout = [
     "piste1-about-connecting-large-dark.png",
     "piste1-about-connecting-standard-dark.png",
     "piste1-about-failed-large-dark.png",
@@ -945,13 +949,19 @@ test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", ()
     "piste1-about-ready-standard-dark.png",
     "piste1-about-untested-large-dark.png",
     "piste1-about-untested-standard-dark.png",
-    "piste1-connection-large-dark.png",
-    "piste1-connection-standard-dark.png",
   ];
-  for (const name of settingsDark) {
+  for (const name of settingsDarkConnection) {
+    assert.equal(existsSync(join(baselines, name)), true, name);
+    assert.equal(listed.includes(name), false, name);
+  }
+  for (const name of settingsDarkAbout) {
     assert.ok(listed.includes(name), name);
+    assert.equal(existsSync(join(baselines, name)), false, name);
     const line = lacunes.split("\n").find((row) => row.includes("`" + name + "`"));
-    assert.match(String(line), /réglages à fond clair/);
+    assert.match(
+      String(line),
+      /texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif/,
+    );
   }
   for (const name of listed) {
     if (name === "unreachable.png") {
