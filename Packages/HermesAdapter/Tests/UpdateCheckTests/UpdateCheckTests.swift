@@ -92,8 +92,9 @@ final class UpdateCheckTests: XCTestCase {
     func testIdleAndACheckWithNoUpdateAreUpToDate() {
         let driver = FakeUpdateDriver()
         let updates = UpdateCheck(driver: driver)
-        XCTAssertEqual(updates.state, .upToDate)
-        XCTAssertEqual(updates.state.statusText, "Hermed Bots est à jour.")
+        XCTAssertEqual(updates.state, .idle)
+        XCTAssertEqual(updates.state.statusText, "")
+        XCTAssertFalse(updates.state.showsStatus)
         XCTAssertFalse(updates.state.showsInstall)
         updates.checkForUpdates()
         XCTAssertEqual(updates.state, .checking)
@@ -102,8 +103,32 @@ final class UpdateCheckTests: XCTestCase {
         updates.noteSessionEnded()
         XCTAssertEqual(updates.state, .upToDate)
         XCTAssertEqual(updates.state.statusText, UpdateCheckCopy.upToDate)
+        XCTAssertTrue(updates.state.showsStatus)
         XCTAssertFalse(updates.state.showsInstall)
         XCTAssertTrue(updates.canCheck)
+    }
+
+    func testTheUpToDateCopyAppearsOnlyAfterASuccessfulCheck() {
+        let driver = FakeUpdateDriver()
+        let updates = UpdateCheck(driver: driver)
+        XCTAssertNotEqual(updates.state, .upToDate)
+        XCTAssertNotEqual(updates.state.statusText, UpdateCheckCopy.upToDate)
+        XCTAssertFalse(updates.state.showsStatus)
+        updates.checkForUpdates()
+        XCTAssertEqual(updates.state, .checking)
+        XCTAssertNotEqual(updates.state.statusText, UpdateCheckCopy.upToDate)
+        updates.noteFailed()
+        updates.noteSessionEnded()
+        XCTAssertEqual(updates.state, .error)
+        XCTAssertNotEqual(updates.state.statusText, UpdateCheckCopy.upToDate)
+        updates.checkForUpdates()
+        updates.noteUpToDate()
+        XCTAssertNotEqual(updates.state.statusText, UpdateCheckCopy.upToDate)
+        updates.noteSessionEnded()
+        XCTAssertEqual(updates.state, .upToDate)
+        XCTAssertEqual(updates.state.statusText, "Hermed Bots est à jour.")
+        XCTAssertTrue(updates.state.showsStatus)
+        XCTAssertFalse(updates.state.showsInstall)
     }
 
     func testARunningCheckShowsTheCheckingStatusAndDisablesAnotherCheck() {

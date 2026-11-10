@@ -47,12 +47,12 @@ Noms encore absents :
 - LACUNE binaire : `issue56-hv-bot-a.png`
 - LACUNE binaire : `issue56-hv-bot-b.png`
 - LACUNE binaire : `issue58-version-missing-key.png`
-- LACUNE binaire : `piste1-about-connecting-large-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
-- LACUNE binaire : `piste1-about-connecting-standard-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
-- LACUNE binaire : `piste1-about-failed-large-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
-- LACUNE binaire : `piste1-about-failed-standard-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
-- LACUNE binaire : `piste1-about-ready-large-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
-- LACUNE binaire : `piste1-about-ready-standard-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
-- LACUNE binaire : `piste1-about-untested-large-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
-- LACUNE binaire : `piste1-about-untested-standard-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
-- LACUNE binaire : `unreachable.png` — montrait une erreur brute ; à recapturer après correctif
+- LACUNE binaire : `piste1-about-connecting-large-dark.png` — statut « à jour » hors carte avant recherche ; à recapturer (dans la carte, secondaire, seulement après recherche réussie)
+- LACUNE binaire : `piste1-about-connecting-standard-dark.png` — statut « à jour » hors carte avant recherche ; à recapturer (dans la carte, secondaire, seulement après recherche réussie)
+- LACUNE binaire : `piste1-about-failed-large-dark.png` — statut « à jour » hors carte avant recherche ; à recapturer (dans la carte, secondaire, seulement après recherche réussie)
+- LACUNE binaire : `piste1-about-failed-standard-dark.png` — statut « à jour » hors carte avant recherche ; à recapturer (dans la carte, secondaire, seulement après recherche réussie)
+- LACUNE binaire : `piste1-about-ready-large-dark.png` — statut « à jour » hors carte avant recherche ; à recapturer (dans la carte, secondaire, seulement après recherche réussie)
+- LACUNE binaire : `piste1-about-ready-standard-dark.png` — statut « à jour » hors carte avant recherche ; à recapturer (dans la carte, secondaire, seulement après recherche réussie)
+- LACUNE binaire : `piste1-about-untested-large-dark.png` — statut « à jour » hors carte avant recherche ; à recapturer (dans la carte, secondaire, seulement après recherche réussie)
+- LACUNE binaire : `piste1-about-untested-standard-dark.png` — statut « à jour » hors carte avant recherche ; à recapturer (dans la carte, secondaire, seulement après recherche réussie)
+- LACUNE binaire : `unreachable.png` — 2e ligne tronquée ; à recapturer après le texte court

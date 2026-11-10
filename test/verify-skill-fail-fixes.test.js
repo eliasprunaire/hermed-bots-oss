@@ -934,7 +934,7 @@ test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", ()
   assert.ok(listed.length > 40, String(listed.length));
   assert.match(
     lacunes,
-    /`unreachable\.png` — montrait une erreur brute ; à recapturer après correctif/,
+    /`unreachable\.png` — 2e ligne tronquée ; à recapturer après le texte court/,
   );
   const settingsDarkConnection = [
     "piste1-connection-large-dark.png",
@@ -960,7 +960,7 @@ test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", ()
     const line = lacunes.split("\n").find((row) => row.includes("`" + name + "`"));
     assert.match(
       String(line),
-      /texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif/,
+      /statut « à jour » hors carte avant recherche ; à recapturer \(dans la carte, secondaire, seulement après recherche réussie\)/,
     );
   }
   for (const name of listed) {

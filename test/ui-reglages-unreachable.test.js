@@ -7,7 +7,8 @@ const { test } = require("node:test");
 
 const ROOT = join(__dirname, "..");
 const SCHEME = "preferredColorScheme(model.testDarkAppearance ? .dark : nil)";
-const UNAVAILABLE = "Liste des bots indisponible. Réessayez quand la liaison est rétablie.";
+const UNAVAILABLE = "Liste des bots indisponible. Réessayez plus tard.";
+const LONG_UNAVAILABLE = "Réessayez quand la liaison est rétablie.";
 
 function read(rel) {
   return readFileSync(join(ROOT, rel), "utf8");
@@ -43,10 +44,11 @@ test("the Settings scene applies the same appearance override as the main window
   assert.equal(settings.includes("Color.black"), false);
 });
 
-test("the sidebar failed state shows a fixed grey copy without interpolating the error or a second retry", () => {
+test("the sidebar failed state shows a short grey copy without interpolating the error or a second retry", () => {
   const view = read("HermedBots/Bots/BotListView.swift");
   const model = read("HermedBots/Bots/BotsModel.swift");
   assert.equal(model.includes(UNAVAILABLE), true);
+  assert.equal(model.includes(LONG_UNAVAILABLE), false);
   assert.match(view, /BotsModel\.listUnavailableMessage/);
 
   const failed = caseBody(view, ".failed");
@@ -60,4 +62,31 @@ test("the sidebar failed state shows a fixed grey copy without interpolating the
 
   assert.match(model, /recordListFailure/);
   assert.match(model, /journalSink/);
+});
+
+test("the About pane shows the Sparkle up-to-date copy only after a successful check, inside the card, in secondary color", () => {
+  const check = read("Packages/HermesAdapter/Sources/UpdateCheck/UpdateCheck.swift");
+  assert.match(check, /case idle/);
+  assert.match(check, /state: UpdateCheckState = \.idle/);
+  assert.match(check, /settled: UpdateCheckState = \.idle/);
+  assert.match(check, /case \.idle: ""/);
+  assert.doesNotMatch(check, /state: UpdateCheckState = \.upToDate/);
+  assert.doesNotMatch(check, /settled: UpdateCheckState = \.upToDate/);
+
+  const view = read("HermedBots/Settings/UpdatesSettingsView.swift");
+  const bodyStart = view.indexOf("var body: some View {");
+  const statusRowDef = view.indexOf("private var statusRow");
+  assert.ok(bodyStart >= 0 && statusRowDef > bodyStart, "body/statusRow absents");
+  const body = view.slice(bodyStart, statusRowDef);
+  const form = (body.match(/Form \{[\s\S]*?\n        \}\n        \.formStyle\(\.grouped\)/) || [""])[0];
+  assert.match(form, /statusRow/);
+  assert.match(form, /SettingsCopy\.checkForUpdates/);
+  const afterForm = body.split(".formStyle(.grouped)")[1] || "";
+  assert.equal(afterForm.includes("statusRow"), false, afterForm);
+  assert.equal(view.includes("foregroundStyle(.green)"), false);
+  assert.match(view, /case \.idle:\s*\n\s*EmptyView\(\)/);
+  assert.match(
+    view,
+    /case \.upToDate:[\s\S]*?Text\(UpdateCheckCopy\.upToDate\)[\s\S]*?foregroundStyle\(\.secondary\)/,
+  );
 });

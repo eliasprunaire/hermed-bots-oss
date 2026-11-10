@@ -38,6 +38,8 @@ public enum UpdateCheckCopy {
 }
 
 public enum UpdateCheckState: Equatable, Sendable {
+    /// Aucune recherche n'a encore abouti : l'écran À propos n'affiche aucun statut Sparkle.
+    case idle
     case upToDate
     case checking
     case available(version: String)
@@ -48,8 +50,13 @@ public enum UpdateCheckState: Equatable, Sendable {
         return false
     }
 
+    public var showsStatus: Bool {
+        self != .idle
+    }
+
     public var statusText: String {
         switch self {
+        case .idle: ""
         case .upToDate: UpdateCheckCopy.upToDate
         case .checking: UpdateCheckCopy.checking
         case .available(let version): UpdateCheckCopy.available(version)
@@ -59,10 +66,10 @@ public enum UpdateCheckState: Equatable, Sendable {
 }
 
 public final class UpdateCheck {
-    public private(set) var state: UpdateCheckState = .upToDate
+    public private(set) var state: UpdateCheckState = .idle
     public var onChange: (() -> Void)?
     private let driver: any UpdateDriver
-    private var settled: UpdateCheckState = .upToDate
+    private var settled: UpdateCheckState = .idle
     private var sessionActive = false
 
     public init(driver: any UpdateDriver) {

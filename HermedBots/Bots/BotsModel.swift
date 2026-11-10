@@ -52,7 +52,7 @@ final class BotsModel {
     var threads: [String: Threads] { shown.threads }
     var expanded: Set<String> { shown.expanded }
 
-    static let listUnavailableMessage = String(localized: "Liste des bots indisponible. Réessayez quand la liaison est rétablie.")
+    static let listUnavailableMessage = String(localized: "Liste des bots indisponible. Réessayez plus tard.")
 
     nonisolated private static let journal = Logger(subsystem: Bundle.main.bundleIdentifier ?? "HermedBots", category: "bots")
     nonisolated static let journalSink = OSAllocatedUnfairLock<@Sendable (String) -> Void>(initialState: { journal.error("\($0, privacy: .public)") })
