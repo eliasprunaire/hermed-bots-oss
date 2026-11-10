@@ -47,14 +47,12 @@ Noms encore absents :
 - LACUNE binaire : `issue56-hv-bot-a.png`
 - LACUNE binaire : `issue56-hv-bot-b.png`
 - LACUNE binaire : `issue58-version-missing-key.png`
-- LACUNE binaire : `piste1-about-connecting-large-dark.png` — réglages à fond clair
-- LACUNE binaire : `piste1-about-connecting-standard-dark.png` — réglages à fond clair
-- LACUNE binaire : `piste1-about-failed-large-dark.png` — réglages à fond clair
-- LACUNE binaire : `piste1-about-failed-standard-dark.png` — réglages à fond clair
-- LACUNE binaire : `piste1-about-ready-large-dark.png` — réglages à fond clair
-- LACUNE binaire : `piste1-about-ready-standard-dark.png` — réglages à fond clair
-- LACUNE binaire : `piste1-about-untested-large-dark.png` — réglages à fond clair
-- LACUNE binaire : `piste1-about-untested-standard-dark.png` — réglages à fond clair
-- LACUNE binaire : `piste1-connection-large-dark.png` — réglages à fond clair
-- LACUNE binaire : `piste1-connection-standard-dark.png` — réglages à fond clair
+- LACUNE binaire : `piste1-about-connecting-large-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
+- LACUNE binaire : `piste1-about-connecting-standard-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
+- LACUNE binaire : `piste1-about-failed-large-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
+- LACUNE binaire : `piste1-about-failed-standard-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
+- LACUNE binaire : `piste1-about-ready-large-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
+- LACUNE binaire : `piste1-about-ready-standard-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
+- LACUNE binaire : `piste1-about-untested-large-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
+- LACUNE binaire : `piste1-about-untested-standard-dark.png` — texte d'état de mise à jour « à jour » affiché à tort en bas de À propos ; à recapturer après correctif
 - LACUNE binaire : `unreachable.png` — montrait une erreur brute ; à recapturer après correctif
