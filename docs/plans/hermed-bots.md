@@ -766,6 +766,8 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 **You see.**
 
+The chat does not show calibration or a turn count.
+
 - [ ] With `set_model` dropped, `hd.banner.degraded.feature.set_model` explains it and the conversation still works.
 
 **Verify, unit.** Tests alone are not sufficient verification. A PR is verified only when its unit, live, and perf boxes are all checked.

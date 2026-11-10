@@ -22,6 +22,7 @@ final class Compat: HD12Harness {
         send()
         completed()
         XCTAssertFalse(element("hd.loop.tokens").exists)
+        assertNoLoopCalibration()
         XCTAssertFalse(element("hd.banner.error").exists)
     }
 
@@ -70,6 +71,7 @@ final class Compat: HD12Harness {
         completed()
         XCTAssertTrue(element("hd.loop.tokens").exists)
         XCTAssertTrue(text("hd.loop.tokens").contains("désactivé"))
+        assertNoLoopCalibration()
         HVShot.capture("hd12-no-tokens", app)
     }
 

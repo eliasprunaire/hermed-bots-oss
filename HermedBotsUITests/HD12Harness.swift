@@ -113,4 +113,11 @@ class HD12Harness: XCTestCase {
         XCTAssertTrue(element("hd.conversation.state").waitForExistence(timeout: 30))
         XCTAssertTrue(text("hd.conversation.state").contains("terminé"))
     }
+
+    func assertNoLoopCalibration(file: StaticString = #filePath, line: UInt = #line) {
+        let labels = app!.staticTexts.allElementsBoundByIndex.map(\.label)
+        for phrase in ["Garde non calibré", "Garde fondé", "tours observés", "Seuils non mesurés"] {
+            XCTAssertFalse(labels.contains { $0.contains(phrase) }, phrase, file: file, line: line)
+        }
+    }
 }

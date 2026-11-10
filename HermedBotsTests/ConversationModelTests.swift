@@ -68,6 +68,30 @@ final class ConversationModelTests: XCTestCase {
         return try XCTUnwrap(GateProtocol.requests.first(where: match), "requête \(method) …\(pathEnd) absente")
     }
 
+    private func pauseCard(_ notice: LoopNotice?) -> LoopNotice.Pause? {
+        switch notice {
+        case .paused(let pause), .pausedAndTokensDisabled(let pause): return pause
+        default: return nil
+        }
+    }
+
+    private func assertNoCalibration(_ notice: LoopNotice?, file: StaticString = #filePath, line: UInt = #line) {
+        let copy: String
+        switch notice {
+        case nil:
+            copy = ""
+        case .tokensDisabled:
+            copy = LoopNotice.tokensDisabledCaption
+        case .paused(let pause):
+            copy = [pause.title, pause.approval, pause.notification].compactMap { $0 }.joined(separator: "\n")
+        case .pausedAndTokensDisabled(let pause):
+            copy = [pause.title, pause.approval, pause.notification, LoopNotice.tokensDisabledCaption].compactMap { $0 }.joined(separator: "\n")
+        }
+        for phrase in ["Garde non calibré", "Garde fondé", "tours observés", "Seuils non mesurés"] {
+            XCTAssertFalse(copy.contains(phrase), phrase, file: file, line: line)
+        }
+    }
+
     /// Ouvre un fil vide : le modèle a un bot, un fil et rien à lire
     private func openEmptyThread(_ model: ConversationModel, session: String) async throws {
         model.open(session: session, of: bot)
@@ -151,6 +175,8 @@ final class ConversationModelTests: XCTestCase {
         try await held(2, "GET", "/v1/runs/r1/events").reply(String(repeating: call, count: 3) + completedTurn("hidden"))
         await eventually("pause visible") { model.pauseCause != nil }
         XCTAssertEqual(model.pauseCause, .repeatedToolCall(count: 3))
+        XCTAssertEqual(pauseCard(model.loopNotice)?.title, "Boucle en pause : Appel d'outil répété 3 fois.")
+        assertNoCalibration(model.loopNotice)
         XCTAssertFalse(model.isBusy)
         model.draft = "do not send"
         XCTAssertFalse(model.canSend)
@@ -203,10 +229,12 @@ final class ConversationModelTests: XCTestCase {
         let calls = (0..<4).map { "data: {\"event\":\"tool.started\",\"tool\":\"terminal\",\"preview\":\"call-\($0)\"}\n\n" }.joined()
         try await held(62, "GET", "/v1/runs/calibrated/events").reply(calls + completedTurn("hidden"))
         await eventually("seuil appris") { model.pauseCause != nil }
-        XCTAssertEqual(model.loopThresholds?.basis, .history(turns: 20))
         XCTAssertEqual(model.pauseCause, .toolCount(count: 4, limit: 3))
+        XCTAssertEqual(pauseCard(model.loopNotice)?.title, "Boucle en pause : 4 appels d'outils dépassent la limite de 3.")
+        assertNoCalibration(model.loopNotice)
         model.select(bot: "other")
-        XCTAssertNil(model.loopThresholds)
+        XCTAssertNil(model.pauseCause)
+        XCTAssertNil(model.loopNotice)
         model.draft = "cold"
         model.send()
         try await held(63, "POST", "/api/sessions").reply(#"{"session":{"id":"other"}}"#)
@@ -215,7 +243,7 @@ final class ConversationModelTests: XCTestCase {
         try await held(66, "GET", "/messages").reply(emptyTranscript)
         await eventually("autre bot fini") { !model.isBusy }
         XCTAssertNil(model.pauseCause)
-        XCTAssertEqual(model.loopThresholds?.basis, .coldStart(turns: 0))
+        XCTAssertEqual(model.loopNotice, .tokensDisabled)
         connect(link, to: hostB)
         model.select(bot: bot)
         model.draft = "cold on B"
@@ -226,7 +254,41 @@ final class ConversationModelTests: XCTestCase {
         try await held(70, "GET", "/messages").reply(emptyTranscript)
         await eventually("autre hôte fini") { !model.isBusy }
         XCTAssertNil(model.pauseCause)
-        XCTAssertEqual(model.loopThresholds?.basis, .coldStart(turns: 0))
+        XCTAssertEqual(model.loopNotice, .tokensDisabled)
+    }
+
+    func testARunningTurnWithoutUsageShowsTheTokenCaption() async throws {
+        let model = makeModel()
+        try await openEmptyThread(model, session: "t")
+        XCTAssertNil(model.loopNotice)
+        model.draft = "go"
+        model.send()
+        try await heldRequest("POST", "/v1/runs").reply(#"{"run_id":"r1"}"#)
+        let events = try await heldRequest("GET", "/v1/runs/r1/events")
+        events.open()
+        events.send(#"data: {"event":"message.delta","delta":"ok"}"# + "\n\n")
+        await eventually("légende pendant le tour") { model.loopNotice == .tokensDisabled }
+        XCTAssertNotEqual(model.conversation.end, .completed)
+        assertNoCalibration(model.loopNotice)
+        try await finishTurn(events, with: #"data: {"event":"run.completed","output":"ok"}"# + "\n\n")
+        await eventually("tour fini sans relevé") { model.conversation.end == .completed }
+        XCTAssertEqual(model.loopNotice, .tokensDisabled)
+        assertNoCalibration(model.loopNotice)
+    }
+
+    func testACompletedTurnWithUsageShowsNoLoopNotice() async throws {
+        let model = makeModel()
+        try await openEmptyThread(model, session: "thread")
+        model.draft = "go"
+        model.send()
+        try await held(1, "POST", "/v1/runs").reply(#"{"run_id":"r1"}"#)
+        try await held(2, "GET", "/v1/runs/r1/events").reply(
+            #"data: {"event":"run.completed","output":"ok","usage":{"total_tokens":12}}"# + "\n\n: stream closed\n\n"
+        )
+        try await held(3, "GET", "/messages").reply(emptyTranscript)
+        await eventually("tour fini avec relevé") { model.conversation.end == .completed }
+        XCTAssertNil(model.loopNotice)
+        XCTAssertEqual(model.tokenSignal, .active)
     }
 
     func testAPausedApprovalStaysAvailableForTheBanner() async throws {
