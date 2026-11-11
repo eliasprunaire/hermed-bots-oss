@@ -930,7 +930,12 @@ test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", ()
   const lacunes = readFileSync(join(baselines, "LACUNES-PNG.md"), "utf8");
   const listed = [...lacunes.matchAll(/- LACUNE binaire : `([^`]+)`/g)].map((m) => m[1]);
   assert.ok(listed.includes(stale));
-  assert.equal(listed.length, 36, String(listed.length));
+  assert.equal(listed.length, 27, String(listed.length));
+  assert.match(
+    lacunes,
+    /Les 26 PNG déjà versionnés dans `UIReferences\/` \(hors `issue58-version-missing-key\.png`/,
+  );
+  assert.match(lacunes, /Les noms ci-dessous n'ont toujours pas de binaire/);
   const settingsDark = [
     "piste1-connection-large-dark.png",
     "piste1-connection-standard-dark.png",
@@ -945,6 +950,21 @@ test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", ()
     "unreachable.png",
   ];
   for (const name of settingsDark) {
+    assert.equal(existsSync(join(baselines, name)), true, name);
+    assert.equal(listed.includes(name), false, name);
+  }
+  const promotedDesignHd15 = [
+    "design-compact-home.png",
+    "design-dark-conversation.png",
+    "design-dark-home.png",
+    "hd15-approval.png",
+    "hd15-double.png",
+    "hd15-drop.png",
+    "hd15-idle.png",
+    "hd15-kept.png",
+    "hd15-no-tunnel.png",
+  ];
+  for (const name of promotedDesignHd15) {
     assert.equal(existsSync(join(baselines, name)), true, name);
     assert.equal(listed.includes(name), false, name);
   }

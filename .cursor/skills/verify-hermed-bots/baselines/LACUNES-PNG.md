@@ -11,10 +11,7 @@ Les 26 PNG déjà versionnés dans `UIReferences/` (hors `issue58-version-missin
 
 Noms encore absents :
 
-- LACUNE binaire : `design-compact-conversation.png`
-- LACUNE binaire : `design-compact-home.png`
-- LACUNE binaire : `design-dark-conversation.png`
-- LACUNE binaire : `design-dark-home.png`
+- LACUNE binaire : `design-compact-conversation.png` — défaut d'interface en fenêtre compacte (Nouvelle session masquée), à corriger puis recapturer
 - LACUNE binaire : `hd07-connection.png`
 - LACUNE binaire : `hd07-refuse-prod.png`
 - LACUNE binaire : `hd07-tunnel.png`
@@ -25,24 +22,18 @@ Noms encore absents :
 - LACUNE binaire : `hd12-notification-authorization.png`
 - LACUNE binaire : `hd12-trunk-no-banners.png`
 - LACUNE binaire : `hd13-cut-trunk.png`
-- LACUNE binaire : `hd13-local-state.png`
-- LACUNE binaire : `hd13-loop-guard.png`
-- LACUNE binaire : `hd13-ten-min-banner.png`
-- LACUNE binaire : `hd14-approval.png`
-- LACUNE binaire : `hd14-drop.png`
-- LACUNE binaire : `hd14-held.png`
-- LACUNE binaire : `hd14-no-write.png`
-- LACUNE binaire : `hd14-other.png`
-- LACUNE binaire : `hd14-release.png`
-- LACUNE binaire : `hd14-taken.png`
+- LACUNE binaire : `hd13-local-state.png` — clé API absente en environnement de test
+- LACUNE binaire : `hd13-loop-guard.png` — clé API absente en environnement de test
+- LACUNE binaire : `hd13-ten-min-banner.png` — clé API absente en environnement de test
+- LACUNE binaire : `hd14-approval.png` — clé API absente en environnement de test
+- LACUNE binaire : `hd14-drop.png` — clé API absente en environnement de test
+- LACUNE binaire : `hd14-held.png` — clé API absente en environnement de test
+- LACUNE binaire : `hd14-no-write.png` — clé API absente en environnement de test
+- LACUNE binaire : `hd14-other.png` — clé API absente en environnement de test
+- LACUNE binaire : `hd14-release.png` — clé API absente en environnement de test
+- LACUNE binaire : `hd14-taken.png` — clé API absente en environnement de test
 - LACUNE binaire : `hd14-trunk-held.png`
-- LACUNE binaire : `hd15-approval.png`
-- LACUNE binaire : `hd15-double.png`
-- LACUNE binaire : `hd15-drop.png`
-- LACUNE binaire : `hd15-idle.png`
-- LACUNE binaire : `hd15-kept.png`
-- LACUNE binaire : `hd15-no-tunnel.png`
-- LACUNE binaire : `hd15-stop-all.png`
+- LACUNE binaire : `hd15-stop-all.png` — image identique à hd15-kept, ne prouve pas les trois arrêts
 - LACUNE binaire : `hd15-trunk-no-button.png`
 - LACUNE binaire : `issue56-hv-bot-a.png`
 - LACUNE binaire : `issue56-hv-bot-b.png`
