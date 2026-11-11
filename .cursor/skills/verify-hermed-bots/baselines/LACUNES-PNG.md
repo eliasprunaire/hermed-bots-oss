@@ -22,16 +22,9 @@ Noms encore absents :
 - LACUNE binaire : `hd12-notification-authorization.png`
 - LACUNE binaire : `hd12-trunk-no-banners.png`
 - LACUNE binaire : `hd13-cut-trunk.png`
-- LACUNE binaire : `hd13-local-state.png` — clé API absente en environnement de test
-- LACUNE binaire : `hd13-loop-guard.png` — clé API absente en environnement de test
-- LACUNE binaire : `hd13-ten-min-banner.png` — clé API absente en environnement de test
-- LACUNE binaire : `hd14-approval.png` — clé API absente en environnement de test
-- LACUNE binaire : `hd14-drop.png` — clé API absente en environnement de test
-- LACUNE binaire : `hd14-held.png` — clé API absente en environnement de test
-- LACUNE binaire : `hd14-no-write.png` — clé API absente en environnement de test
-- LACUNE binaire : `hd14-other.png` — clé API absente en environnement de test
-- LACUNE binaire : `hd14-release.png` — clé API absente en environnement de test
-- LACUNE binaire : `hd14-taken.png` — clé API absente en environnement de test
+- LACUNE binaire : `hd13-loop-guard.png` — le test du garde-boucle échoue (outil courant non affiché dans le délai), à investiguer
+- LACUNE binaire : `hd14-drop.png` — défaut d'interface : ligne technique brute dans le bandeau, texte « Mode dégradé » répété sous chaque bot, à corriger puis recapturer
+- LACUNE binaire : `hd14-held.png` — défaut d'interface : deux bandeaux identiques empilés, à corriger puis recapturer
 - LACUNE binaire : `hd14-trunk-held.png`
 - LACUNE binaire : `hd15-stop-all.png` — image identique à hd15-kept, ne prouve pas les trois arrêts
 - LACUNE binaire : `hd15-trunk-no-button.png`
