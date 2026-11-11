@@ -1643,13 +1643,15 @@ final class RemoteLoginShellTests: XCTestCase {
     /// Bandeau dégradé : les deux phrases, sans la ligne technique brute ; pastille courte à côté
     @MainActor
     func testDroppedDetectionBannerOmitsTheTechnicalLineAndUsesAShortPill() async {
-        let lock = ProfileLock(connection: { "lab.invalid" }, read: {
+        let connection: @MainActor () -> String = { "lab.invalid" }
+        let lock = ProfileLock(connection: connection, read: {
             throw SSHFailure.unreachable("détection Desktop indisponible")
         })
-        let refreshed = await lock.refresh()
+        let refreshed: Bool = await lock.refresh()
         XCTAssertFalse(refreshed)
         let reason = lock.reason("hv-bot-a") ?? ""
-        let expected = (ProfileLock.State.unknown.reason ?? "") + "\nCause : " + ProfileLock.unreachableCause
+        let unknown = ProfileLock.State.unknown.reason ?? ""
+        let expected = unknown + "\nCause : " + ProfileLock.unreachableCause
         XCTAssertEqual(reason, expected)
         XCTAssertFalse(reason.contains("détection Desktop indisponible"), reason)
         XCTAssertEqual(reason.split(whereSeparator: \.isNewline).count, 2)
@@ -1659,10 +1661,11 @@ final class RemoteLoginShellTests: XCTestCase {
     /// Profil tenu : le bandeau garde la phrase entière, la barre latérale la pastille courte
     @MainActor
     func testAHeldProfileKeepsTheFullBannerAndAShortSidebarPill() async {
-        let lock = ProfileLock(connection: { "lab.invalid" }, read: {
+        let connection: @MainActor () -> String = { "lab.invalid" }
+        let lock = ProfileLock(connection: connection, read: {
             Data(#"{"held": ["hv-bot-a"]}"#.utf8)
         })
-        let refreshed = await lock.refresh()
+        let refreshed: Bool = await lock.refresh()
         XCTAssertTrue(refreshed)
         XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.held.reason)
         XCTAssertEqual(lock.sidebarLabel("hv-bot-a"), "Tenu par Desktop")
