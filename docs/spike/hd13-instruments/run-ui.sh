@@ -25,6 +25,13 @@ only=()
 for t in "${tests[@]}"; do case "$t" in HermedBots*) only+=(-only-testing:"$t") ;; *) only+=(-only-testing:"HermedBotsUITests/$t") ;; esac; done
 
 "$SK/hv-guard.sh" snapshot "$HV_EVIDENCE/guard-before.txt" || exit $?
+# une clé par profil servi, comme hv-run.sh ui fake : sans elle l'app n'a aucune adresse d'API et Tout arrêter reste grisé
+HV_TEST_API_KEYS=$(python3 - "$ROOT/Packages/HermesAdapter/Tests/HermesAdapterTests/Fixtures/hermes-current/contract.json" <<'PYKEYS'
+import json, secrets, sys
+print(json.dumps({profile: secrets.token_urlsafe(32) for profile in json.load(open(sys.argv[1]))["profiles"]["served"]}))
+PYKEYS
+) || exit 32
+export HV_TEST_API_KEYS TEST_RUNNER_HV_TEST_API_KEYS=$HV_TEST_API_KEYS
 HV_PORT=18643 "$SK/hv-hermes-env.sh" up fake || exit $?
 python3 "$ROOT/docs/spike/hd13-instruments/cut-proxy.py" > "$HV_EVIDENCE/proxy.log" 2>&1 & PROXY=$!
 for _ in {1..25}; do curl -fsS http://127.0.0.1:18642/_hv/ready >/dev/null 2>&1 && break; sleep 0.2; done
