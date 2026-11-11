@@ -56,6 +56,40 @@ test("every VM guard opens for the test VM account and closes for any other acco
   }
 });
 
+test("hd13 and hd14 run-ui.sh emit HV_TEST_API_KEYS like hd15 before xcodebuild", () => {
+  const files = [
+    join(SPIKE, "hd13-instruments", "run-ui.sh"),
+    join(SPIKE, "hd14-instruments", "run-ui.sh"),
+    join(SPIKE, "hd15-instruments", "run-ui.sh"),
+  ];
+  for (const path of files) {
+    const text = readFileSync(path, "utf8");
+    const rel = relative(ROOT, path);
+    assert.match(
+      text,
+      /HV_TEST_API_KEYS=\$\(python3 - .*contract\.json"? <<'PYKEYS'/,
+      `${rel} : bloc python3/contract.json absent`,
+    );
+    assert.match(text, /secrets\.token_urlsafe\(32\)/, `${rel} : token_urlsafe(32) absent`);
+    assert.match(text, /\["profiles"\]\["served"\]/, `${rel} : profiles.served absent`);
+    assert.match(text, /\) \|\| exit 32/, `${rel} : || exit 32 absent`);
+    assert.match(
+      text,
+      /export HV_TEST_API_KEYS TEST_RUNNER_HV_TEST_API_KEYS=\$HV_TEST_API_KEYS/,
+      `${rel} : export des deux variables absent`,
+    );
+    const exported = text.indexOf("export HV_TEST_API_KEYS TEST_RUNNER_HV_TEST_API_KEYS=$HV_TEST_API_KEYS");
+    const xcode = text.indexOf("xcodebuild test-without-building");
+    assert.ok(exported !== -1 && xcode !== -1 && exported < xcode, `${rel} : export après xcodebuild`);
+  }
+  const hd13 = readFileSync(join(SPIKE, "hd13-instruments", "run-ui.sh"), "utf8");
+  assert.match(
+    hd13,
+    /python3 - "\$ROOT\/Packages\/HermesAdapter\/Tests\/HermesAdapterTests\/Fixtures\/hermes-current\/contract\.json"/,
+    "hd13 : contract.json hors ROOT",
+  );
+});
+
 test("every skill path follows HV_SKILL_SCRIPTS", () => {
   const assignments = SHELL.flatMap((path) => readFileSync(path, "utf8").split("\n").filter((line) => /^SK=/.test(line)).map((line) => [path, line]));
   assert.ok(assignments.length >= 10, `trop peu de lignes SK= trouvées : ${assignments.length}`);
