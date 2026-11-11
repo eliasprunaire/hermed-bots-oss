@@ -54,9 +54,10 @@ struct ContentView: View {
                 }
             }
             .overlay(alignment: .top) { ConnectingPill(model: model) }
-            // dans la barre d'outils et non dans la barre latérale : l'arrêt reste visible quand l'utilisateur masque la barre latérale
+            // dans la barre d'outils et non dans la barre latérale : l'arrêt reste visible, ou dans le débordement, quand l'utilisateur masque la barre latérale
             .toolbar {
                 ToolbarItem(placement: .primaryAction) { StopAllButton(model: model.killSwitch) }
+                    .visibilityPriority(.low)
             }
             .animation(.easeOut(duration: 0.2), value: model.isCheckingAPI)
         }
