@@ -78,8 +78,9 @@ struct Conversation: Equatable {
     }
 
     /// Une lecture qui échoue ne touche pas à la fin du dernier tour : `begin` l'a déjà effacée pour un tour en cours
+    /// Un message vide ramène le fil à l'idle sans bandeau rouge : le verrou de profil a déjà le sien
     mutating func fail(_ message: String) {
-        failure = message
+        failure = message.isEmpty ? nil : message
         phase = .idle
     }
 

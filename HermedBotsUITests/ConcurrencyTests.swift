@@ -32,7 +32,7 @@ final class ConcurrencyTests: HD12Harness {
 
     private func waitBlocked() {
         XCTAssertTrue(element(reason).waitForExistence(timeout: 10))
-        XCTAssertTrue(text(reason).contains("Hermes Desktop"))
+        XCTAssertTrue(text(reason).contains("Tenu par Desktop"))
         XCTAssertFalse(element("hd.composer.send").isEnabled)
     }
 

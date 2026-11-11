@@ -243,15 +243,32 @@ final class ConversationModel {
 
     var profileLockReason: String? { botID.flatMap { profileLock?.reason($0) } }
 
+    /// Erreur d'ouverture montrée : le verrou de profil n'est pas une erreur
+    var displayedOpenError: String? {
+        guard let openError, openError != profileLockReason else { return nil }
+        return openError
+    }
+
+    /// Échec de lecture ou de tour montré : le verrou de profil n'est pas une erreur
+    var displayedFailure: String? {
+        guard let failure = conversation.failure, failure != profileLockReason else { return nil }
+        return failure
+    }
+
+    /// Bandeaux de verrou ou d'erreur produits pour la conversation : le tenu n'en a qu'un
+    var lockAndErrorBannerCount: Int {
+        (profileLockReason == nil ? 0 : 1) + (displayedOpenError == nil ? 0 : 1) + (displayedFailure == nil ? 0 : 1)
+    }
+
     private func permits(_ key: ConversationMachine.Key, on host: String, queueOnUnknown: Bool = false) async -> Bool {
         guard let profileLock, host == connection() else { return true }
         guard await profileLock.permits(key.bot, on: host) else {
             // Les effets gardent leur traitement d'une liaison quittée, dont l'approbation mise en attente
             guard host == connection() else { return true }
             if queueOnUnknown, profileLock.state(key.bot, on: host) == .unknown { return false }
-            let reason = profileLock.reason(key.bot, on: host) ?? String(localized: "Détection de Hermes Desktop en cours, réessayez.")
-            apply(.modelFailed(key, reason), on: host)
-            apply(.failed(key, reason), on: host)
+            // le bandeau orange du verrou est la seule source d'affichage : pas d'erreur rouge avec la même phrase
+            apply(.modelFailed(key, ""), on: host)
+            apply(.failed(key, ""), on: host)
             return false
         }
         return true
@@ -610,8 +627,8 @@ final class ConversationModel {
                     try await Task.sleep(for: approvalRetry)
                     continue
                 }
-                if let profileLock, let reason = profileLock.reason(key.bot, on: connection) {
-                    apply(.failed(key, reason), on: connection)
+                if let profileLock, profileLock.reason(key.bot, on: connection) != nil {
+                    apply(.failed(key, ""), on: connection)
                     return
                 }
                 if case .pause = loopReports[runKey]?.verdict { return }
