@@ -27,7 +27,13 @@ final class ConversationModelTests: XCTestCase {
         configuration.protocolClasses = [GateProtocol.self]
         // hôte factice en `.invalid` (RFC 6761) : il ne se résout jamais, GateProtocol répond à sa place
         let client = HermesClient(baseURL: URL(string: "http://hermes.invalid")!, configuration: configuration)
-        return ConversationModel(client: { reachable ? client : nil }, connection: profileLock == nil ? nil : { "http://hermes.invalid" }, bots: bots, listedThread: listedThread, startedReads: startedReads, approvalRetry: approvalRetry, profileLock: profileLock, resumeStore: resumeStore, onAPIError: onAPIError, unauthorizedOpenMessage: unauthorizedOpenMessage)
+        let connection: (@MainActor () -> String)?
+        if profileLock == nil {
+            connection = nil
+        } else {
+            connection = { "http://hermes.invalid" }
+        }
+        return ConversationModel(client: { reachable ? client : nil }, connection: connection, bots: bots, listedThread: listedThread, startedReads: startedReads, approvalRetry: approvalRetry, profileLock: profileLock, resumeStore: resumeStore, onAPIError: onAPIError, unauthorizedOpenMessage: unauthorizedOpenMessage)
     }
 
     /// L'état d'un fil du bot de test, qu'il soit à l'écran ou non
