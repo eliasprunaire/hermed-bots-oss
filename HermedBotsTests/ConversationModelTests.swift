@@ -21,13 +21,13 @@ final class ConversationModelTests: XCTestCase {
     /// `reachable: false` : aucun client, comme quand le tunnel n'est pas ouvert
     /// `bots`, `listedThread` et `startedReads` sont ce que la barre latérale sait : les profils actifs, ce que la liste des fils dit d'un fil (son modèle, le numéro de la lecture), et le numéro de la dernière lecture partie
     /// `approvalRetry` est l'attente entre deux essais d'une décision qui ne part pas
-    private func makeModel(reachable: Bool = true, bots: @escaping @MainActor () -> [Bot] = { [] }, listedThread: @escaping @MainActor (String, String) -> (model: String?, read: Int)? = { _, _ in nil }, startedReads: @escaping @MainActor () -> Int = { 0 }, approvalRetry: Duration = .milliseconds(20), resumeStore: ResumeStore? = nil, onAPIError: @escaping @MainActor (Error, String) -> Void = { _, _ in }, unauthorizedOpenMessage: @escaping @MainActor (String) -> String = { HermesAPIKey.unauthorizedMessage(profile: $0, holdsKey: true) }) -> ConversationModel {
+    private func makeModel(reachable: Bool = true, bots: @escaping @MainActor () -> [Bot] = { [] }, listedThread: @escaping @MainActor (String, String) -> (model: String?, read: Int)? = { _, _ in nil }, startedReads: @escaping @MainActor () -> Int = { 0 }, approvalRetry: Duration = .milliseconds(20), resumeStore: ResumeStore? = nil, profileLock: ProfileLock? = nil, onAPIError: @escaping @MainActor (Error, String) -> Void = { _, _ in }, unauthorizedOpenMessage: @escaping @MainActor (String) -> String = { HermesAPIKey.unauthorizedMessage(profile: $0, holdsKey: true) }) -> ConversationModel {
         GateProtocol.reset()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [GateProtocol.self]
         // hôte factice en `.invalid` (RFC 6761) : il ne se résout jamais, GateProtocol répond à sa place
         let client = HermesClient(baseURL: URL(string: "http://hermes.invalid")!, configuration: configuration)
-        return ConversationModel(client: { reachable ? client : nil }, bots: bots, listedThread: listedThread, startedReads: startedReads, approvalRetry: approvalRetry, resumeStore: resumeStore, onAPIError: onAPIError, unauthorizedOpenMessage: unauthorizedOpenMessage)
+        return ConversationModel(client: { reachable ? client : nil }, connection: profileLock == nil ? nil : { "http://hermes.invalid" }, bots: bots, listedThread: listedThread, startedReads: startedReads, approvalRetry: approvalRetry, profileLock: profileLock, resumeStore: resumeStore, onAPIError: onAPIError, unauthorizedOpenMessage: unauthorizedOpenMessage)
     }
 
     /// L'état d'un fil du bot de test, qu'il soit à l'écran ou non
@@ -2007,6 +2007,45 @@ final class ConversationModelTests: XCTestCase {
         await eventually("usage serveur") { model.compaction.source == .server }
         XCTAssertEqual(model.compaction.usedTokens, 70_000)
         XCTAssertTrue(model.compaction.isCompacted)
+    }
+
+    /// Un profil tenu : un seul bandeau (orange, cadenas), pas le rouge doublon avec la même phrase
+    func testAHeldProfileProducesASingleLockBannerWithoutARedDuplicate() async throws {
+        let lock = ProfileLock(connection: { "http://hermes.invalid" }, read: {
+            Data(#"{"held": ["hv-bot"]}"#.utf8)
+        })
+        XCTAssertTrue(await lock.refresh())
+        let model = makeModel(profileLock: lock)
+        model.activate(bot: bot)
+        try await held(0, "GET", "/api/sessions").reply(#"{"data":[{"id":"s-held","title":"Fil"}],"pagination":{"has_more":false}}"#)
+        await eventually("verrou tenu") { model.profileLockReason != nil && !model.isOpening && !model.isLoading }
+        XCTAssertEqual(model.profileLockReason, ProfileLock.State.held.reason)
+        XCTAssertNil(model.displayedOpenError)
+        XCTAssertNil(model.displayedFailure)
+        XCTAssertEqual(model.lockAndErrorBannerCount, 1)
+        XCTAssertEqual(model.profileLock?.sidebarLabel(bot), "Tenu par Desktop")
+        XCTAssertFalse(model.canSend)
+        model.presentOpenError("Impossible d'ouvrir hv-bot.", profile: bot)
+        XCTAssertEqual(model.displayedOpenError, "Impossible d'ouvrir hv-bot.")
+        XCTAssertEqual(model.lockAndErrorBannerCount, 2)
+    }
+
+    /// Détection indisponible : le bandeau a deux phrases, jamais la ligne brute ; pastille « Dégradé »
+    func testDroppedDetectionBannerOmitsTheTechnicalLine() async throws {
+        let lock = ProfileLock(connection: { "http://hermes.invalid" }, read: {
+            throw SSHFailure.unreachable("détection Desktop indisponible")
+        })
+        XCTAssertFalse(await lock.refresh())
+        let model = makeModel(profileLock: lock)
+        model.select(bot: bot)
+        let reason = try XCTUnwrap(model.profileLockReason)
+        XCTAssertTrue(reason.hasPrefix(ProfileLock.State.unknown.reason ?? "?"))
+        XCTAssertTrue(reason.contains(ProfileLock.unreachableCause), reason)
+        XCTAssertFalse(reason.contains("détection Desktop indisponible"), reason)
+        XCTAssertEqual(reason.split(whereSeparator: \.isNewline).count, 2)
+        XCTAssertNil(model.displayedOpenError)
+        XCTAssertEqual(model.lockAndErrorBannerCount, 1)
+        XCTAssertEqual(model.profileLock?.sidebarLabel(bot), "Dégradé")
     }
 }
 

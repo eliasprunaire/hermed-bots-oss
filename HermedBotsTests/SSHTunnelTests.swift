@@ -1606,6 +1606,7 @@ final class RemoteLoginShellTests: XCTestCase {
             (ProfileProbeFailure.failed(status: 1), "la sonde a échoué (code 1)"),
             (ProfileProbeFailure.timedOut, "n'a pas répondu"),
             (SSHFailure.unreachable("délai dépassé"), "la machine Hermes ne répond pas"),
+            (SSHFailure.unreachable("détection Desktop indisponible"), ProfileLock.unreachableCause),
         ] {
             failure = error
             let read = await lock.refresh()
@@ -1637,6 +1638,33 @@ final class RemoteLoginShellTests: XCTestCase {
         let latest = lock.reason("hv-bot-a") ?? ""
         XCTAssertTrue(latest.contains("n'a pas répondu"), latest)
         XCTAssertFalse(latest.contains("CocoaError"), latest)
+    }
+
+    /// Bandeau dégradé : les deux phrases, sans la ligne technique brute ; pastille courte à côté
+    @MainActor
+    func testDroppedDetectionBannerOmitsTheTechnicalLineAndUsesAShortPill() async {
+        let lock = ProfileLock(connection: { "lab.invalid" }, read: {
+            throw SSHFailure.unreachable("détection Desktop indisponible")
+        })
+        XCTAssertFalse(await lock.refresh())
+        let reason = lock.reason("hv-bot-a") ?? ""
+        let expected = (ProfileLock.State.unknown.reason ?? "") + "\nCause : " + ProfileLock.unreachableCause
+        XCTAssertEqual(reason, expected)
+        XCTAssertFalse(reason.contains("détection Desktop indisponible"), reason)
+        XCTAssertEqual(reason.split(whereSeparator: \.isNewline).count, 2)
+        XCTAssertEqual(lock.sidebarLabel("hv-bot-a"), "Dégradé")
+    }
+
+    /// Profil tenu : le bandeau garde la phrase entière, la barre latérale la pastille courte
+    @MainActor
+    func testAHeldProfileKeepsTheFullBannerAndAShortSidebarPill() async {
+        let lock = ProfileLock(connection: { "lab.invalid" }, read: {
+            Data(#"{"held": ["hv-bot-a"]}"#.utf8)
+        })
+        XCTAssertTrue(await lock.refresh())
+        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.held.reason)
+        XCTAssertEqual(lock.sidebarLabel("hv-bot-a"), "Tenu par Desktop")
+        XCTAssertNil(lock.sidebarLabel("hv-bot-b"))
     }
 
     /// La cause d'un hôte ne s'affiche pas pour un autre

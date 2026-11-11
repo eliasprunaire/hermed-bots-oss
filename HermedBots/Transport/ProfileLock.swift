@@ -16,6 +16,15 @@ final class ProfileLock {
             case .unknown: String(localized: "Mode dégradé : la détection de Hermes Desktop est indisponible. Les écritures de ce profil sont bloquées.")
             }
         }
+
+        /// Pastille courte de la barre latérale ; le bandeau de conversation garde `reason`
+        var sidebarLabel: String? {
+            switch self {
+            case .free: nil
+            case .held: String(localized: "Tenu par Desktop")
+            case .unknown: String(localized: "Dégradé")
+            }
+        }
     }
 
     private struct Snapshot {
@@ -46,6 +55,11 @@ final class ProfileLock {
         let state = state(profile, on: host)
         guard state == .unknown, let base = state.reason, let cause = causes[host ?? connection()] else { return state.reason }
         return base + "\n" + String(localized: "Cause : \(cause)")
+    }
+
+    /// Pastille de la barre latérale pour ce profil ; nil s'il est libre
+    func sidebarLabel(_ profile: String, on host: String? = nil) -> String? {
+        state(profile, on: host).sidebarLabel
     }
 
     func run() async {
@@ -94,12 +108,25 @@ final class ProfileLock {
         return held != nil
     }
 
+    /// Cause affichée pour un hôte injoignable : vouvoiement, sans ligne technique brute
+    static let unreachableCause = String(localized: "hôte injoignable. Vérifiez le réseau, puis réessayez.")
+
     private static func cause(of error: Error) -> String? {
         switch error {
-        case let failure as ProfileProbeFailure: failure.message
-        // un tunnel fermé ou en réouverture a sa propre bannière : ce n'est pas une panne de la sonde
-        case let failure as SSHFailure where failure != .tunnelClosed: failure.message
-        default: nil
+        case let failure as ProfileProbeFailure:
+            return failure.message
+        case let failure as SSHFailure:
+            switch failure {
+            case .tunnelClosed:
+                return nil
+            case .unreachable(let detail):
+                if detail == "délai dépassé" { return String(localized: "la machine Hermes ne répond pas") }
+                return unreachableCause
+            default:
+                return failure.message
+            }
+        default:
+            return nil
         }
     }
 

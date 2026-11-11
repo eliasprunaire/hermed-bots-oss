@@ -377,7 +377,7 @@ struct ConversationMachine: Equatable {
         case .modelFailed(let key, let error):
             guard var thread = threads[key], thread.pendingModel != nil else { return [] }
             thread.pendingModel = nil
-            thread.modelError = error
+            thread.modelError = error.isEmpty ? nil : error
             // le premier tour n'est pas parti : il ne part pas sur un autre modèle que celui qui a été choisi
             if thread.waitingMessage != nil {
                 thread.waitingMessage = nil

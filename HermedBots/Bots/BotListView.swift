@@ -16,7 +16,7 @@ struct BotListView: View {
                 BotChangeNotice(change: change, apply: model.validateChange)
             }
             ForEach(model.list.shown ?? []) { bot in
-                BotRow(bot: bot, isSelected: bot.id == selectedBot, activity: activity(bot.id), lockReason: profileLock.reason(bot.id)) {
+                BotRow(bot: bot, isSelected: bot.id == selectedBot, activity: activity(bot.id), lockLabel: profileLock.sidebarLabel(bot.id), lockHelp: profileLock.reason(bot.id)) {
                     select(bot.id)
                 }
             }
@@ -62,7 +62,8 @@ struct BotRow: View {
     let bot: Bot
     let isSelected: Bool
     let activity: ConversationMachine.Activity
-    let lockReason: String?
+    let lockLabel: String?
+    let lockHelp: String?
     let toggle: () -> Void
     @State private var hovered = false
 
@@ -84,13 +85,12 @@ struct BotRow: View {
                         .accessibilityIdentifier(AccessibilityID.botModel(bot.id))
                 }
             }
-            if let lockReason {
-                Text(lockReason)
+            if let lockLabel {
+                Text(lockLabel)
                     .font(.caption)
                     .foregroundStyle(.orange)
-                    // la cause d'une panne de la sonde peut tenir sur plusieurs lignes : la barre latérale en garde deux
-                    .lineLimit(2)
-                    .help(lockReason)
+                    .lineLimit(1)
+                    .help(lockHelp ?? lockLabel)
                     .accessibilityIdentifier(AccessibilityID.botLock(bot.id))
             }
             Spacer(minLength: 0)

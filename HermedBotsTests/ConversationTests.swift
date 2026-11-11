@@ -95,6 +95,14 @@ final class ConversationTests: XCTestCase {
         XCTAssertEqual(conversation.phase, .idle)
     }
 
+    func testAnEmptyFailureSettlesWithoutARedBanner() {
+        var conversation = Conversation()
+        _ = conversation.begin("Bonjour")
+        conversation.fail("")
+        XCTAssertNil(conversation.failure)
+        XCTAssertEqual(conversation.phase, .idle)
+    }
+
     func testANewSendClearsTheLastStateAndFailure() {
         var conversation = Conversation()
         _ = conversation.begin("un")

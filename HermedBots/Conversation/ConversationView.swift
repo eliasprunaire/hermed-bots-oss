@@ -41,7 +41,7 @@ struct ConversationView: View {
                 .glassEffect(.regular, in: .capsule)
                 .padding(.top, 4)
             }
-            if let error = model.openError {
+            if let error = model.displayedOpenError {
                 NoticeCard(tint: .red, symbol: "exclamationmark.triangle.fill") {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
                         Text(error).accessibilityID(.conversationError)
@@ -200,7 +200,7 @@ struct ConversationView: View {
             if let end = model.conversation.end {
                 TurnEndRow(end: end, detail: model.conversation.endDetail).padding(.leading, 36)
             }
-            if let failure = model.conversation.failure {
+            if let failure = model.displayedFailure {
                 NoticeCard(tint: .red, symbol: "exclamationmark.triangle.fill") {
                     Text(failure).lineLimit(6).accessibilityID(.conversationError)
                 }
