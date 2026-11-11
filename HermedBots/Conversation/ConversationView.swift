@@ -89,11 +89,20 @@ struct ConversationView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { model.newSession() } label: { Label("Nouvelle session", systemImage: "square.and.pencil") }
-                    .labelStyle(.titleAndIcon)
-                    .accessibilityID(.sessionNew)
-                    .disabled(model.stopInProgress || model.profileLockReason != nil)
+                Button { model.newSession() } label: {
+                    ViewThatFits(in: .horizontal) {
+                        Label("Nouvelle session", systemImage: "square.and.pencil")
+                            .labelStyle(.titleAndIcon)
+                        Label("Nouvelle session", systemImage: "square.and.pencil")
+                            .labelStyle(.iconOnly)
+                    }
+                }
+                .help("Nouvelle session")
+                .accessibilityLabel("Nouvelle session")
+                .accessibilityID(.sessionNew)
+                .disabled(model.stopInProgress || model.profileLockReason != nil)
             }
+            .visibilityPriority(.high)
         }
     }
 
