@@ -1646,7 +1646,8 @@ final class RemoteLoginShellTests: XCTestCase {
         let lock = ProfileLock(connection: { "lab.invalid" }, read: {
             throw SSHFailure.unreachable("détection Desktop indisponible")
         })
-        XCTAssertFalse(await lock.refresh())
+        let refreshed = await lock.refresh()
+        XCTAssertFalse(refreshed)
         let reason = lock.reason("hv-bot-a") ?? ""
         let expected = (ProfileLock.State.unknown.reason ?? "") + "\nCause : " + ProfileLock.unreachableCause
         XCTAssertEqual(reason, expected)
@@ -1661,7 +1662,8 @@ final class RemoteLoginShellTests: XCTestCase {
         let lock = ProfileLock(connection: { "lab.invalid" }, read: {
             Data(#"{"held": ["hv-bot-a"]}"#.utf8)
         })
-        XCTAssertTrue(await lock.refresh())
+        let refreshed = await lock.refresh()
+        XCTAssertTrue(refreshed)
         XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.held.reason)
         XCTAssertEqual(lock.sidebarLabel("hv-bot-a"), "Tenu par Desktop")
         XCTAssertNil(lock.sidebarLabel("hv-bot-b"))

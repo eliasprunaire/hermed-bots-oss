@@ -2014,7 +2014,8 @@ final class ConversationModelTests: XCTestCase {
         let lock = ProfileLock(connection: { "http://hermes.invalid" }, read: {
             Data(#"{"held": ["hv-bot"]}"#.utf8)
         })
-        XCTAssertTrue(await lock.refresh())
+        let refreshed = await lock.refresh()
+        XCTAssertTrue(refreshed)
         let model = makeModel(profileLock: lock)
         model.activate(bot: bot)
         try await held(0, "GET", "/api/sessions").reply(#"{"data":[{"id":"s-held","title":"Fil"}],"pagination":{"has_more":false}}"#)
@@ -2035,7 +2036,8 @@ final class ConversationModelTests: XCTestCase {
         let lock = ProfileLock(connection: { "http://hermes.invalid" }, read: {
             throw SSHFailure.unreachable("détection Desktop indisponible")
         })
-        XCTAssertFalse(await lock.refresh())
+        let refreshed = await lock.refresh()
+        XCTAssertFalse(refreshed)
         let model = makeModel(profileLock: lock)
         model.select(bot: bot)
         let reason = try XCTUnwrap(model.profileLockReason)
