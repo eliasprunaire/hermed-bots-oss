@@ -93,6 +93,31 @@ async function waitReady(port, env) {
   throw new Error("fake Hermes did not become ready");
 }
 
+function parseSse(raw) {
+  const events = [];
+  let id = null;
+  for (const line of String(raw).split(/\r?\n/)) {
+    if (line.startsWith("id: ")) id = Number(line.slice(4));
+    else if (line.startsWith("data: ")) events.push({ id, data: JSON.parse(line.slice(6)) });
+  }
+  return events;
+}
+
+function toolStartedGaps(events) {
+  const started = events.filter((ev) => ev.data && ev.data.event === "tool.started");
+  const gaps = [];
+  for (let i = 1; i < started.length; i++) {
+    gaps.push(started[i].data.timestamp - started[i - 1].data.timestamp);
+  }
+  return { started, gaps };
+}
+
+function runStarts(log) {
+  return (log || []).filter(
+    (row) => row.m === "POST" && typeof row.p === "string" && row.p.endsWith("/v1/runs") && row.s === 202,
+  );
+}
+
 test("profile health and session messages match HermesAdapter", async () => {
   const port = await freePort();
   const child = await waitReady(port, {});
@@ -144,6 +169,60 @@ test("SSE log records message.delta text at emit time", async () => {
       deltas.some((row) => row.body === " d00" && typeof row.t === "number"),
       JSON.stringify(deltas),
     );
+  } finally {
+    child.kill("SIGTERM");
+  }
+});
+
+test("fake Hermes HV_LOOP honors HV_PACE_<ms> between tool.started", async () => {
+  const port = await freePort();
+  const child = await waitReady(port, { HV_TEST_API_KEY: "pace-loop-key" });
+  const auth = { Authorization: "Bearer pace-loop-key" };
+  async function loop(input) {
+    const started = await request(port, "/p/hv-bot-a/v1/runs", {
+      method: "POST",
+      headers: auth,
+      body: JSON.stringify({ input }),
+    });
+    assert.equal(started.status, 202, started.raw);
+    const runId = started.json && started.json.run_id;
+    assert.ok(runId);
+    const events = await request(port, `/p/hv-bot-a/v1/runs/${runId}/events`, { headers: auth });
+    assert.equal(events.status, 200, events.raw);
+    return { runId, parsed: parseSse(events.raw) };
+  }
+  try {
+    const paced = await loop("HV_LOOP HV_PACE_500 go");
+    const pacedGaps = toolStartedGaps(paced.parsed);
+    assert.equal(pacedGaps.started.length, 3, JSON.stringify(paced.parsed.map((ev) => ev.data.event)));
+    assert.ok(pacedGaps.gaps.length >= 1);
+    for (const gap of pacedGaps.gaps) {
+      assert.ok(gap >= 0.35 && gap <= 0.7, `HV_PACE_500 gap=${gap}`);
+    }
+    const logPaced = await request(port, "/_hv/log");
+    assert.equal(runStarts(logPaced.json).length, 1, JSON.stringify(runStarts(logPaced.json)));
+
+    const replay = await request(port, `/p/hv-bot-a/v1/runs/${paced.runId}/events`, {
+      headers: { ...auth, "Last-Event-ID": "0" },
+    });
+    assert.equal(replay.status, 200, replay.raw);
+    const replayed = parseSse(replay.raw);
+    assert.equal(replayed[0] && replayed[0].id, 1, JSON.stringify(replayed.map((ev) => ev.id)));
+    assert.equal(replayed.filter((ev) => ev.data.event === "tool.started").length, 2);
+    assert.equal(replayed.filter((ev) => ev.data.event === "run.completed").length, 1);
+
+    const reset = await request(port, "/_hv/reset", { method: "POST", body: "{}" });
+    assert.equal(reset.status, 200, reset.raw);
+
+    const plain = await loop("HV_LOOP go");
+    const plainGaps = toolStartedGaps(plain.parsed);
+    assert.equal(plainGaps.started.length, 3);
+    assert.ok(plainGaps.gaps.length >= 1);
+    for (const gap of plainGaps.gaps) {
+      assert.ok(gap >= 0.02 && gap <= 0.15, `default gap=${gap}`);
+    }
+    const logPlain = await request(port, "/_hv/log");
+    assert.equal(runStarts(logPlain.json).length, 1, JSON.stringify(runStarts(logPlain.json)));
   } finally {
     child.kill("SIGTERM");
   }
