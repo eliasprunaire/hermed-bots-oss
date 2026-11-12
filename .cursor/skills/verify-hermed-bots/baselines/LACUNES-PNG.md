@@ -21,7 +21,6 @@ Noms encore absents :
 - LACUNE binaire : `hd12-notification-authorization.png`
 - LACUNE binaire : `hd12-trunk-no-banners.png`
 - LACUNE binaire : `hd13-cut-trunk.png`
-- LACUNE binaire : `hd13-loop-guard.png` — le test du garde-boucle échoue (outil courant non affiché dans le délai), à investiguer
 - LACUNE binaire : `hd14-trunk-held.png`
 - LACUNE binaire : `hd15-stop-all.png` — image identique à hd15-kept, ne prouve pas les trois arrêts
 - LACUNE binaire : `hd15-trunk-no-button.png`

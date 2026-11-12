@@ -1006,7 +1006,7 @@ test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", ()
   const lacunes = readFileSync(join(baselines, "LACUNES-PNG.md"), "utf8");
   const listed = [...lacunes.matchAll(/- LACUNE binaire : `([^`]+)`/g)].map((m) => m[1]);
   assert.ok(listed.includes(stale));
-  assert.equal(listed.length, 17, String(listed.length));
+  assert.equal(listed.length, 16, String(listed.length));
   assert.match(
     lacunes,
     /Les 26 PNG déjà versionnés dans `UIReferences\/` \(hors `issue58-version-missing-key\.png`/,
@@ -1035,6 +1035,7 @@ test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", ()
     "design-dark-conversation.png",
     "design-dark-home.png",
     "hd13-local-state.png",
+    "hd13-loop-guard.png",
     "hd13-ten-min-banner.png",
     "hd14-approval.png",
     "hd14-drop.png",
