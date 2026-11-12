@@ -1,5 +1,6 @@
 import AppSettings
 import Foundation
+import LoopGuard
 
 struct AppEnvironment {
     var secrets: SecretStore
@@ -19,10 +20,32 @@ struct AppEnvironment {
     /// Mode test seulement : scène figée pour les captures XCUITest, sans réseau
     var testShotScene: String?
 
+    /// Texte fixe du bandeau de pause en mode test : aucun appel à `UNUserNotificationCenter`
+    static let testPauseNotification = "Notification de test."
+    /// Hors mode test, le bandeau montre d'abord cette ligne pendant la demande d'autorisation macOS
+    static let pauseNotificationPending = "Autorisation des notifications en attente."
+
     /// Le mode test refuse l'hôte factice `example-host`. Hors mode test, aucun hôte n'est refusé.
     var refuseTestHost: Bool { isTestMode }
 
+    /// En mode test, le bandeau de pause n'appelle pas `UNUserNotificationCenter`
+    var postsLoopPauseNotifications: Bool { !isTestMode }
+
+    /// Première ligne de notification du bandeau : texte fixe en mode test, attente d'autorisation hors mode test
+    var pauseNotificationLine: String {
+        postsLoopPauseNotifications ? Self.pauseNotificationPending : Self.testPauseNotification
+    }
+
+    /// En mode test, ignore `product` et renvoie `testPauseNotification` ; hors mode test, conserve l'injection fournie
+    func pauseNotifier(
+        product: @escaping @Sendable (LoopGuard.Cause) async -> String
+    ) -> @Sendable (LoopGuard.Cause) async -> String {
+        if postsLoopPauseNotifications { return product }
+        return { _ in Self.testPauseNotification }
+    }
+
     /// Le mode test n'existe que dans un build Debug : une Release ignore `HV_TEST_MODE`, `HV_TEST_API_KEY`, `HV_TEST_API_KEYS`, `HV_TEST_SSH_KEY`, `HV_API_URL`, `HV_HANG_MS` et `HV_SSH_*`
+    /// En mode test, `pauseNotifier` n'appelle pas `UNUserNotificationCenter`
     /// `keychain` est une fabrique pour qu'un test prouve que le Trousseau n'est pas même construit en mode test
     static func resolve(_ environment: [String: String], defaults: UserDefaults = .standard, keychain: () -> SecretStore = { KeychainSecretStore() }) -> AppEnvironment {
         #if DEBUG

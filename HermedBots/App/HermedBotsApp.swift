@@ -273,7 +273,7 @@ struct HermedBotsApp: App {
 
     init() {
         let environment = AppEnvironment.resolve(ProcessInfo.processInfo.environment)
-        let notifyPause: @Sendable (LoopGuard.Cause) async -> String = { await LoopPauseNotifications.shared.post(cause: $0) }
+        let notifyPause = environment.pauseNotifier { await LoopPauseNotifications.shared.post(cause: $0) }
         #if DEBUG
         let updates = UpdateCheck(driver: NullUpdateDriver())
         _model = State(initialValue: AppModel(environment: environment, updates: updates, notifyPause: notifyPause))

@@ -132,6 +132,7 @@ final class ConversationModel {
     private let onRetryOpen: @MainActor () -> Void
     private let unauthorizedOpenMessage: @MainActor (String) -> String
     private let notifyPause: @Sendable (LoopGuard.Cause) async -> String
+    private let pauseNotificationPending: String
     private let approvalRetry: Duration
     let profileLock: ProfileLock?
 
@@ -155,7 +156,8 @@ final class ConversationModel {
         onAPIError: @escaping @MainActor (Error, String) -> Void = { _, _ in },
         onRetryOpen: @escaping @MainActor () -> Void = {},
         unauthorizedOpenMessage: @escaping @MainActor (String) -> String = { HermesAPIKey.unauthorizedMessage(profile: $0, holdsKey: true) },
-        notifyPause: @escaping @Sendable (LoopGuard.Cause) async -> String = { _ in "Notification indisponible." }
+        notifyPause: @escaping @Sendable (LoopGuard.Cause) async -> String = { _ in "Notification indisponible." },
+        pauseNotificationPending: String = AppEnvironment.pauseNotificationPending
     ) {
         self.resumeStore = resumeStore
         self.startRun = startRun
@@ -169,6 +171,7 @@ final class ConversationModel {
         self.approvalRetry = approvalRetry
         self.profileLock = profileLock
         self.notifyPause = notifyPause
+        self.pauseNotificationPending = pauseNotificationPending
         self.onAPIError = onAPIError
         self.onRetryOpen = onRetryOpen
         self.unauthorizedOpenMessage = unauthorizedOpenMessage
@@ -730,7 +733,7 @@ final class ConversationModel {
         #if DEBUG
         pauseTimes[key] = Date().timeIntervalSince1970
         #endif
-        notifications[key] = "Autorisation des notifications en attente."
+        notifications[key] = pauseNotificationPending
         Task { notifications[key] = await notifyPause(cause) }
         return false
     }

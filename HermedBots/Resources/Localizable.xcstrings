@@ -222,6 +222,12 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "unknown" } }
       }
     },
+    "L'affichage et l'envoi sont suspendus. Hermes peut continuer sur le serveur. Utilisez « Tout arrêter » pour l'arrêter." : {
+      "localizations" : {
+        "fr" : { "stringUnit" : { "state" : "translated", "value" : "L'affichage et l'envoi sont suspendus. Hermes peut continuer sur le serveur. Utilisez « Tout arrêter » pour l'arrêter." } },
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Display and sending are suspended. Hermes may continue on the server. Use “Tout arrêter” to stop it." } }
+      }
+    },
     "L'agent SSH est verrouillé ou vide." : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The SSH agent is locked or empty." } }
