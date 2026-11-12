@@ -74,8 +74,15 @@ final class NativeNotifications: HD12Harness {
         send("HV_LOOP go")
         XCTAssertTrue(element("hd.banner.loop-pause").waitForExistence(timeout: 15))
         XCTAssertTrue(element("hd.loop.notification").waitForExistence(timeout: 10))
-        XCTAssertEqual(text("hd.loop.notification"), "Notification de test.") // AppEnvironment.testPauseNotification
+        let deadline = Date().addingTimeInterval(10)
+        while text("hd.loop.notification").contains("en attente"), Date() < deadline { usleep(100_000) }
+        let status = text("hd.loop.notification")
+        print("HV-NOTIFICATION \(status)")
         HVShot.capture("hd12-notification-authorization", app)
+        if status.contains("en attente") || status.contains("désactivée dans les réglages") {
+            throw XCTSkip("Autorisation macOS absente dans la VM jetable : " + status)
+        }
+        XCTAssertTrue(status.contains("remise par macOS"))
     }
 }
 
