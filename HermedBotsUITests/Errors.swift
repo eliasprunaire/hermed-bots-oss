@@ -67,6 +67,11 @@ final class Errors: HD12Harness {
 
 @MainActor
 final class NativeNotifications: HD12Harness {
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        nativePauseNotification = true
+    }
+
     func testLoopPauseNotificationDelivery() throws {
         configure()
         let app = launch()

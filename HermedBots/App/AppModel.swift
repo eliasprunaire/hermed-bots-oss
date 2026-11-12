@@ -186,7 +186,7 @@ final class AppModel {
         notifyPause: @escaping @Sendable (LoopGuard.Cause) async -> String = { _ in "Notification indisponible." }
     ) {
         self.apiKeyReader = apiKeyReader
-        // mode test : texte fixe, aucun UNUserNotificationCenter ; hors mode test : conserve l'injection
+        // mode test : texte fixe, sauf HV_NATIVE_PAUSE_NOTIFICATION=1 ; hors mode test : conserve l'injection
         self.notifyPause = environment.pauseNotifier(product: notifyPause)
         self.urlConfiguration = urlConfiguration
         self.environment = environment
