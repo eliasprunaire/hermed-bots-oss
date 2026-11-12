@@ -11,7 +11,6 @@ Les 26 PNG déjà versionnés dans `UIReferences/` (hors `issue58-version-missin
 
 Noms encore absents :
 
-- LACUNE binaire : `design-compact-conversation.png` — défaut d'interface en fenêtre compacte (Nouvelle session masquée), à corriger puis recapturer
 - LACUNE binaire : `hd07-connection.png`
 - LACUNE binaire : `hd07-refuse-prod.png`
 - LACUNE binaire : `hd07-tunnel.png`
