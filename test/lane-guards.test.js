@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
-const { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir, userInfo } = require("node:os");
 const { join, relative } = require("node:path");
 const { test } = require("node:test");
@@ -88,6 +88,85 @@ test("hd13 and hd14 run-ui.sh emit HV_TEST_API_KEYS like hd15 before xcodebuild"
     /python3 - "\$ROOT\/Packages\/HermesAdapter\/Tests\/HermesAdapterTests\/Fixtures\/hermes-current\/contract\.json"/,
     "hd13 : contract.json hors ROOT",
   );
+});
+
+test("hd13 run-ui.sh copies fake-requests.json in the EXIT trap before down fake", () => {
+  const text = readFileSync(join(SPIKE, "hd13-instruments", "run-ui.sh"), "utf8");
+  const match = text.match(/^trap '([^']*)' EXIT$/m);
+  assert.ok(match, "hd13 : trap EXIT introuvable");
+  const trap = match[1];
+  const curlAt = trap.indexOf("curl ");
+  const downAt = trap.indexOf("down fake");
+  assert.ok(curlAt !== -1, "hd13 : curl absent du trap");
+  assert.ok(downAt !== -1, "hd13 : down fake absent du trap");
+  assert.ok(curlAt < downAt, "hd13 : curl après down fake");
+  assert.match(trap, /curl -s -m 5 http:\/\/127\.0\.0\.1:18643\/_hv\/log > "\$HV_EVIDENCE\/fake-requests\.json"/);
+  assert.doesNotMatch(trap, /Authorization/i);
+  assert.match(trap, /\|\| true/);
+
+  const payload = '[{"m":"POST","p":"/p/hv-bot-a/v1/runs","s":401,"body":""}]';
+  const dirs = [];
+  function runTrap(curlRc, exitCode) {
+    const dir = mkdtempSync(join(tmpdir(), "hd13-fake-log-"));
+    dirs.push(dir);
+    const evidence = join(dir, "evidence");
+    mkdirSync(evidence);
+    const bin = join(dir, "bin");
+    mkdirSync(bin);
+    const skill = join(dir, "scripts");
+    mkdirSync(skill);
+    const order = join(dir, "order");
+    const curlArgs = join(dir, "curl.args");
+    const envArgs = join(dir, "env.args");
+    writeFileSync(join(bin, "curl"), `#!/bin/sh
+printf '%s\\n' "$@" > ${JSON.stringify(curlArgs)}
+echo curl >> ${JSON.stringify(order)}
+[ ${curlRc} -eq 0 ] || exit ${curlRc}
+printf '%s' ${JSON.stringify(payload)}
+`);
+    chmodSync(join(bin, "curl"), 0o755);
+    writeFileSync(join(skill, "hv-hermes-env.sh"), `#!/bin/sh
+if [ -f "$HV_EVIDENCE/fake-requests.json" ]; then
+  echo down-after-copy >> ${JSON.stringify(order)}
+else
+  echo down-before-copy >> ${JSON.stringify(order)}
+fi
+printf '%s\\n' "$*" > ${JSON.stringify(envArgs)}
+`);
+    chmodSync(join(skill, "hv-hermes-env.sh"), 0o755);
+    const run = spawnSync("bash", ["-c", `set -uo pipefail\ntrap '${trap}' EXIT\nexit ${exitCode}`], {
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        HV_EVIDENCE: evidence,
+        SK: skill,
+        PROXY: "1999999999",
+        STOP: join(dir, "stop"),
+        SAMPLER: "1999999998",
+        WATCHER: "1999999997",
+      },
+      encoding: "utf8",
+    });
+    return { evidence, order, curlArgs, envArgs, run };
+  }
+
+  try {
+    const ok = runTrap(0, 42);
+    assert.equal(ok.run.status, 42, `hd13 : le trap change le code de sortie (${ok.run.stderr})`);
+    assert.equal(readFileSync(join(ok.evidence, "fake-requests.json"), "utf8"), payload);
+    assert.deepEqual(readFileSync(ok.order, "utf8").trim().split("\n"), ["curl", "down-after-copy"]);
+    assert.equal(readFileSync(ok.envArgs, "utf8").trim(), "down fake");
+    const args = readFileSync(ok.curlArgs, "utf8").trim().split("\n");
+    assert.deepEqual(args, ["-s", "-m", "5", "http://127.0.0.1:18643/_hv/log"]);
+    assert.doesNotMatch(args.join(" "), /Authorization/i);
+
+    const fail = runTrap(22, 7);
+    assert.equal(fail.run.status, 7, `hd13 : curl en échec fait échouer la lane (${fail.run.stderr})`);
+    assert.deepEqual(readFileSync(fail.order, "utf8").trim().split("\n"), ["curl", "down-after-copy"]);
+    assert.equal(readFileSync(fail.envArgs, "utf8").trim(), "down fake");
+  } finally {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("every skill path follows HV_SKILL_SCRIPTS", () => {
