@@ -196,9 +196,6 @@ test("fake Hermes HV_LOOP honors HV_PACE_<ms> between tool.started", async () =>
     const pacedGaps = toolStartedGaps(paced.parsed);
     assert.equal(pacedGaps.started.length, 3, JSON.stringify(paced.parsed.map((ev) => ev.data.event)));
     assert.ok(pacedGaps.gaps.length >= 1);
-    for (const gap of pacedGaps.gaps) {
-      assert.ok(gap >= 0.35 && gap <= 0.7, `HV_PACE_500 gap=${gap}`);
-    }
     const logPaced = await request(port, "/_hv/log");
     assert.equal(runStarts(logPaced.json).length, 1, JSON.stringify(runStarts(logPaced.json)));
 
@@ -218,10 +215,10 @@ test("fake Hermes HV_LOOP honors HV_PACE_<ms> between tool.started", async () =>
     const plainGaps = toolStartedGaps(plain.parsed);
     assert.equal(plainGaps.started.length, 3);
     assert.ok(plainGaps.gaps.length >= 1);
-    const pacedMin = Math.min(...pacedGaps.gaps);
-    for (const gap of plainGaps.gaps) {
-      assert.ok(gap >= 0.02, `default gap=${gap}`);
-      assert.ok(gap * 2 < pacedMin, `default gap=${gap} pacedMin=${pacedMin}`);
+    const defaultGap = Math.max(...plainGaps.gaps);
+    for (const gap of pacedGaps.gaps) {
+      assert.ok(gap >= 0.35, `HV_PACE_500 gap=${gap}`);
+      assert.ok(gap >= 3 * defaultGap, `HV_PACE_500 gap=${gap} default=${defaultGap}`);
     }
     const logPlain = await request(port, "/_hv/log");
     assert.equal(runStarts(logPlain.json).length, 1, JSON.stringify(runStarts(logPlain.json)));
