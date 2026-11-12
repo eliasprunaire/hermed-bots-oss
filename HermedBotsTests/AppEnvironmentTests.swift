@@ -1,4 +1,5 @@
 import AppSettings
+import LoopGuard
 import XCTest
 
 final class AppEnvironmentTests: XCTestCase {
@@ -66,6 +67,38 @@ final class AppEnvironmentTests: XCTestCase {
         let table = "Profile Model Gateway\nhv-bot-a model running"
         XCTAssertEqual(AppEnvironment.resolve(["HV_TEST_MODE": "1", "HV_TEST_PROFILE_TABLE": table], keychain: spy).testProfileTable, table)
         XCTAssertNil(AppEnvironment.resolve(["HV_TEST_PROFILE_TABLE": table], defaults: isolatedDefaults(), keychain: { SpyKeychain() }).testProfileTable)
+    }
+
+    func testTestModePauseNotifierReturnsTheFixedTextWithoutCallingTheProduct() async {
+        let environment = AppEnvironment.resolve(["HV_TEST_MODE": "1"], keychain: spy)
+        XCTAssertFalse(environment.testNativePauseNotification)
+        XCTAssertFalse(environment.postsLoopPauseNotifications)
+        XCTAssertEqual(environment.pauseNotificationLine, AppEnvironment.testPauseNotification)
+        let flag = PauseCallFlag()
+        let notify = environment.pauseNotifier { _ in
+            flag.called = true
+            return "ne doit pas servir"
+        }
+        let status = await notify(.repeatedToolCall(count: 3))
+        XCTAssertEqual(status, AppEnvironment.testPauseNotification)
+        XCTAssertFalse(flag.called)
+    }
+
+    func testNativePauseNotificationOptInKeepsTheProductInTestMode() async {
+        let environment = AppEnvironment.resolve(
+            ["HV_TEST_MODE": "1", "HV_NATIVE_PAUSE_NOTIFICATION": "1"], keychain: spy
+        )
+        XCTAssertTrue(environment.testNativePauseNotification)
+        XCTAssertTrue(environment.postsLoopPauseNotifications)
+        XCTAssertEqual(environment.pauseNotificationLine, AppEnvironment.pauseNotificationPending)
+        let flag = PauseCallFlag()
+        let notify = environment.pauseNotifier { _ in
+            flag.called = true
+            return "Notification remise par macOS."
+        }
+        let status = await notify(.repeatedToolCall(count: 3))
+        XCTAssertEqual(status, "Notification remise par macOS.")
+        XCTAssertTrue(flag.called)
     }
 
     func testTheDarkAppearanceAndTheWindowSizeAreReadOnlyInTestMode() {
@@ -153,7 +186,7 @@ final class AppEnvironmentTests: XCTestCase {
     func testReleaseIgnoresTestModeTheTestKeyAndTheApiUrl() {
         var built = false
         let environment = AppEnvironment.resolve(
-            ["HV_TEST_MODE": "1", "HV_TEST_API_KEY": "cle-de-test-0123456789", "HV_TEST_API_KEYS": #"{"cyber":"cyber-test-key"}"#, "HV_API_URL": "http://127.0.0.1:18642", "HV_SSH_HOST": "host.example", "HV_SSH_USER": "u", "HV_TEST_SSH_KEY": "k", "HV_TEST_PROFILE_TABLE": "ignored"],
+            ["HV_TEST_MODE": "1", "HV_TEST_API_KEY": "cle-de-test-0123456789", "HV_TEST_API_KEYS": #"{"cyber":"cyber-test-key"}"#, "HV_API_URL": "http://127.0.0.1:18642", "HV_SSH_HOST": "host.example", "HV_SSH_USER": "u", "HV_TEST_SSH_KEY": "k", "HV_TEST_PROFILE_TABLE": "ignored", "HV_NATIVE_PAUSE_NOTIFICATION": "1"],
             defaults: isolatedDefaults(),
             keychain: {
                 built = true
@@ -166,8 +199,34 @@ final class AppEnvironmentTests: XCTestCase {
         XCTAssertNil(environment.ssh, "la Release ignore HV_SSH_HOST")
         XCTAssertNil(environment.testProfileTable)
         XCTAssertFalse(environment.refuseTestHost)
+        XCTAssertTrue(environment.postsLoopPauseNotifications)
+        XCTAssertEqual(environment.pauseNotificationLine, AppEnvironment.pauseNotificationPending)
+        XCTAssertFalse(environment.testNativePauseNotification)
     }
     #endif
+
+    func testNativePauseNotificationOptInIsIgnoredWithoutTestMode() {
+        let environment = AppEnvironment.resolve(
+            ["HV_NATIVE_PAUSE_NOTIFICATION": "1"], defaults: isolatedDefaults(), keychain: { SpyKeychain() }
+        )
+        XCTAssertFalse(environment.testNativePauseNotification)
+        XCTAssertTrue(environment.postsLoopPauseNotifications)
+    }
+
+    func testWithoutTestModeThePauseNotifierKeepsTheProductInjection() async {
+        let environment = AppEnvironment.resolve([:], defaults: isolatedDefaults(), keychain: { SpyKeychain() })
+        XCTAssertTrue(environment.postsLoopPauseNotifications)
+        XCTAssertEqual(environment.pauseNotificationLine, AppEnvironment.pauseNotificationPending)
+        let flag = PauseCallFlag()
+        let notify = environment.pauseNotifier { cause in
+            flag.called = true
+            XCTAssertEqual(cause, .repeatedToolCall(count: 3))
+            return "Notification remise par macOS."
+        }
+        let status = await notify(.repeatedToolCall(count: 3))
+        XCTAssertEqual(status, "Notification remise par macOS.")
+        XCTAssertTrue(flag.called)
+    }
 
     func testWithoutTestModeTheKeychainIsUsedAndTheApiUrlIsIgnored() {
         var built = false
@@ -209,4 +268,8 @@ final class AppEnvironmentTests: XCTestCase {
         endpoint.save(to: defaults)
         XCTAssertEqual(SSHEndpoint.stored(in: defaults), endpoint)
     }
+}
+
+private final class PauseCallFlag: @unchecked Sendable {
+    var called = false
 }

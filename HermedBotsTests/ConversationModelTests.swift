@@ -21,7 +21,7 @@ final class ConversationModelTests: XCTestCase {
     /// `reachable: false` : aucun client, comme quand le tunnel n'est pas ouvert
     /// `bots`, `listedThread` et `startedReads` sont ce que la barre latérale sait : les profils actifs, ce que la liste des fils dit d'un fil (son modèle, le numéro de la lecture), et le numéro de la dernière lecture partie
     /// `approvalRetry` est l'attente entre deux essais d'une décision qui ne part pas
-    private func makeModel(reachable: Bool = true, bots: @escaping @MainActor () -> [Bot] = { [] }, listedThread: @escaping @MainActor (String, String) -> (model: String?, read: Int)? = { _, _ in nil }, startedReads: @escaping @MainActor () -> Int = { 0 }, approvalRetry: Duration = .milliseconds(20), resumeStore: ResumeStore? = nil, profileLock: ProfileLock? = nil, onAPIError: @escaping @MainActor (Error, String) -> Void = { _, _ in }, unauthorizedOpenMessage: @escaping @MainActor (String) -> String = { HermesAPIKey.unauthorizedMessage(profile: $0, holdsKey: true) }) -> ConversationModel {
+    private func makeModel(reachable: Bool = true, bots: @escaping @MainActor () -> [Bot] = { [] }, listedThread: @escaping @MainActor (String, String) -> (model: String?, read: Int)? = { _, _ in nil }, startedReads: @escaping @MainActor () -> Int = { 0 }, approvalRetry: Duration = .milliseconds(20), resumeStore: ResumeStore? = nil, profileLock: ProfileLock? = nil, onAPIError: @escaping @MainActor (Error, String) -> Void = { _, _ in }, unauthorizedOpenMessage: @escaping @MainActor (String) -> String = { HermesAPIKey.unauthorizedMessage(profile: $0, holdsKey: true) }, notifyPause: @escaping @Sendable (LoopGuard.Cause) async -> String = { _ in "Notification indisponible." }, pauseNotificationPending: String = AppEnvironment.pauseNotificationPending) -> ConversationModel {
         GateProtocol.reset()
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [GateProtocol.self]
@@ -30,7 +30,7 @@ final class ConversationModelTests: XCTestCase {
         let hermesClient: HermesClient? = reachable ? client : nil
         let clientProvider: @MainActor () -> HermesClient? = { hermesClient }
         let connection: @MainActor () -> String = { "http://hermes.invalid" }
-        return ConversationModel(client: clientProvider, connection: connection, bots: bots, listedThread: listedThread, startedReads: startedReads, approvalRetry: approvalRetry, profileLock: profileLock, resumeStore: resumeStore, onAPIError: onAPIError, unauthorizedOpenMessage: unauthorizedOpenMessage)
+        return ConversationModel(client: clientProvider, connection: connection, bots: bots, listedThread: listedThread, startedReads: startedReads, approvalRetry: approvalRetry, profileLock: profileLock, resumeStore: resumeStore, onAPIError: onAPIError, unauthorizedOpenMessage: unauthorizedOpenMessage, notifyPause: notifyPause, pauseNotificationPending: pauseNotificationPending)
     }
 
     /// L'état d'un fil du bot de test, qu'il soit à l'écran ou non
@@ -190,6 +190,30 @@ final class ConversationModelTests: XCTestCase {
         XCTAssertNil(model.pauseCause)
         model.open(session: "thread", of: bot)
         XCTAssertEqual(model.pauseCause, .repeatedToolCall(count: 3))
+    }
+
+    func testTestModePauseBannerUsesTheFixedNotificationWithoutCallingTheProductNotifier() async throws {
+        let name = "hd-pause-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: name)!
+        addTeardownBlock { UserDefaults(suiteName: name)?.removePersistentDomain(forName: name) }
+        let environment = AppEnvironment(
+            secrets: InMemorySecretStore(apiKey: nil), baseURL: nil, ssh: nil, isTestMode: true, defaults: defaults
+        )
+        let flag = CallFlag()
+        let notify = environment.pauseNotifier { _ in
+            flag.called = true
+            return "ne doit pas servir"
+        }
+        let model = makeModel(notifyPause: notify, pauseNotificationPending: environment.pauseNotificationLine)
+        try await openEmptyThread(model, session: "thread")
+        model.draft = "loop"
+        model.send()
+        try await held(1, "POST", "/v1/runs").reply(#"{"run_id":"r1"}"#)
+        let call = "data: {\"event\":\"tool.started\",\"tool\":\"terminal\",\"preview\":\"repeat\"}\n\n"
+        try await held(2, "GET", "/v1/runs/r1/events").reply(String(repeating: call, count: 3) + completedTurn("hidden"))
+        await eventually("pause visible") { model.pauseCause != nil }
+        XCTAssertEqual(pauseCard(model.loopNotice)?.notification, AppEnvironment.testPauseNotification)
+        XCTAssertFalse(flag.called, "LoopPauseNotifications ne doit pas être appelé en mode test")
     }
 
     func testClosingAPausedThreadOpensANewSessionWithoutCancellingTheRemoteRun() async throws {
@@ -2055,6 +2079,10 @@ final class ConversationModelTests: XCTestCase {
         XCTAssertEqual(model.lockAndErrorBannerCount, 1)
         XCTAssertEqual(model.profileLock?.sidebarLabel(bot), "Dégradé")
     }
+}
+
+private final class CallFlag: @unchecked Sendable {
+    var called = false
 }
 
 /// Une lecture de `hermes profile list` qui attend que le test lui donne sa réponse

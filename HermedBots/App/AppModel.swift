@@ -58,7 +58,8 @@ final class AppModel {
             let holdsKey = (try? self.environment.secrets.resolvedAPIKey(profile: profile)) != nil
             return HermesAPIKey.unauthorizedMessage(profile: profile, holdsKey: holdsKey)
         },
-        notifyPause: { [unowned self] cause in await self.notifyPause(cause) }
+        notifyPause: { [unowned self] cause in await self.notifyPause(cause) },
+        pauseNotificationPending: environment.pauseNotificationLine
     )
     @ObservationIgnored lazy var profileLock = ProfileLock(
         connection: { [unowned self] in self.connection },
@@ -185,7 +186,8 @@ final class AppModel {
         notifyPause: @escaping @Sendable (LoopGuard.Cause) async -> String = { _ in "Notification indisponible." }
     ) {
         self.apiKeyReader = apiKeyReader
-        self.notifyPause = notifyPause
+        // mode test : texte fixe, sauf HV_NATIVE_PAUSE_NOTIFICATION=1 ; hors mode test : conserve l'injection
+        self.notifyPause = environment.pauseNotifier(product: notifyPause)
         self.urlConfiguration = urlConfiguration
         self.environment = environment
         self.updates = updates

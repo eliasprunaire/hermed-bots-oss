@@ -37,7 +37,7 @@ struct LoopPauseBanner: View {
     private func pauseCard(_ pause: LoopNotice.Pause) -> some View {
         NoticeCard(tint: .orange, symbol: "pause.circle.fill") {
             Text(pause.title).fontWeight(.semibold).accessibilityID(.bannerLoopPause)
-            Text("L'affichage et l'envoi sont suspendus. Hermes peut continuer sur le serveur. Utilisez le kill switch pour l'arrêter.")
+            Text("L'affichage et l'envoi sont suspendus. Hermes peut continuer sur le serveur. Utilisez « Tout arrêter » pour l'arrêter.")
             if let approval = pause.approval {
                 Text(approval)
             }

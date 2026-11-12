@@ -4,6 +4,8 @@ import XCTest
 class HD12Harness: XCTestCase {
     var app: XCUIApplication?
     var testProfileLocks = false
+    /// Lane NativeNotifications seulement : l'app garde `UNUserNotificationCenter`
+    var nativePauseNotification = false
     let environment = ProcessInfo.processInfo.environment
 
     override func setUpWithError() throws {
@@ -66,6 +68,7 @@ class HD12Harness: XCTestCase {
         app.launchEnvironment["HV_TEST_MODE"] = "1"
         app.launchEnvironment["HV_PROFILE_LOCKS"] = testProfileLocks ? "1" : "0"
         app.launchEnvironment["HV_RESUME_SCOPE"] = UUID().uuidString
+        if nativePauseNotification { app.launchEnvironment["HV_NATIVE_PAUSE_NOTIFICATION"] = "1" }
         for key in ["HV_API_URL", "HV_TEST_API_KEY", "HV_TEST_API_KEYS", "HV_TEST_PROFILE_TABLE"] { app.launchEnvironment[key] = environment[key] }
         if wrongKey {
             app.launchEnvironment["HV_TEST_API_KEY"] = "intentionally-invalid-test-key"
