@@ -378,6 +378,9 @@ class H(BaseHTTPRequestHandler):
         else:
             inp = ""
         pace = 1.0 if "HV_SLOW" in inp else 0.05
+        paced = re.search(r"HV_PACE_(\d+)", inp)
+        if paced:
+            pace = int(paced.group(1)) / 1000.0
         if STATE["omit_tokens"]:
             def strip_usage(ev):
                 return {k: x for k, x in ev.items() if k != "usage"} if isinstance(ev, dict) else ev
