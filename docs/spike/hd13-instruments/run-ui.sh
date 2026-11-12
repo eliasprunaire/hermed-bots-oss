@@ -49,7 +49,8 @@ bash "$ROOT/docs/spike/hd08-instruments/netsample.sh" "$HV_EVIDENCE/net.txt" "$S
     else sleep 0.3; fi
   done
 ) & WATCHER=$!
-trap 'kill "$PROXY" 2>/dev/null; touch "$STOP"; wait "$SAMPLER" 2>/dev/null; wait "$WATCHER" 2>/dev/null; HV_PORT=18643 "$SK/hv-hermes-env.sh" down fake >/dev/null 2>&1' EXIT
+# /_hv/log n'enregistre que m, p, body, s (pas d'en-tête, donc pas d'Authorization)
+trap 'kill "$PROXY" 2>/dev/null; touch "$STOP"; wait "$SAMPLER" 2>/dev/null; wait "$WATCHER" 2>/dev/null; curl -s -m 5 http://127.0.0.1:18643/_hv/log > "$HV_EVIDENCE/fake-requests.json" 2>/dev/null || true; HV_PORT=18643 "$SK/hv-hermes-env.sh" down fake >/dev/null 2>&1' EXIT
 echo "faux serveur mode=$mode drop=$drop ; xcodebuild test-without-building ${only[*]} -> $HV_EVIDENCE"
 TEST_RUNNER_HV13_SINGLE=${HV13_SINGLE:-0} TEST_RUNNER_HV13_PROXY=1 TEST_RUNNER_HV13_BASELINE=${HV13_BASELINE:-0} TEST_RUNNER_HV_TEST_MODE=1 TEST_RUNNER_HV_DROP=$drop TEST_RUNNER_HV_API_URL=http://127.0.0.1:${HV_PORT:-18642} TEST_RUNNER_HV_SHOTS="$HV_EVIDENCE/shots" \
   xcodebuild test-without-building -xctestrun "$XCTESTRUN" -destination 'platform=macOS' "${only[@]}" \
