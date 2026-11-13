@@ -7,6 +7,7 @@ struct ComposerView: View {
     @Bindable var model: ConversationModel
     let bot: Bot
     @FocusState private var focused: Bool
+    @Environment(\.hideComposerCaret) private var hideComposerCaret
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
@@ -17,6 +18,7 @@ struct ComposerView: View {
                 .disabled(model.isOpening || model.openError != nil)
                 .padding(.vertical, 7)
                 .onSubmit(model.send)
+                .modifier(ComposerCaretTint(hidden: hideComposerCaret))
                 .accessibilityID(.composerInput)
             Button(action: model.send) {
                 Image(systemName: "arrow.up")
@@ -39,5 +41,18 @@ struct ComposerView: View {
         .padding(.top, 6)
         .padding(.bottom, 14)
         .onAppear { focused = true }
+    }
+}
+
+/// Mode test seulement : `tint(.clear)` rend le caret invisible sans retirer le focus ni fermer une feuille
+private struct ComposerCaretTint: ViewModifier {
+    let hidden: Bool
+
+    func body(content: Content) -> some View {
+        if hidden {
+            content.tint(.clear)
+        } else {
+            content
+        }
     }
 }
