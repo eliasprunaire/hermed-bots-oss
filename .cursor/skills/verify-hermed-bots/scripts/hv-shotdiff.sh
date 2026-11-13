@@ -4,8 +4,10 @@
 #         hv-shotdiff.sh --export <xcresult> <dossier-captures> [nom-attendu...]   # pièces jointes PNG -> <nom>.png
 #         hv-shotdiff.sh --bless <dossier-captures> <dossier-baselines>   # promeut (humain seulement)
 # Tolérance = fraction de pixels différents (fuzz 5 % par pixel). Outil : ImageMagick `compare`
-# (brew install imagemagick). Codes : 0 OK ; 2 usage ; 11 écart > tolérance ; 12 baseline manquante ;
-# 13 outil absent ; 15 captures absentes (dossier absent ou sans PNG, export impossible, nom attendu manquant).
+# (brew install imagemagick). Un écart franc localisé (zone connexe après érosion d'un pixel,
+# ΔE élevé) échoue aussi, même si le ratio global reste sous la tolérance. Codes : 0 OK ; 2 usage ;
+# 11 écart > tolérance ou zone locale ; 12 baseline manquante ; 13 outil absent ; 15 captures
+# absentes (dossier absent ou sans PNG, export impossible, nom attendu manquant).
 # Le runner XCUITest est sandboxé : il n'écrit pas dans le dossier des captures, qui vient de --export.
 # Le jugement visuel final reste manuel (A3) : ce script ne fait que trier.
 set -euo pipefail
@@ -70,7 +72,269 @@ for f in "$CAP"/*.png; do
   tot=$(identify -format '%[fx:w*h]' "$BASE/$n")
   tot=$(printf '%s' "$tot" | tr ',' '.')
   ratio=$(awk -v a="$px" -v b="$tot" 'BEGIN{ if (a !~ /^[0-9.e+]+$/) a=b; printf "%.5f", a/b }')
-  if awk -v r="$ratio" -v t="$TOL" 'BEGIN{exit !(r>t)}'; then echo "DIFF $n ratio=$ratio > $TOL"; rc=11
-  else echo "OK   $n ratio=$ratio"; rm -f "$DIF/$n"; fi
+  if awk -v r="$ratio" -v t="$TOL" 'BEGIN{exit !(r>t)}'; then echo "DIFF $n ratio=$ratio > $TOL"; rc=11; continue; fi
+  if awk -v a="$px" 'BEGIN{exit !(a+0==0)}'; then echo "OK   $n ratio=$ratio"; rm -f "$DIF/$n"; continue; fi
+  if cmp -s "$BASE/$n" "$f"; then echo "OK   $n ratio=$ratio"; rm -f "$DIF/$n"; continue; fi
+  command -v python3 >/dev/null 2>&1 || { echo "SHOT FAIL (13): python3 absent" >&2; [ $rc -eq 0 ] && rc=13; continue; }
+  zone=$(python3 -I - "$BASE/$n" "$f" <<'PY'
+import math, struct, sys, zlib
+
+FUZZ2 = (0.05 * 255 * math.sqrt(3)) ** 2
+MIN_ERODED = 80
+MIN_SIDE = 8
+MIN_DE = 10.0
+
+
+def paeth(a, b, c):
+    p = a + b - c
+    pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+    if pa <= pb and pa <= pc:
+        return a
+    if pb <= pc:
+        return b
+    return c
+
+
+def to8(v, bit):
+    if bit == 8:
+        return v
+    return (v * 255 + 32767) // 65535
+
+
+def trns_key(chunk, offset, bit):
+    v = (chunk[offset] << 8) | chunk[offset + 1]
+    if bit == 16:
+        return v
+    return v & ((1 << bit) - 1)
+
+
+def decode_rgb(path):
+    data = open(path, "rb").read()
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not png")
+    i = 8
+    w = h = bit = ct = inter = None
+    idat = []
+    plte = None
+    trns = None
+    while i + 12 <= len(data):
+        ln = struct.unpack(">I", data[i : i + 4])[0]
+        tag = data[i + 4 : i + 8]
+        chunk = data[i + 8 : i + 8 + ln]
+        if tag == b"IHDR":
+            w, h, bit, ct, _comp, _filt, inter = struct.unpack(">IIBBBBB", chunk)
+        elif tag == b"PLTE":
+            plte = chunk
+        elif tag == b"tRNS":
+            trns = chunk
+        elif tag == b"IDAT":
+            idat.append(chunk)
+        elif tag == b"IEND":
+            break
+        i += 12 + ln
+    if w is None or bit not in (8, 16) or inter != 0 or (ct == 3 and bit == 16):
+        raise ValueError("png")
+    raw = zlib.decompress(b"".join(idat))
+    channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[ct]
+    bpp = max(1, channels * (bit // 8))
+    stride = w * bpp
+    out = bytearray(w * h * 4)
+    prev = bytearray(stride)
+    pos = 0
+    oi = 0
+    for _y in range(h):
+        f = raw[pos]
+        pos += 1
+        scan = bytearray(raw[pos : pos + stride])
+        pos += stride
+        if f == 1:
+            for x in range(stride):
+                scan[x] = (scan[x] + (scan[x - bpp] if x >= bpp else 0)) & 255
+        elif f == 2:
+            for x in range(stride):
+                scan[x] = (scan[x] + prev[x]) & 255
+        elif f == 3:
+            for x in range(stride):
+                left = scan[x - bpp] if x >= bpp else 0
+                scan[x] = (scan[x] + ((left + prev[x]) // 2)) & 255
+        elif f == 4:
+            for x in range(stride):
+                left = scan[x - bpp] if x >= bpp else 0
+                upleft = prev[x - bpp] if x >= bpp else 0
+                scan[x] = (scan[x] + paeth(left, prev[x], upleft)) & 255
+        elif f != 0:
+            raise ValueError("filter")
+        sp = 0
+        for _x in range(w):
+            native = []
+            for _c in range(channels):
+                if bit == 8:
+                    native.append(scan[sp])
+                    sp += 1
+                else:
+                    native.append((scan[sp] << 8) | scan[sp + 1])
+                    sp += 2
+            samp = [to8(v, bit) for v in native]
+            if ct == 2:
+                r, g, b = samp
+                a = 255
+                if trns and len(trns) >= 6:
+                    key = (
+                        trns_key(trns, 0, bit),
+                        trns_key(trns, 2, bit),
+                        trns_key(trns, 4, bit),
+                    )
+                    if tuple(native) == key:
+                        a = 0
+            elif ct == 6:
+                r, g, b, a = samp
+            elif ct == 0:
+                r = g = b = samp[0]
+                a = 255
+                if trns and len(trns) >= 2 and native[0] == trns_key(trns, 0, bit):
+                    a = 0
+            elif ct == 4:
+                r = g = b = samp[0]
+                a = samp[1]
+            elif ct == 3:
+                if not plte:
+                    raise ValueError("plte")
+                p = samp[0] * 3
+                r, g, b = plte[p], plte[p + 1], plte[p + 2]
+                a = trns[native[0]] if trns and native[0] < len(trns) else 255
+            else:
+                raise ValueError("png")
+            out[oi] = r
+            out[oi + 1] = g
+            out[oi + 2] = b
+            out[oi + 3] = a
+            oi += 4
+        prev = scan
+    return w, h, bytes(out)
+
+
+def srgb_to_lin(c):
+    c = c / 255.0
+    return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+
+
+def rgb_to_lab(r, g, b):
+    r, g, b = srgb_to_lin(r), srgb_to_lin(g), srgb_to_lin(b)
+    x = (r * 0.4124564 + g * 0.3575761 + b * 0.1804375) / 0.95047
+    y = r * 0.2126729 + g * 0.7151522 + b * 0.0721750
+    z = (r * 0.0193339 + g * 0.1191920 + b * 0.9503041) / 1.08883
+
+    def f(t):
+        return t ** (1 / 3) if t > 0.008856 else (7.787 * t + 16 / 116)
+
+    fx, fy, fz = f(x), f(y), f(z)
+    return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
+
+
+def over(r, g, b, a, bg):
+    inv = 255 - a
+    return ((r * a + bg * inv) // 255, (g * a + bg * inv) // 255, (b * a + bg * inv) // 255)
+
+
+def de_rgb(c1, c2):
+    L1, a1, b1 = rgb_to_lab(*c1)
+    L2, a2, b2 = rgb_to_lab(*c2)
+    return math.sqrt((L1 - L2) ** 2 + (a1 - a2) ** 2 + (b1 - b2) ** 2)
+
+
+def mean_de(a, b, w, pts):
+    acc = 0.0
+    n = 0
+    step = max(1, len(pts) // 400)
+    for x, y in pts[::step]:
+        o = (y * w + x) * 4
+        c1 = a[o : o + 4]
+        c2 = b[o : o + 4]
+        d_black = de_rgb(over(c1[0], c1[1], c1[2], c1[3], 0), over(c2[0], c2[1], c2[2], c2[3], 0))
+        d_white = de_rgb(over(c1[0], c1[1], c1[2], c1[3], 255), over(c2[0], c2[1], c2[2], c2[3], 255))
+        acc += d_black if d_black > d_white else d_white
+        n += 1
+    return acc / n if n else 0.0
+
+
+def vis_diff(c1, c2):
+    for bg in (0, 255):
+        p1 = over(c1[0], c1[1], c1[2], c1[3], bg)
+        p2 = over(c2[0], c2[1], c2[2], c2[3], bg)
+        dr, dg, db = p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]
+        if dr * dr + dg * dg + db * db > FUZZ2:
+            return True
+    return False
+
+
+def main(base, cap):
+    w, h, a = decode_rgb(base)
+    w2, h2, b = decode_rgb(cap)
+    if (w, h) != (w2, h2):
+        raise ValueError("size")
+    pix = set()
+    n = w * h
+    for p in range(n):
+        i = p * 4
+        if vis_diff(a[i : i + 4], b[i : i + 4]):
+            pix.add((p % w, p // w))
+    if not pix:
+        return 0
+    visited = set()
+    best = None
+    for seed in pix:
+        if seed in visited:
+            continue
+        stack = [seed]
+        visited.add(seed)
+        comp = []
+        while stack:
+            x, y = stack.pop()
+            comp.append((x, y))
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    nxt = (x + dx, y + dy)
+                    if nxt in pix and nxt not in visited:
+                        visited.add(nxt)
+                        stack.append(nxt)
+        er = [
+            (x, y)
+            for x, y in comp
+            if (x - 1, y) in pix and (x + 1, y) in pix and (x, y - 1) in pix and (x, y + 1) in pix
+        ]
+        if len(er) < MIN_ERODED:
+            continue
+        xs = [p[0] for p in er]
+        ys = [p[1] for p in er]
+        side = min(max(xs) - min(xs) + 1, max(ys) - min(ys) + 1)
+        if side < MIN_SIDE:
+            continue
+        de = mean_de(a, b, w, er)
+        if de < MIN_DE:
+            continue
+        cand = (len(er), comp, er, de)
+        if best is None or cand[0] > best[0]:
+            best = cand
+    if best is None:
+        return 0
+    _eroded_n, comp, _er, de = best
+    xs = [p[0] for p in comp]
+    ys = [p[1] for p in comp]
+    x0, y0 = min(xs), min(ys)
+    bw, bh = max(xs) - x0 + 1, max(ys) - y0 + 1
+    sys.stdout.write("%d,%d,%dx%d px=%d dE=%.1f\n" % (x0, y0, bw, bh, len(comp), de))
+    return 1
+
+
+try:
+    sys.exit(main(sys.argv[1], sys.argv[2]))
+except Exception as exc:
+    sys.stderr.write("analyse locale: %s\n" % exc)
+    sys.exit(2)
+PY
+) && zrc=0 || zrc=$?
+  if [ "$zrc" -eq 0 ]; then echo "OK   $n ratio=$ratio"; rm -f "$DIF/$n"
+  elif [ "$zrc" -eq 1 ]; then echo "DIFF $n ratio=$ratio zone=$zone"; rc=11
+  else echo "SHOT FAIL (13): analyse locale impossible pour $n" >&2; [ $rc -eq 0 ] && rc=13; fi
 done
 exit $rc
