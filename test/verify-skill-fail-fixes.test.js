@@ -771,7 +771,7 @@ function pngChunk(tag, data) {
   return Buffer.concat([len, payload, crc]);
 }
 
-function encodePng(w, h, bit, colorType, raw) {
+function encodePng(w, h, bit, colorType, raw, extraChunks = []) {
   const ihdr = Buffer.alloc(13);
   ihdr.writeUInt32BE(w, 0);
   ihdr.writeUInt32BE(h, 4);
@@ -780,6 +780,7 @@ function encodePng(w, h, bit, colorType, raw) {
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     pngChunk("IHDR", ihdr),
+    ...extraChunks,
     pngChunk("IDAT", deflateSync(raw)),
     pngChunk("IEND", Buffer.alloc(0)),
   ]);
@@ -821,6 +822,36 @@ function encodePngRgba(w, h, rgba) {
     rgba.copy(raw, (stride + 1) * y + 1, y * stride, (y + 1) * stride);
   }
   return encodePng(w, h, 8, 6, raw);
+}
+
+function encodePngGrey8(w, h, grey, trnsValue) {
+  const stride = w;
+  const raw = Buffer.alloc((stride + 1) * h);
+  for (let y = 0; y < h; y++) {
+    raw[(stride + 1) * y] = 0;
+    grey.copy(raw, (stride + 1) * y + 1, y * w, (y + 1) * w);
+  }
+  const extra = [];
+  if (trnsValue !== undefined) {
+    const tRNS = Buffer.alloc(2);
+    tRNS.writeUInt16BE(trnsValue);
+    extra.push(pngChunk("tRNS", tRNS));
+  }
+  return encodePng(w, h, 8, 0, raw, extra);
+}
+
+function encodePngGrey4(w, h, grey8) {
+  const stride = Math.ceil(w / 2);
+  const raw = Buffer.alloc((stride + 1) * h);
+  for (let y = 0; y < h; y++) {
+    raw[(stride + 1) * y] = 0;
+    for (let x = 0; x < w; x += 2) {
+      const v0 = grey8[y * w + x] >> 4;
+      const v1 = x + 1 < w ? grey8[y * w + x + 1] >> 4 : 0;
+      raw[(stride + 1) * y + 1 + (x >> 1)] = (v0 << 4) | v1;
+    }
+  }
+  return encodePng(w, h, 4, 0, raw);
 }
 
 function rgbCanvas(w, h, color) {
@@ -1219,7 +1250,7 @@ test("hv-shotdiff accepts a lossless 16-bit PNG re-encode under default TOL", ()
   blitRgb(rgb, w, 10, 8, 12, 10, [200, 30, 30]);
   writeFileSync(join(base, "depth.png"), encodePngRgb(w, h, rgb));
   writeFileSync(join(cap, "depth.png"), encodePngRgb16(w, h, rgb));
-  const env = shotdiffIhdrEnv(dir, "0");
+  const env = shotdiffIhdrEnv(dir, "1");
   const run = runShotdiff(cap, base, dif, env);
   assert.equal(run.status, 0, `out=${run.stdout} err=${run.stderr}`);
   assert.match(run.stdout, /OK {3}depth\.png/);
@@ -1257,11 +1288,113 @@ test("hv-shotdiff ignores RGB that is fully transparent under default TOL", () =
   }
   writeFileSync(join(base, "ghost.png"), encodePngRgba(w, h, baseRgba));
   writeFileSync(join(cap, "ghost.png"), encodePngRgba(w, h, capRgba));
-  const env = shotdiffIhdrEnv(dir, "0");
+  const env = shotdiffIhdrEnv(dir, "1");
   const run = runShotdiff(cap, base, dif, env);
   assert.equal(run.status, 0, `out=${run.stdout} err=${run.stderr}`);
   assert.match(run.stdout, /OK {3}ghost\.png/);
   assert.doesNotMatch(run.stdout, /DIFF/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("hv-shotdiff flags black pixels that become transparent under default TOL", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-black-a-"));
+  const cap = join(dir, "cap");
+  const base = join(dir, "base");
+  const dif = join(dir, "dif");
+  mkdirSync(cap);
+  mkdirSync(base);
+  mkdirSync(dif);
+  const w = 200;
+  const h = 200;
+  const baseRgba = Buffer.alloc(w * h * 4, 255);
+  const capRgba = Buffer.alloc(w * h * 4, 255);
+  for (let y = 90; y < 110; y++) {
+    for (let x = 90; x < 110; x++) {
+      const o = (y * w + x) * 4;
+      baseRgba[o] = 0;
+      baseRgba[o + 1] = 0;
+      baseRgba[o + 2] = 0;
+      baseRgba[o + 3] = 255;
+      capRgba[o] = 0;
+      capRgba[o + 1] = 0;
+      capRgba[o + 2] = 0;
+      capRgba[o + 3] = 0;
+    }
+  }
+  writeFileSync(join(base, "hole.png"), encodePngRgba(w, h, baseRgba));
+  writeFileSync(join(cap, "hole.png"), encodePngRgba(w, h, capRgba));
+  const env = shotdiffIhdrEnv(dir, "400");
+  const run = runShotdiff(cap, base, dif, env);
+  assert.equal(run.status, 11, `out=${run.stdout} err=${run.stderr}`);
+  assert.match(run.stdout, /DIFF hole\.png/);
+  assert.match(run.stdout, /zone=90,90,20x20/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("hv-shotdiff treats 8-bit tRNS as a raw sample under default TOL", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-trns-"));
+  const cap = join(dir, "cap");
+  const base = join(dir, "base");
+  const dif = join(dir, "dif");
+  mkdirSync(cap);
+  mkdirSync(base);
+  mkdirSync(dif);
+  const w = 200;
+  const h = 200;
+  const grey = Buffer.alloc(w * h, 80);
+  for (let y = 90; y < 110; y++) {
+    for (let x = 90; x < 110; x++) {
+      grey[y * w + x] = 121;
+    }
+  }
+  writeFileSync(join(base, "key.png"), encodePngGrey8(w, h, grey, 121));
+  writeFileSync(join(cap, "key.png"), encodePngGrey8(w, h, grey));
+  const env = shotdiffIhdrEnv(dir, "190");
+  const run = runShotdiff(cap, base, dif, env);
+  assert.equal(run.status, 11, `out=${run.stdout} err=${run.stderr}`);
+  assert.match(run.stdout, /DIFF key\.png/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("hv-shotdiff accepts AE=0 for a 4-bit re-encode under default TOL", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-4bit-"));
+  const cap = join(dir, "cap");
+  const base = join(dir, "base");
+  const dif = join(dir, "dif");
+  mkdirSync(cap);
+  mkdirSync(base);
+  mkdirSync(dif);
+  const w = 40;
+  const h = 30;
+  const grey = Buffer.alloc(w * h, 85);
+  writeFileSync(join(base, "depth4.png"), encodePngGrey8(w, h, grey));
+  writeFileSync(join(cap, "depth4.png"), encodePngGrey4(w, h, grey));
+  const env = shotdiffIhdrEnv(dir, "0");
+  const run = runShotdiff(cap, base, dif, env);
+  assert.equal(run.status, 0, `out=${run.stdout} err=${run.stderr}`);
+  assert.match(run.stdout, /OK {3}depth4\.png/);
+  assert.doesNotMatch(run.stdout, /DIFF/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("hv-shotdiff fails closed when AE is nonzero and the PNG depth is 4-bit", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-4bit-ae-"));
+  const cap = join(dir, "cap");
+  const base = join(dir, "base");
+  const dif = join(dir, "dif");
+  mkdirSync(cap);
+  mkdirSync(base);
+  mkdirSync(dif);
+  const w = 40;
+  const h = 30;
+  const greyA = Buffer.alloc(w * h, 85);
+  const greyB = Buffer.alloc(w * h, 170);
+  writeFileSync(join(base, "g.png"), encodePngGrey8(w, h, greyA));
+  writeFileSync(join(cap, "g.png"), encodePngGrey4(w, h, greyB));
+  const env = shotdiffIhdrEnv(dir, "5");
+  const run = runShotdiff(cap, base, dif, env);
+  assert.equal(run.status, 13, `out=${run.stdout} err=${run.stderr}`);
+  assert.match(run.stderr, /analyse locale impossible pour g\.png/);
   rmSync(dir, { recursive: true, force: true });
 });
 

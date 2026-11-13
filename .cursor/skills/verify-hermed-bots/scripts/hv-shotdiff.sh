@@ -73,6 +73,7 @@ for f in "$CAP"/*.png; do
   tot=$(printf '%s' "$tot" | tr ',' '.')
   ratio=$(awk -v a="$px" -v b="$tot" 'BEGIN{ if (a !~ /^[0-9.e+]+$/) a=b; printf "%.5f", a/b }')
   if awk -v r="$ratio" -v t="$TOL" 'BEGIN{exit !(r>t)}'; then echo "DIFF $n ratio=$ratio > $TOL"; rc=11; continue; fi
+  if awk -v a="$px" 'BEGIN{exit !(a+0==0)}'; then echo "OK   $n ratio=$ratio"; rm -f "$DIF/$n"; continue; fi
   if cmp -s "$BASE/$n" "$f"; then echo "OK   $n ratio=$ratio"; rm -f "$DIF/$n"; continue; fi
   command -v python3 >/dev/null 2>&1 || { echo "SHOT FAIL (13): python3 absent" >&2; [ $rc -eq 0 ] && rc=13; continue; }
   zone=$(python3 -I - "$BASE/$n" "$f" <<'PY'
@@ -98,6 +99,13 @@ def to8(v, bit):
     if bit == 8:
         return v
     return (v * 255 + 32767) // 65535
+
+
+def trns_key(chunk, offset, bit):
+    v = (chunk[offset] << 8) | chunk[offset + 1]
+    if bit == 16:
+        return v
+    return v & ((1 << bit) - 1)
 
 
 def decode_rgb(path):
@@ -130,7 +138,7 @@ def decode_rgb(path):
     channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[ct]
     bpp = max(1, channels * (bit // 8))
     stride = w * bpp
-    out = bytearray(w * h * 3)
+    out = bytearray(w * h * 4)
     prev = bytearray(stride)
     pos = 0
     oi = 0
@@ -158,32 +166,32 @@ def decode_rgb(path):
             raise ValueError("filter")
         sp = 0
         for _x in range(w):
-            samp = []
+            native = []
             for _c in range(channels):
                 if bit == 8:
-                    samp.append(scan[sp])
+                    native.append(scan[sp])
                     sp += 1
                 else:
-                    v = (scan[sp] << 8) | scan[sp + 1]
-                    samp.append(to8(v, 16))
+                    native.append((scan[sp] << 8) | scan[sp + 1])
                     sp += 2
+            samp = [to8(v, bit) for v in native]
             if ct == 2:
                 r, g, b = samp
                 a = 255
                 if trns and len(trns) >= 6:
                     key = (
-                        to8((trns[0] << 8) | trns[1], 16),
-                        to8((trns[2] << 8) | trns[3], 16),
-                        to8((trns[4] << 8) | trns[5], 16),
+                        trns_key(trns, 0, bit),
+                        trns_key(trns, 2, bit),
+                        trns_key(trns, 4, bit),
                     )
-                    if (r, g, b) == key:
+                    if tuple(native) == key:
                         a = 0
             elif ct == 6:
                 r, g, b, a = samp
             elif ct == 0:
                 r = g = b = samp[0]
                 a = 255
-                if trns and len(trns) >= 2 and samp[0] == to8((trns[0] << 8) | trns[1], 16):
+                if trns and len(trns) >= 2 and native[0] == trns_key(trns, 0, bit):
                     a = 0
             elif ct == 4:
                 r = g = b = samp[0]
@@ -193,13 +201,14 @@ def decode_rgb(path):
                     raise ValueError("plte")
                 p = samp[0] * 3
                 r, g, b = plte[p], plte[p + 1], plte[p + 2]
-                a = trns[samp[0]] if trns and samp[0] < len(trns) else 255
+                a = trns[native[0]] if trns and native[0] < len(trns) else 255
             else:
                 raise ValueError("png")
-            out[oi] = r * a // 255
-            out[oi + 1] = g * a // 255
-            out[oi + 2] = b * a // 255
-            oi += 3
+            out[oi] = r
+            out[oi + 1] = g
+            out[oi + 2] = b
+            out[oi + 3] = a
+            oi += 4
         prev = scan
     return w, h, bytes(out)
 
@@ -222,17 +231,40 @@ def rgb_to_lab(r, g, b):
     return (116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz))
 
 
+def over(r, g, b, a, bg):
+    inv = 255 - a
+    return ((r * a + bg * inv) // 255, (g * a + bg * inv) // 255, (b * a + bg * inv) // 255)
+
+
+def de_rgb(c1, c2):
+    L1, a1, b1 = rgb_to_lab(*c1)
+    L2, a2, b2 = rgb_to_lab(*c2)
+    return math.sqrt((L1 - L2) ** 2 + (a1 - a2) ** 2 + (b1 - b2) ** 2)
+
+
 def mean_de(a, b, w, pts):
     acc = 0.0
     n = 0
     step = max(1, len(pts) // 400)
     for x, y in pts[::step]:
-        o = (y * w + x) * 3
-        L1, a1, b1 = rgb_to_lab(a[o], a[o + 1], a[o + 2])
-        L2, a2, b2 = rgb_to_lab(b[o], b[o + 1], b[o + 2])
-        acc += math.sqrt((L1 - L2) ** 2 + (a1 - a2) ** 2 + (b1 - b2) ** 2)
+        o = (y * w + x) * 4
+        c1 = a[o : o + 4]
+        c2 = b[o : o + 4]
+        d_black = de_rgb(over(c1[0], c1[1], c1[2], c1[3], 0), over(c2[0], c2[1], c2[2], c2[3], 0))
+        d_white = de_rgb(over(c1[0], c1[1], c1[2], c1[3], 255), over(c2[0], c2[1], c2[2], c2[3], 255))
+        acc += d_black if d_black > d_white else d_white
         n += 1
     return acc / n if n else 0.0
+
+
+def vis_diff(c1, c2):
+    for bg in (0, 255):
+        p1 = over(c1[0], c1[1], c1[2], c1[3], bg)
+        p2 = over(c2[0], c2[1], c2[2], c2[3], bg)
+        dr, dg, db = p1[0] - p2[0], p1[1] - p2[1], p1[2] - p2[2]
+        if dr * dr + dg * dg + db * db > FUZZ2:
+            return True
+    return False
 
 
 def main(base, cap):
@@ -241,14 +273,10 @@ def main(base, cap):
     if (w, h) != (w2, h2):
         raise ValueError("size")
     pix = set()
-    i = 0
     n = w * h
     for p in range(n):
-        dr = a[i] - b[i]
-        dg = a[i + 1] - b[i + 1]
-        db = a[i + 2] - b[i + 2]
-        i += 3
-        if dr * dr + dg * dg + db * db > FUZZ2:
+        i = p * 4
+        if vis_diff(a[i : i + 4], b[i : i + 4]):
             pix.add((p % w, p // w))
     if not pix:
         return 0
