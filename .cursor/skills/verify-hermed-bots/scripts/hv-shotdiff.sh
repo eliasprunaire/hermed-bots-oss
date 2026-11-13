@@ -5,9 +5,12 @@
 #         hv-shotdiff.sh --bless <dossier-captures> <dossier-baselines>   # promeut (humain seulement)
 # Tolérance = fraction de pixels différents (fuzz 5 % par pixel). Outil : ImageMagick `compare`
 # (brew install imagemagick). Un écart franc localisé (zone connexe après érosion d'un pixel,
-# ΔE élevé) échoue aussi, même si le ratio global reste sous la tolérance. Codes : 0 OK ; 2 usage ;
-# 11 écart > tolérance ou zone locale ; 12 baseline manquante ; 13 outil absent ; 15 captures
-# absentes (dossier absent ou sans PNG, export impossible, nom attendu manquant).
+# ΔE élevé) échoue aussi, même si le ratio global reste sous la tolérance. Avant les zones, un
+# pixel n'est différent que si aucun voisin dans un rayon de 4 px n'est à moins de ΔE 10
+# (les deux sens : décalage et anticrénelage ignorés, couleur nouvelle conservée).
+# Codes : 0 OK ; 2 usage ; 11 écart > tolérance ou zone locale ; 12 baseline manquante ;
+# 13 outil absent ; 15 captures absentes (dossier absent ou sans PNG, export impossible,
+# nom attendu manquant).
 # Le runner XCUITest est sandboxé : il n'écrit pas dans le dossier des captures, qui vient de --export.
 # Le jugement visuel final reste manuel (A3) : ce script ne fait que trier.
 set -euo pipefail
@@ -80,6 +83,9 @@ for f in "$CAP"/*.png; do
 import math, struct, sys, zlib
 
 FUZZ2 = (0.05 * 255 * math.sqrt(3)) ** 2
+NEIGHBOR_RADIUS = 4
+NEIGHBOR_DE = 10.0
+NEIGHBOR_DE2 = NEIGHBOR_DE * NEIGHBOR_DE
 MIN_ERODED = 80
 MIN_SIDE = 8
 MIN_DE = 10.0
@@ -267,17 +273,74 @@ def vis_diff(c1, c2):
     return False
 
 
+def lab_cached(r, g, b, cache):
+    key = (r << 16) | (g << 8) | b
+    lab = cache.get(key)
+    if lab is None:
+        lab = rgb_to_lab(r, g, b)
+        cache[key] = lab
+    return lab
+
+
+def vis_de2(c1, c2, cache):
+    best = 0.0
+    for bg in (0, 255):
+        p1 = over(c1[0], c1[1], c1[2], c1[3], bg)
+        p2 = over(c2[0], c2[1], c2[2], c2[3], bg)
+        L1, a1, b1 = lab_cached(p1[0], p1[1], p1[2], cache)
+        L2, a2, b2 = lab_cached(p2[0], p2[1], p2[2], cache)
+        dl, da, db = L1 - L2, a1 - a2, b1 - b2
+        d2 = dl * dl + da * da + db * db
+        if d2 > best:
+            best = d2
+    return best
+
+
+def has_neighbor(src, dst, w, h, x, y, cache):
+    so = (y * w + x) * 4
+    sr, sg, sb, sa = src[so], src[so + 1], src[so + 2], src[so + 3]
+    rad = NEIGHBOR_RADIUS
+    y0 = 0 if y < rad else y - rad
+    y1 = h if y + rad + 1 > h else y + rad + 1
+    x0 = 0 if x < rad else x - rad
+    x1 = w if x + rad + 1 > w else x + rad + 1
+    for yy in range(y0, y1):
+        row = yy * w * 4
+        for xx in range(x0, x1):
+            do = row + xx * 4
+            if (
+                dst[do] == sr
+                and dst[do + 1] == sg
+                and dst[do + 2] == sb
+                and dst[do + 3] == sa
+            ):
+                return True
+    src_px = src[so : so + 4]
+    for yy in range(y0, y1):
+        row = yy * w * 4
+        for xx in range(x0, x1):
+            do = row + xx * 4
+            if vis_de2(src_px, dst[do : do + 4], cache) <= NEIGHBOR_DE2:
+                return True
+    return False
+
+
 def main(base, cap):
     w, h, a = decode_rgb(base)
     w2, h2, b = decode_rgb(cap)
     if (w, h) != (w2, h2):
         raise ValueError("size")
     pix = set()
+    cache = {}
     n = w * h
     for p in range(n):
         i = p * 4
         if vis_diff(a[i : i + 4], b[i : i + 4]):
-            pix.add((p % w, p // w))
+            x, y = p % w, p // w
+            if not has_neighbor(a, b, w, h, x, y, cache) or not has_neighbor(
+                b, a, w, h, x, y, cache
+            ):
+                pix.add((x, y))
     if not pix:
         return 0
     visited = set()
