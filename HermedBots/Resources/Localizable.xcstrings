@@ -142,6 +142,16 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Connection" } }
       }
     },
+    "Connexion…" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connecting…" } }
+      }
+    },
+    "Compatibilité · voir Réglages" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Compatibility · see Settings" } }
+      }
+    },
     "Écrire à %@…" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Message %@…" } }
@@ -384,6 +394,11 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "present" } }
       }
     },
+    "Prêt" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Ready" } }
+      }
+    },
     "présente" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "present" } }
@@ -458,6 +473,11 @@
     "Utilisateur" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "User" } }
+      }
+    },
+    "Version Hermes" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hermes version" } }
       }
     },
     "Version de Hermes" : {
