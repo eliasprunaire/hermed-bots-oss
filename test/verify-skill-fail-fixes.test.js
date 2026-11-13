@@ -910,30 +910,43 @@ function findConvert() {
   return null;
 }
 
-function writeBannerPng(bin, text, out) {
-  const common = [
-    "-size",
-    "1280x200",
-    "xc:rgb(240,240,240)",
-    "-fill",
-    "rgb(20,20,20)",
-    "-pointsize",
-    "28",
-    "-gravity",
-    "NorthWest",
-    "-annotate",
-    "+24+40",
-    text,
-    `png24:${out}`,
-  ];
-  const withFont = [
-    "-size",
-    "1280x200",
-    "xc:rgb(240,240,240)",
-    "-fill",
-    "rgb(20,20,20)",
-    "-font",
+function imageMagickFontNames(bin) {
+  const list = spawnSync(bin, ["-list", "font"], { encoding: "utf8" });
+  if (list.error || list.status !== 0) return [];
+  const names = [];
+  for (const line of String(list.stdout || "").split("\n")) {
+    const match = /^\s*Font:\s+(\S+)/.exec(line);
+    if (match) names.push(match[1]);
+  }
+  return names;
+}
+
+function preferredImageMagickFont(names) {
+  const prefer = [
     "DejaVu-Sans-Bold",
+    "DejaVuSans-Bold",
+    "Liberation-Sans-Bold",
+    "FreeSans-Bold",
+    "Arial-Bold",
+    "Helvetica-Bold",
+    "Helvetica",
+  ];
+  for (const name of prefer) {
+    if (names.includes(name)) return name;
+  }
+  return names[0] || null;
+}
+
+function bannerMagickArgs(text, out, font) {
+  const args = [
+    "-size",
+    "1280x200",
+    "xc:rgb(240,240,240)",
+    "-fill",
+    "rgb(20,20,20)",
+  ];
+  if (font) args.push("-font", font);
+  args.push(
     "-pointsize",
     "28",
     "-gravity",
@@ -942,10 +955,22 @@ function writeBannerPng(bin, text, out) {
     "+24+40",
     text,
     `png24:${out}`,
-  ];
-  let run = spawnSync(bin, withFont, { encoding: "utf8" });
-  if (run.status !== 0) run = spawnSync(bin, common, { encoding: "utf8" });
-  assert.equal(run.status, 0, run.stderr || run.stdout);
+  );
+  return args;
+}
+
+function writeBannerPng(bin, text, out) {
+  const font = preferredImageMagickFont(imageMagickFontNames(bin));
+  let run = spawnSync(bin, bannerMagickArgs(text, out, font || "DejaVu-Sans-Bold"), {
+    encoding: "utf8",
+  });
+  if (run.status !== 0) {
+    run = spawnSync(bin, bannerMagickArgs(text, out, null), { encoding: "utf8" });
+  }
+  if (run.status !== 0) {
+    writeBannerPngFallback(text, out);
+    return;
+  }
 }
 
 function writeBannerPngFallback(text, out) {
@@ -1332,6 +1357,16 @@ test("hv-shotdiff fails a 25x25 pill reduced to 17x17 under default TOL", () => 
   assert.equal(Number(zone[4]), 25);
   assert.equal(Number(zone[5]), 336);
   assert.ok(Number(zone[6]) >= 40, zone[6]);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("writeBannerPng uses pixel fallback when ImageMagick cannot render text", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-banner-fallback-"));
+  const out = join(dir, "banner.png");
+  const fake = join(dir, "no-font-convert");
+  writeFileSync(fake, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  writeBannerPng(fake, "OK", out);
+  assert.equal(existsSync(out), true);
   rmSync(dir, { recursive: true, force: true });
 });
 
