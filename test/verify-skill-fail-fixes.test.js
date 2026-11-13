@@ -16,6 +16,7 @@ const http = require("node:http");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
+const { createHash } = require("node:crypto");
 const { crc32, deflateSync } = require("node:zlib");
 
 const ROOT = join(__dirname, "..");
@@ -1172,6 +1173,7 @@ test("hv-shotdiff accepts typical antialiasing under default TOL", () => {
 });
 
 test("hv-shotdiff flags hd09-cancelled orange vs grey from #150 against main", () => {
+  // Capture historique de #150 (c4138edb), figée hors baselines, indépendante de l'historique git.
   const dir = mkdtempSync(join(tmpdir(), "hv-shot-hd09-"));
   const cap = join(dir, "cap");
   const base = join(dir, "base");
@@ -1179,13 +1181,12 @@ test("hv-shotdiff flags hd09-cancelled orange vs grey from #150 against main", (
   mkdirSync(cap);
   mkdirSync(base);
   mkdirSync(dif);
-  const shown = spawnSync(
-    "git",
-    ["show", "c4138edb:.cursor/skills/verify-hermed-bots/baselines/hd09-cancelled.png"],
-    { cwd: ROOT, encoding: "buffer", maxBuffer: 10 * 1024 * 1024, timeout: 10000 },
+  const historic = readFileSync(join(ROOT, "test/fixtures/shotdiff/hd09-cancelled-c4138edb.png"));
+  assert.equal(
+    createHash("sha256").update(historic).digest("hex"),
+    "0316fdd24dbf71459bd1c75a41cd812729a8e1a45545e4f2bc9d7671668617f1",
   );
-  assert.equal(shown.status, 0, String(shown.stderr || ""));
-  writeFileSync(join(cap, "hd09-cancelled.png"), shown.stdout);
+  writeFileSync(join(cap, "hd09-cancelled.png"), historic);
   writeFileSync(
     join(base, "hd09-cancelled.png"),
     readFileSync(join(ROOT, ".cursor/skills/verify-hermed-bots/baselines/hd09-cancelled.png")),
