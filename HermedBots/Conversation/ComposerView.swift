@@ -67,13 +67,6 @@ struct ComposerView: View {
     }
 }
 
-/// Position du caret après ⏎ : fin du brouillon, aucune étendue
-enum ComposerSubmit {
-    static func collapsedRange(of text: String) -> NSRange {
-        NSRange(location: (text as NSString).length, length: 0)
-    }
-}
-
 /// Replace le premier répondant sur l'éditeur éditable du champ, sans toucher aux bulles du fil
 private struct ComposerSubmitRepair: NSViewRepresentable {
     var generation: Int

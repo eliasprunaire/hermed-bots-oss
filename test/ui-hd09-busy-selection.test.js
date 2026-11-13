@@ -71,7 +71,7 @@ test("⏎ refuse d'envoyer sans laisser une sélection : focus rendu, caret à l
   assert.match(submit, /focused = true/);
   assert.match(submit, /submitGeneration \+= 1/);
 
-  const range = firstBlock(composer, "enum ComposerSubmit");
+  const range = firstBlock(read("HermedBots/Conversation/ComposerSubmit.swift"), "enum ComposerSubmit");
   assert.match(range, /static func collapsedRange\(of text: String\) -> NSRange/);
   assert.match(range, /NSRange\(location: \(text as NSString\)\.length, length: 0\)/);
 
@@ -81,6 +81,9 @@ test("⏎ refuse d'envoyer sans laisser une sélection : focus rendu, caret à l
   assert.match(repair, /ComposerSubmit\.collapsedRange/);
   assert.match(repair, /isEditable/);
   assert.doesNotMatch(repair, /hasKeyboardFocus/);
+
+  const project = read("HermedBots.xcodeproj/project.pbxproj");
+  assert.match(project, /ComposerSubmit\.swift in Sources/);
 });
 
 test("le masquage du caret en mode test n'est pas un clic d'unfocus", () => {
