@@ -56,8 +56,9 @@ test("every VM guard opens for the test VM account and closes for any other acco
   }
 });
 
-test("hd13 and hd14 run-ui.sh emit HV_TEST_API_KEYS like hd15 before xcodebuild", () => {
+test("hd11, hd13 and hd14 run-ui.sh emit HV_TEST_API_KEYS like hd15 before xcodebuild", () => {
   const files = [
+    join(SPIKE, "hd11-instruments", "run-ui.sh"),
     join(SPIKE, "hd13-instruments", "run-ui.sh"),
     join(SPIKE, "hd14-instruments", "run-ui.sh"),
     join(SPIKE, "hd15-instruments", "run-ui.sh"),
@@ -81,13 +82,16 @@ test("hd13 and hd14 run-ui.sh emit HV_TEST_API_KEYS like hd15 before xcodebuild"
     const exported = text.indexOf("export HV_TEST_API_KEYS TEST_RUNNER_HV_TEST_API_KEYS=$HV_TEST_API_KEYS");
     const xcode = text.indexOf("xcodebuild test-without-building");
     assert.ok(exported !== -1 && xcode !== -1 && exported < xcode, `${rel} : export après xcodebuild`);
+    assert.doesNotMatch(text, /HV_TEST_API_KEYS=["']/, `${rel} : clé en dur`);
   }
-  const hd13 = readFileSync(join(SPIKE, "hd13-instruments", "run-ui.sh"), "utf8");
-  assert.match(
-    hd13,
-    /python3 - "\$ROOT\/Packages\/HermesAdapter\/Tests\/HermesAdapterTests\/Fixtures\/hermes-current\/contract\.json"/,
-    "hd13 : contract.json hors ROOT",
-  );
+  for (const lane of ["hd11", "hd13"]) {
+    const text = readFileSync(join(SPIKE, `${lane}-instruments`, "run-ui.sh"), "utf8");
+    assert.match(
+      text,
+      /python3 - "\$ROOT\/Packages\/HermesAdapter\/Tests\/HermesAdapterTests\/Fixtures\/hermes-current\/contract\.json"/,
+      `${lane} : contract.json hors ROOT`,
+    );
+  }
 });
 
 test("hd13 run-ui.sh copies fake-requests.json in the EXIT trap before down fake", () => {
