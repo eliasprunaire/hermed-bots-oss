@@ -49,6 +49,9 @@ struct Conversation: Equatable {
     /// Envoyer exige un message non vide et aucun tour en cours
     func canSend(_ draft: String) -> Bool { phase == .idle && Self.message(from: draft) != nil }
 
+    /// L'état terminal n'apparaît que s'il y a des lignes : un transcript vide ne montre pas de tour fantôme
+    var showsEnd: Bool { end != nil && !entries.isEmpty }
+
     /// Ajoute le message de l'utilisateur et ouvre le tour ; rend le texte à envoyer, ou nil quand l'envoi est refusé
     /// Le refus du tour déjà en cours est ce qui fait qu'un double clic ne part qu'une fois
     mutating func begin(_ draft: String) -> String? {

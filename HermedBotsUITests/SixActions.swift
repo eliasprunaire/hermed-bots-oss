@@ -606,18 +606,25 @@ final class SixActions: XCTestCase {
 
     /// Lane 6 : des espaces seuls ne s'envoient pas
     func testAMessageOfSpacesCannotBeSent() throws {
-        let start = Date()
         let app = launch(isolated: false)
         try openBot(in: app)
+        // Chat unique : le fil le plus récent peut déjà porter un tour ; une session neuve isole le brouillon d'espaces
+        let neuve = element(.sessionNew, in: app)
+        XCTAssertTrue(neuve.waitForExistence(timeout: 10), "hd.session.new absent")
+        neuve.click()
+        XCTAssertTrue(element(.conversationEmpty, in: app).waitForExistence(timeout: 10), "un fil vide pour le brouillon d'espaces")
+        XCTAssertFalse(element(.conversationState, in: app).exists, "pas de tour fantôme sur un fil vide")
+        let start = Date()
         type("     ", in: app)
         XCTAssertFalse(element(.composerSend, in: app).isEnabled, "Envoyer doit rester grisé pour des espaces")
         // ⏎ ne contourne pas le bouton
         element(.composerInput, in: app).typeKey(.return, modifierFlags: [])
         XCTAssertFalse(waitUntil(1) { self.posts(self.runs, since: start) > 0 || self.posts(self.sessions, since: start) > 0 }, "un message d'espaces a produit une requête")
         XCTAssertEqual(posts(runs, since: start), 0)
-        XCTAssertEqual(posts(sessions, since: start), 0, "un message refusé ne crée pas de fil")
-        // Chat unique : le fil le plus récent est déjà ouvert, pas d'écran d'accueil vide
+        XCTAssertEqual(posts(sessions, since: start), 0, "un message refusé ne crée pas un second fil")
         XCTAssertTrue(element(.conversationView, in: app).exists)
+        XCTAssertTrue(element(.conversationEmpty, in: app).exists)
+        XCTAssertFalse(element(.conversationState, in: app).exists, "les espaces ne fabriquent pas de tour")
         XCTAssertFalse(element(.composerSend, in: app).isEnabled)
         type("\n\t ", in: app)
         XCTAssertFalse(element(.composerSend, in: app).isEnabled)
@@ -627,6 +634,8 @@ final class SixActions: XCTestCase {
     /// Lane 7 : 100 000 caractères collés, une seule requête, la fenêtre répond
     func testAHundredThousandCharacterMessageGoesOutOnce() throws {
         try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
+        // sans reset, des deltas injectés par la sonde resteraient collés à ce tour : la dernière ligne serait « d19 »
+        FakeServer.reset()
         let start = Date()
         let app = launch(isolated: false)
         try openBot(in: app)
@@ -640,6 +649,9 @@ final class SixActions: XCTestCase {
         XCTAssertTrue(waitUntil(30) { self.element(.composerSend, in: app).isEnabled }, "le collage n'a pas rempli le champ")
         element(.composerSend, in: app).click()
         XCTAssertTrue(waitForState("completed", in: app, timeout: 60), "le tour de 100 000 caractères ne finit pas")
+        // la dernière ligne à l'écran, pas une ligne d'historique : waitForMessage passerait sur la ligne 14
+        XCTAssertTrue(waitUntil(60) { self.shownMessages(in: app).last == "Réponse de test" }, "la réponse n'est pas visible après l'envoi long")
+        XCTAssertEqual(shownMessages(in: app).last, "Réponse de test", "la dernière ligne doit être la réponse entière")
         XCTAssertEqual(app.state, .runningForeground)
         XCTAssertTrue(element(.composerInput, in: app).isHittable, "la fenêtre ne répond plus")
         let sent = postBodies(on: runs, since: start)

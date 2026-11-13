@@ -11,11 +11,20 @@ struct ComposerView: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 10) {
-            TextField(model.openError == nil ? "Écrire à \(bot.name)…" : model.composerUnavailableText, text: $model.draft, axis: .vertical)
+            TextField(composerPrompt, text: $model.draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...8)
                 .focused($focused)
                 .disabled(model.isOpening || model.openError != nil)
+                .overlay(alignment: .leading) {
+                    if !model.draft.isEmpty, Conversation.message(from: model.draft) == nil {
+                        Text(composerPrompt)
+                            .foregroundStyle(.tertiary)
+                            .lineLimit(1)
+                            .allowsHitTesting(false)
+                            .accessibilityHidden(true)
+                    }
+                }
                 .padding(.vertical, 7)
                 .onSubmit(model.send)
                 .modifier(ComposerCaretTint(hidden: hideComposerCaret))
@@ -41,6 +50,10 @@ struct ComposerView: View {
         .padding(.top, 6)
         .padding(.bottom, 14)
         .onAppear { focused = true }
+    }
+
+    private var composerPrompt: String {
+        model.openError == nil ? "Écrire à \(bot.name)…" : model.composerUnavailableText
     }
 }
 
