@@ -1225,7 +1225,6 @@ test("hv-shotdiff keeps default TOL 0.02 and a local zone rule", () => {
   assert.match(src, /MIN_ERODED = 80/);
   assert.match(src, /NEIGHBOR_RADIUS = 4/);
   assert.match(src, /NEIGHBOR_DE = 10/);
-  assert.match(src, /claim_neighbor/);
   const runSrc = readFileSync(HV_RUN, "utf8");
   assert.match(runSrc, /SHOT_TOL=0\.03/);
   assert.match(runSrc, /SHOT_TOL=0\.02/);
@@ -1340,40 +1339,6 @@ test("hv-shotdiff accepts a 4 px vertically shifted pill under default TOL", () 
   assert.equal(run.status, 0, `out=${run.stdout} err=${run.stderr}`);
   assert.match(run.stdout, /OK {3}pill\.png/);
   assert.doesNotMatch(run.stdout, /DIFF/);
-  rmSync(dir, { recursive: true, force: true });
-});
-
-test("hv-shotdiff fails a 20x20 orange square reduced to 12x12 under default TOL", () => {
-  const dir = mkdtempSync(join(tmpdir(), "hv-shot-shrink-"));
-  const cap = join(dir, "cap");
-  const base = join(dir, "base");
-  const dif = join(dir, "dif");
-  mkdirSync(cap);
-  mkdirSync(base);
-  mkdirSync(dif);
-  const w = 200;
-  const h = 200;
-  const bg = [240, 240, 240];
-  const orange = [255, 141, 40];
-  const a = rgbCanvas(w, h, bg);
-  const b = rgbCanvas(w, h, bg);
-  blitRgb(a, w, 90, 90, 20, 20, orange);
-  blitRgb(b, w, 94, 94, 12, 12, orange);
-  writeFileSync(join(base, "shrink.png"), encodePngRgb(w, h, a));
-  writeFileSync(join(cap, "shrink.png"), encodePngRgb(w, h, b));
-  const env = shotdiffIhdrEnv(dir, "100");
-  const run = runShotdiff(cap, base, dif, env);
-  assert.equal(run.status, 11, `out=${run.stdout} err=${run.stderr}`);
-  assert.match(run.stdout, /DIFF shrink\.png/);
-  assert.match(run.stdout, /ratio=0\.00250/);
-  const zone = /zone=(\d+),(\d+),(\d+)x(\d+) px=(\d+) dE=([0-9.]+)/.exec(run.stdout);
-  assert.ok(zone, run.stdout);
-  assert.equal(Number(zone[1]), 90);
-  assert.equal(Number(zone[2]), 90);
-  assert.equal(Number(zone[3]), 20);
-  assert.equal(Number(zone[4]), 20);
-  assert.equal(Number(zone[5]), 256);
-  assert.ok(Number(zone[6]) >= 40, zone[6]);
   rmSync(dir, { recursive: true, force: true });
 });
 

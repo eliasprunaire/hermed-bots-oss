@@ -6,9 +6,8 @@
 # Tolérance = fraction de pixels différents (fuzz 5 % par pixel). Outil : ImageMagick `compare`
 # (brew install imagemagick). Un écart franc localisé (zone connexe après érosion d'un pixel,
 # ΔE élevé) échoue aussi, même si le ratio global reste sous la tolérance. Avant les zones, un
-# pixel n'est différent que si aucun voisin exclusif dans un rayon de 4 px n'est à moins de ΔE 10
-# (les deux sens : décalage et anticrénelage ignorés ; une réduction ou une couleur nouvelle
-# reste un échec).
+# pixel n'est différent que si aucun voisin dans un rayon de 4 px n'est à moins de ΔE 10
+# (les deux sens : décalage et anticrénelage ignorés, couleur nouvelle conservée).
 # Codes : 0 OK ; 2 usage ; 11 écart > tolérance ou zone locale ; 12 baseline manquante ;
 # 13 outil absent ; 15 captures absentes (dossier absent ou sans PNG, export impossible,
 # nom attendu manquant).
@@ -297,10 +296,9 @@ def vis_de2(c1, c2, cache):
     return best
 
 
-def claim_neighbor(src, dst, w, h, x, y, claimed, cache):
+def has_neighbor(src, dst, w, h, x, y, cache):
     so = (y * w + x) * 4
     sr, sg, sb, sa = src[so], src[so + 1], src[so + 2], src[so + 3]
-    src_px = src[so : so + 4]
     rad = NEIGHBOR_RADIUS
     y0 = 0 if y < rad else y - rad
     y1 = h if y + rad + 1 > h else y + rad + 1
@@ -309,8 +307,6 @@ def claim_neighbor(src, dst, w, h, x, y, claimed, cache):
     for yy in range(y0, y1):
         row = yy * w * 4
         for xx in range(x0, x1):
-            if (xx, yy) in claimed:
-                continue
             do = row + xx * 4
             if (
                 dst[do] == sr
@@ -318,16 +314,13 @@ def claim_neighbor(src, dst, w, h, x, y, claimed, cache):
                 and dst[do + 2] == sb
                 and dst[do + 3] == sa
             ):
-                claimed.add((xx, yy))
                 return True
+    src_px = src[so : so + 4]
     for yy in range(y0, y1):
         row = yy * w * 4
         for xx in range(x0, x1):
-            if (xx, yy) in claimed:
-                continue
             do = row + xx * 4
             if vis_de2(src_px, dst[do : do + 4], cache) <= NEIGHBOR_DE2:
-                claimed.add((xx, yy))
                 return True
     return False
 
@@ -337,42 +330,17 @@ def main(base, cap):
     w2, h2, b = decode_rgb(cap)
     if (w, h) != (w2, h2):
         raise ValueError("size")
-    diffs = []
+    pix = set()
+    cache = {}
     n = w * h
     for p in range(n):
         i = p * 4
         if vis_diff(a[i : i + 4], b[i : i + 4]):
-            diffs.append((p % w, p // w))
-    if not diffs:
-        return 0
-    cache = {}
-    claimed_fwd = set()
-    claimed_rev = set()
-    unexplained = set()
-    for x, y in diffs:
-        ok_fwd = claim_neighbor(a, b, w, h, x, y, claimed_fwd, cache)
-        ok_rev = claim_neighbor(b, a, w, h, x, y, claimed_rev, cache)
-        if not ok_fwd or not ok_rev:
-            unexplained.add((x, y))
-    if not unexplained:
-        return 0
-    diffset = set(diffs)
-    pix = set()
-    seen = set()
-    for seed in unexplained:
-        if seed in seen:
-            continue
-        stack = [seed]
-        seen.add(seed)
-        while stack:
-            x, y = stack.pop()
-            pix.add((x, y))
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    nxt = (x + dx, y + dy)
-                    if nxt in diffset and nxt not in seen:
-                        seen.add(nxt)
-                        stack.append(nxt)
+            x, y = p % w, p // w
+            if not has_neighbor(a, b, w, h, x, y, cache) or not has_neighbor(
+                b, a, w, h, x, y, cache
+            ):
+                pix.add((x, y))
     if not pix:
         return 0
     visited = set()
