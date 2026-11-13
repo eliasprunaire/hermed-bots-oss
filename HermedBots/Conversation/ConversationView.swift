@@ -323,7 +323,8 @@ private struct TurnEndRow: View {
         switch end {
         case .completed: .green
         case .failed: .red
-        case .cancelled, .interrupted: .orange
+        case .cancelled: .secondary
+        case .interrupted: .orange
         }
     }
 }
