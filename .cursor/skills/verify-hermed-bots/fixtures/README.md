@@ -90,6 +90,8 @@ Deux comportements du vrai Hermes ne sont pas des erreurs : un message d'espaces
 - `fields` : ajoute `zz_new_field` dans chaque objet JSON et retire le premier champ de `optional_fields`.
 - `malformed` : contrôles négatifs, choisis par `HV_MALFORMED`. `null`, `string` et `noid` abîment chaque liste `data` (null, chaîne, second élément sans `id`). `leak` liste `hv-old` comme actif. `nolock` ignore le verrou de modèle.
 
+`POST /_hv/config` accepte aussi `fail_without_text` (opt-in, hors `HV_FAKE_MODE`) : le tour n'émet pas le texte assistant de la fixture. Les scénarios hd09-failed et hd09-failed-error restent sans texte ; hd09-cancelled et hd09-interrupted reçoivent un delta visiblement tronqué.
+
 Le faux serveur valide ce que la sonde de bord exige : clé absente (401), JSON invalide ou clé de `body` absente ou vide (400), profil ou identifiant inconnu (404). Il garde en mémoire les tours, les sessions et le modèle verrouillé de chaque session qu'il a créés.
 
 Différences voulues avec le vrai Hermes :

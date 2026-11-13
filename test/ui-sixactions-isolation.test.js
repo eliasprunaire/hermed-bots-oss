@@ -63,7 +63,40 @@ test("POST /_hv/reset resème les transcripts des sessions", () => {
   const source = read(".cursor/skills/verify-hermed-bots/scripts/hv-fake-hermes.py");
   const reset = pythonDef(source, "reset_state");
   assert.match(reset, /seed_session_messages\(\)/);
+  assert.match(reset, /fail_without_text=False/);
   const seed = pythonDef(source, "seed_session_messages");
   assert.match(seed, /SESSION_MSGS\.clear\(\)/);
   assert.match(seed, /SEED_MSG_DATA/);
+});
+
+test("testEveryTerminalState active le mode échec sans texte avant chaque capture hd09", () => {
+  const source = read("HermedBotsUITests/SixActions.swift");
+  const body = firstBlock(source, "func testEveryTerminalStateShowsAsHermesSentIt()");
+  const configAt = body.indexOf("failWithoutText: true");
+  const injectAt = body.indexOf("serverPost(\"/_hv/inject\"");
+  const captureAt = body.indexOf("HVShot.capture");
+  assert.notEqual(configAt, -1, "failWithoutText absent");
+  assert.notEqual(injectAt, -1, "inject absent");
+  assert.notEqual(captureAt, -1, "capture absente");
+  assert.ok(configAt < injectAt, "le mode doit précéder l'injection");
+  assert.ok(injectAt < captureAt, "l'injection doit précéder la capture");
+  for (const shot of ["hd09-failed", "hd09-failed-error", "hd09-cancelled", "hd09-interrupted"]) {
+    assert.match(body, new RegExp(`"${shot}"`));
+  }
+  assert.match(body, /Réponse de t/);
+  assert.match(body, /aucun texte assistant pour l'échec/);
+});
+
+test("les autres scénarios hd09 n'activent pas le mode échec sans texte", () => {
+  const source = read("HermedBotsUITests/SixActions.swift");
+  const others = [
+    "func testConversation()",
+    "func testAnUnknownEventInTheStreamDoesNotBreakTheTurn()",
+    "func testReopeningAThreadShowsItsTranscriptAndSendsNothing()",
+  ];
+  for (const marker of others) {
+    const body = firstBlock(source, marker);
+    assert.equal(body.includes("failWithoutText"), false, marker);
+    assert.equal(body.includes("fail_without_text"), false, marker);
+  }
 });
