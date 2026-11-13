@@ -16,6 +16,7 @@ const http = require("node:http");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
+const { crc32, deflateSync } = require("node:zlib");
 
 const ROOT = join(__dirname, "..");
 const FAKE = join(ROOT, ".cursor/skills/verify-hermed-bots/scripts/hv-fake-hermes.py");
@@ -730,6 +731,112 @@ function shotdiffEnv(dir, ae, pixels, extra = {}) {
   return { ...process.env, ...extra, PATH: `${bin}:${process.env.PATH || ""}` };
 }
 
+function shotdiffIhdrEnv(dir, ae, extra = {}) {
+  const bin = join(dir, "bin");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, "compare"), `#!/bin/sh\nprintf '%s\\n' "${ae}" >&2\nexit 1\n`, { mode: 0o755 });
+  writeFileSync(
+    join(bin, "identify"),
+    [
+      "#!/bin/sh",
+      "fmt=; file=",
+      "while [ $# -gt 0 ]; do",
+      '  case "$1" in',
+      "    -format) fmt=$2; shift 2 ;;",
+      "    *) file=$1; shift ;;",
+      "  esac",
+      "done",
+      'set -- $(od -An -t u1 -j 16 -N 8 "$file")',
+      "w=$(( $1 * 16777216 + $2 * 65536 + $3 * 256 + $4 ))",
+      "h=$(( $5 * 16777216 + $6 * 65536 + $7 * 256 + $8 ))",
+      'case "$fmt" in',
+      '  %w) printf "%s\\n" "$w" ;;',
+      '  %h) printf "%s\\n" "$h" ;;',
+      "  *) printf '%s\\n' $((w * h)) ;;",
+      "esac",
+      "",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  return { ...process.env, ...extra, PATH: `${bin}:${process.env.PATH || ""}`, LC_ALL: "C" };
+}
+
+function encodePngRgb(w, h, rgb) {
+  const stride = w * 3;
+  const raw = Buffer.alloc((stride + 1) * h);
+  for (let y = 0; y < h; y++) {
+    raw[(stride + 1) * y] = 0;
+    rgb.copy(raw, (stride + 1) * y + 1, y * stride, (y + 1) * stride);
+  }
+  const chunk = (tag, data) => {
+    const payload = Buffer.concat([Buffer.from(tag), data]);
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(payload) >>> 0);
+    return Buffer.concat([len, payload, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+function rgbCanvas(w, h, color) {
+  const buf = Buffer.alloc(w * h * 3);
+  for (let i = 0; i < w * h; i++) {
+    buf[i * 3] = color[0];
+    buf[i * 3 + 1] = color[1];
+    buf[i * 3 + 2] = color[2];
+  }
+  return buf;
+}
+
+function blitRgb(buf, w, x0, y0, ww, hh, color) {
+  for (let y = y0; y < y0 + hh; y++) {
+    for (let x = x0; x < x0 + ww; x++) {
+      const o = (y * w + x) * 3;
+      buf[o] = color[0];
+      buf[o + 1] = color[1];
+      buf[o + 2] = color[2];
+    }
+  }
+}
+
+function fillCircleAa(buf, w, h, cx, cy, r, color, bg) {
+  const r2 = r * r;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let i = 0; i < 4; i++) {
+        for (let j = 0; j < 4; j++) {
+          const px = x + (i + 0.5) / 4;
+          const py = y + (j + 0.5) / 4;
+          if ((px - cx) * (px - cx) + (py - cy) * (py - cy) <= r2) acc += 1;
+        }
+      }
+      const t = acc / 16;
+      const o = (y * w + x) * 3;
+      buf[o] = Math.round(bg[0] * (1 - t) + color[0] * t);
+      buf[o + 1] = Math.round(bg[1] * (1 - t) + color[1] * t);
+      buf[o + 2] = Math.round(bg[2] * (1 - t) + color[2] * t);
+    }
+  }
+}
+
+function runShotdiff(cap, base, dif, env, tol) {
+  const args = [SHOTDIFF, cap, base, dif];
+  if (tol !== undefined) args.push(tol);
+  return spawnSync("bash", args, { encoding: "utf8", env, timeout: 60000 });
+}
+
 test("hv-shotdiff rejects a large ratio under fr_FR and C locales", () => {
   const dir = mkdtempSync(join(tmpdir(), "hv-shot-"));
   const cap = join(dir, "cap");
@@ -991,6 +1098,130 @@ test("hv-shotdiff fails when image dimensions differ", () => {
   assert.equal(run.status, 11, `out=${run.stdout} err=${run.stderr}`);
   assert.match(run.stdout, /DIFF/);
   assert.match(run.stdout, /size/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("hv-shotdiff keeps default TOL 0.02 and a local zone rule", () => {
+  const src = readFileSync(SHOTDIFF, "utf8");
+  assert.match(src, /TOL=\$\{4:-0\.02\}/);
+  assert.match(src, /zone=\$zone/);
+  assert.match(src, /MIN_ERODED = 80/);
+  const runSrc = readFileSync(HV_RUN, "utf8");
+  assert.match(runSrc, /SHOT_TOL=0\.03/);
+  assert.match(runSrc, /SHOT_TOL=0\.02/);
+  assert.doesNotMatch(runSrc, /hv-shotdiff\.sh".*diffs" 0\.02/);
+});
+
+test("hv-shotdiff fails a small frank orange/grey blob under default TOL", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-blob-"));
+  const cap = join(dir, "cap");
+  const base = join(dir, "base");
+  const dif = join(dir, "dif");
+  mkdirSync(cap);
+  mkdirSync(base);
+  mkdirSync(dif);
+  const w = 200;
+  const h = 200;
+  const bg = [240, 240, 240];
+  const orange = rgbCanvas(w, h, bg);
+  const grey = rgbCanvas(w, h, bg);
+  blitRgb(orange, w, 90, 90, 20, 20, [255, 141, 40]);
+  blitRgb(grey, w, 90, 90, 20, 20, [121, 121, 121]);
+  writeFileSync(join(base, "pill.png"), encodePngRgb(w, h, orange));
+  writeFileSync(join(cap, "pill.png"), encodePngRgb(w, h, grey));
+  const env = shotdiffIhdrEnv(dir, "400");
+  const run = runShotdiff(cap, base, dif, env);
+  assert.equal(run.status, 11, `out=${run.stdout} err=${run.stderr}`);
+  assert.match(run.stdout, /DIFF pill\.png/);
+  assert.match(run.stdout, /ratio=0\.01000/);
+  const zone = /zone=(\d+),(\d+),(\d+)x(\d+) px=(\d+) dE=([0-9.]+)/.exec(run.stdout);
+  assert.ok(zone, run.stdout);
+  assert.equal(Number(zone[1]), 90);
+  assert.equal(Number(zone[2]), 90);
+  assert.equal(Number(zone[3]), 20);
+  assert.equal(Number(zone[4]), 20);
+  assert.equal(Number(zone[5]), 400);
+  assert.ok(Number(zone[6]) >= 40, zone[6]);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("hv-shotdiff accepts typical antialiasing under default TOL", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-aa-"));
+  const cap = join(dir, "cap");
+  const base = join(dir, "base");
+  const dif = join(dir, "dif");
+  mkdirSync(cap);
+  mkdirSync(base);
+  mkdirSync(dif);
+  const w = 200;
+  const h = 200;
+  const bg = [240, 240, 240];
+  const color = [20, 20, 20];
+  const a = rgbCanvas(w, h, bg);
+  const b = rgbCanvas(w, h, bg);
+  fillCircleAa(a, w, h, 100.0, 100.0, 40.0, color, bg);
+  fillCircleAa(b, w, h, 100.4, 100.0, 40.0, color, bg);
+  writeFileSync(join(base, "edge.png"), encodePngRgb(w, h, a));
+  writeFileSync(join(cap, "edge.png"), encodePngRgb(w, h, b));
+  const env = shotdiffIhdrEnv(dir, "298");
+  const run = runShotdiff(cap, base, dif, env);
+  assert.equal(run.status, 0, `out=${run.stdout} err=${run.stderr}`);
+  assert.match(run.stdout, /OK {3}edge\.png/);
+  assert.doesNotMatch(run.stdout, /DIFF/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("hv-shotdiff flags hd09-cancelled orange vs grey from #150 against main", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-hd09-"));
+  const cap = join(dir, "cap");
+  const base = join(dir, "base");
+  const dif = join(dir, "dif");
+  mkdirSync(cap);
+  mkdirSync(base);
+  mkdirSync(dif);
+  const shown = spawnSync(
+    "git",
+    ["show", "c4138edb:.cursor/skills/verify-hermed-bots/baselines/hd09-cancelled.png"],
+    { cwd: ROOT, encoding: "buffer", maxBuffer: 10 * 1024 * 1024, timeout: 10000 },
+  );
+  assert.equal(shown.status, 0, String(shown.stderr || ""));
+  writeFileSync(join(cap, "hd09-cancelled.png"), shown.stdout);
+  writeFileSync(
+    join(base, "hd09-cancelled.png"),
+    readFileSync(join(ROOT, ".cursor/skills/verify-hermed-bots/baselines/hd09-cancelled.png")),
+  );
+  const env = shotdiffIhdrEnv(dir, "428");
+  const run = runShotdiff(cap, base, dif, env);
+  assert.equal(run.status, 11, `out=${run.stdout} err=${run.stderr}`);
+  assert.match(run.stdout, /DIFF hd09-cancelled\.png/);
+  const ratio = /ratio=([0-9.]+)/.exec(run.stdout);
+  assert.ok(ratio, run.stdout);
+  assert.ok(Number(ratio[1]) < 0.02, ratio[1]);
+  const zone = /zone=(\d+),(\d+),(\d+)x(\d+) px=(\d+) dE=([0-9.]+)/.exec(run.stdout);
+  assert.ok(zone, run.stdout);
+  assert.ok(Number(zone[1]) >= 640 && Number(zone[1]) <= 670, zone[1]);
+  assert.ok(Number(zone[2]) >= 640 && Number(zone[2]) <= 670, zone[2]);
+  assert.ok(Number(zone[3]) >= 20 && Number(zone[3]) <= 30, zone[3]);
+  assert.ok(Number(zone[4]) >= 20 && Number(zone[4]) <= 30, zone[4]);
+  assert.ok(Number(zone[5]) >= 300, zone[5]);
+  assert.ok(Number(zone[6]) >= 40, zone[6]);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("hv-shotdiff accepts every baseline compared to itself", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-self-"));
+  const dif = join(dir, "dif");
+  mkdirSync(dif);
+  const baselines = join(ROOT, ".cursor/skills/verify-hermed-bots/baselines");
+  const pngs = readdirSync(baselines).filter((name) => name.endsWith(".png"));
+  assert.ok(pngs.length > 0, "aucune référence PNG");
+  const env = shotdiffIhdrEnv(dir, "0");
+  const run = runShotdiff(baselines, baselines, dif, env);
+  assert.equal(run.status, 0, `out=${run.stdout} err=${run.stderr}`);
+  const oks = run.stdout.split("\n").filter((line) => /^OK\s/.test(line));
+  const diffs = run.stdout.split("\n").filter((line) => /^DIFF /.test(line));
+  assert.equal(diffs.length, 0, diffs.join("\n"));
+  assert.equal(oks.length, pngs.length, `ok=${oks.length} png=${pngs.length}`);
   rmSync(dir, { recursive: true, force: true });
 });
 
