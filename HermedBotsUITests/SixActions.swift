@@ -171,7 +171,8 @@ final class SixActions: XCTestCase {
     // MARK: la liste
 
     func testListBots() throws {
-        let app = launch(isolated: false)
+        // processus neuf : isolated:false réutiliserait un fil déjà ouvert (hd08-bots doit rester l'accueil)
+        let app = launch()
         let wanted = ["hv-bot-a", "hv-bot-b"]
         try requireIssue56Bots(in: app)
         for id in wanted {
@@ -185,6 +186,8 @@ final class SixActions: XCTestCase {
         }
         XCTAssertEqual(count(AccessibilityID.botsList.rawValue, in: app), 1)
         XCTAssertFalse(element(.botsEmpty, in: app).exists, "le message « aucun bot » reste affiché avec des bots")
+        XCTAssertTrue(element(AccessibilityID.homeBot("hv-bot-a"), in: app).waitForExistence(timeout: 10), "l'accueil doit rester ouvert : hd08-bots capture la grille, pas un fil")
+        XCTAssertFalse(element(.conversationView, in: app).exists, "un fil ouvert masquerait l'accueil de hd08-bots")
         print("HV-BOTS rows=\(shownBotIDs(in: app).sorted())")
         HVShot.capture("hd08-bots", app)
     }
@@ -522,6 +525,8 @@ final class SixActions: XCTestCase {
     /// Rouvrir un fil passé montre son transcript, avec les numéros de Hermes, sans rien envoyer
     func testReopeningAThreadShowsItsTranscriptAndSendsNothing() throws {
         try XCTSkipIf(serverMode() == nil, "Ce scénario exige le journal et les fixtures du faux serveur")
+        // le faux serveur est partagé : sans reset, s-past-1 garde les tours des tests alphabétiquement avant
+        FakeServer.reset()
         let start = Date()
         let app = launch()
         try openBot(in: app)
