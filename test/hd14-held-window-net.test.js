@@ -2,7 +2,7 @@
 
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
-const { mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
+const { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
 const { test } = require("node:test");
@@ -35,15 +35,18 @@ function netCheck() {
   return firstBlock(readFileSync(RUN_UI, "utf8"), "hd14_net_check()");
 }
 
+function runNetCheckAt(file) {
+  return spawnSync("bash", ["-c", `${netCheck()}\nhd14_net_check "$1"`, "bash", file], {
+    encoding: "utf8",
+  });
+}
+
 function runNetCheck(contents) {
   const dir = mkdtempSync(join(tmpdir(), "hd14-net-"));
   try {
     const file = join(dir, "net.txt");
     writeFileSync(file, contents);
-    const run = spawnSync("bash", ["-c", `${netCheck()}\nhd14_net_check "$1"`, "bash", file], {
-      encoding: "utf8",
-    });
-    return run;
+    return runNetCheckAt(file);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -78,6 +81,24 @@ test("le contrôle réseau hd14 accepte un relevé vide et refuse une destinatio
   const empty = runNetCheck("");
   assert.equal(empty.status, 0, empty.stderr);
   assert.match(empty.stdout, /NET OK/);
+
+  const missingDir = mkdtempSync(join(tmpdir(), "hd14-net-missing-"));
+  try {
+    const missing = runNetCheckAt(join(missingDir, "net.txt"));
+    assert.equal(missing.status, 1, missing.stderr);
+    assert.match(missing.stdout, /absent ou illisible/);
+    const unread = join(missingDir, "unread.txt");
+    writeFileSync(unread, "");
+    chmodSync(unread, 0);
+    const blocked = runNetCheckAt(unread);
+    chmodSync(unread, 0o644);
+    if (blocked.status !== 0) {
+      assert.equal(blocked.status, 1, blocked.stderr);
+      assert.match(blocked.stdout, /absent ou illisible/);
+    }
+  } finally {
+    rmSync(missingDir, { recursive: true, force: true });
+  }
 
   const allowed = runNetCheck("HermedBots 123 127.0.0.1:54321->127.0.0.1:18642 ESTABLISHED\n");
   assert.equal(allowed.status, 0, allowed.stderr);

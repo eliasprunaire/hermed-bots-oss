@@ -5,7 +5,14 @@ set -uo pipefail
 # relevé vide = aucune destination interdite = succès ; une destination interdite reste un échec
 hd14_net_check() {
   local net=$1 destinations others
-  destinations=$(awk '{ n = split($3, parts, "->"); if (n == 2) print parts[2] }' "$net" | sort -u)
+  if [ ! -f "$net" ] || [ ! -r "$net" ]; then
+    echo "HD14 lane=10 NET relevé absent ou illisible"
+    return 1
+  fi
+  destinations=$(awk '{ n = split($3, parts, "->"); if (n == 2) print parts[2] }' "$net" | sort -u) || {
+    echo "HD14 lane=10 NET relevé illisible"
+    return 1
+  }
   others=$(printf '%s\n' "$destinations" | grep -vx -e '' -e '127.0.0.1:18642' || true)
   if [ -z "$others" ]; then
     echo "HD14 lane=10 NET OK destinations=${destinations:-aucune}"
