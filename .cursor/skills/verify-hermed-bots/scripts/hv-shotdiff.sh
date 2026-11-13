@@ -94,6 +94,12 @@ def paeth(a, b, c):
     return c
 
 
+def to8(v, bit):
+    if bit == 8:
+        return v
+    return (v * 255 + 32767) // 65535
+
+
 def decode_rgb(path):
     data = open(path, "rb").read()
     if data[:8] != b"\x89PNG\r\n\x1a\n":
@@ -102,6 +108,7 @@ def decode_rgb(path):
     w = h = bit = ct = inter = None
     idat = []
     plte = None
+    trns = None
     while i + 12 <= len(data):
         ln = struct.unpack(">I", data[i : i + 4])[0]
         tag = data[i + 4 : i + 8]
@@ -110,16 +117,19 @@ def decode_rgb(path):
             w, h, bit, ct, _comp, _filt, inter = struct.unpack(">IIBBBBB", chunk)
         elif tag == b"PLTE":
             plte = chunk
+        elif tag == b"tRNS":
+            trns = chunk
         elif tag == b"IDAT":
             idat.append(chunk)
         elif tag == b"IEND":
             break
         i += 12 + ln
-    if w is None or bit != 8 or inter != 0:
+    if w is None or bit not in (8, 16) or inter != 0 or (ct == 3 and bit == 16):
         raise ValueError("png")
     raw = zlib.decompress(b"".join(idat))
-    ch = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[ct]
-    stride = w * ch
+    channels = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}[ct]
+    bpp = max(1, channels * (bit // 8))
+    stride = w * bpp
     out = bytearray(w * h * 3)
     prev = bytearray(stride)
     pos = 0
@@ -131,46 +141,65 @@ def decode_rgb(path):
         pos += stride
         if f == 1:
             for x in range(stride):
-                scan[x] = (scan[x] + (scan[x - ch] if x >= ch else 0)) & 255
+                scan[x] = (scan[x] + (scan[x - bpp] if x >= bpp else 0)) & 255
         elif f == 2:
             for x in range(stride):
                 scan[x] = (scan[x] + prev[x]) & 255
         elif f == 3:
             for x in range(stride):
-                left = scan[x - ch] if x >= ch else 0
+                left = scan[x - bpp] if x >= bpp else 0
                 scan[x] = (scan[x] + ((left + prev[x]) // 2)) & 255
         elif f == 4:
             for x in range(stride):
-                left = scan[x - ch] if x >= ch else 0
-                upleft = prev[x - ch] if x >= ch else 0
+                left = scan[x - bpp] if x >= bpp else 0
+                upleft = prev[x - bpp] if x >= bpp else 0
                 scan[x] = (scan[x] + paeth(left, prev[x], upleft)) & 255
         elif f != 0:
             raise ValueError("filter")
-        if ct == 2:
-            out[oi : oi + stride] = scan
-            oi += stride
-        elif ct == 6:
-            for x in range(w):
-                o = x * 4
-                out[oi : oi + 3] = scan[o : o + 3]
-                oi += 3
-        elif ct == 0:
-            for x in range(w):
-                v = scan[x]
-                out[oi : oi + 3] = bytes((v, v, v))
-                oi += 3
-        elif ct == 4:
-            for x in range(w):
-                v = scan[x * 2]
-                out[oi : oi + 3] = bytes((v, v, v))
-                oi += 3
-        elif ct == 3:
-            if not plte:
-                raise ValueError("plte")
-            for x in range(w):
-                p = scan[x] * 3
-                out[oi : oi + 3] = plte[p : p + 3]
-                oi += 3
+        sp = 0
+        for _x in range(w):
+            samp = []
+            for _c in range(channels):
+                if bit == 8:
+                    samp.append(scan[sp])
+                    sp += 1
+                else:
+                    v = (scan[sp] << 8) | scan[sp + 1]
+                    samp.append(to8(v, 16))
+                    sp += 2
+            if ct == 2:
+                r, g, b = samp
+                a = 255
+                if trns and len(trns) >= 6:
+                    key = (
+                        to8((trns[0] << 8) | trns[1], 16),
+                        to8((trns[2] << 8) | trns[3], 16),
+                        to8((trns[4] << 8) | trns[5], 16),
+                    )
+                    if (r, g, b) == key:
+                        a = 0
+            elif ct == 6:
+                r, g, b, a = samp
+            elif ct == 0:
+                r = g = b = samp[0]
+                a = 255
+                if trns and len(trns) >= 2 and samp[0] == to8((trns[0] << 8) | trns[1], 16):
+                    a = 0
+            elif ct == 4:
+                r = g = b = samp[0]
+                a = samp[1]
+            elif ct == 3:
+                if not plte:
+                    raise ValueError("plte")
+                p = samp[0] * 3
+                r, g, b = plte[p], plte[p + 1], plte[p + 2]
+                a = trns[samp[0]] if trns and samp[0] < len(trns) else 255
+            else:
+                raise ValueError("png")
+            out[oi] = r * a // 255
+            out[oi + 1] = g * a // 255
+            out[oi + 2] = b * a // 255
+            oi += 3
         prev = scan
     return w, h, bytes(out)
 

@@ -762,6 +762,29 @@ function shotdiffIhdrEnv(dir, ae, extra = {}) {
   return { ...process.env, ...extra, PATH: `${bin}:${process.env.PATH || ""}`, LC_ALL: "C" };
 }
 
+function pngChunk(tag, data) {
+  const payload = Buffer.concat([Buffer.from(tag), data]);
+  const len = Buffer.alloc(4);
+  len.writeUInt32BE(data.length);
+  const crc = Buffer.alloc(4);
+  crc.writeUInt32BE(crc32(payload) >>> 0);
+  return Buffer.concat([len, payload, crc]);
+}
+
+function encodePng(w, h, bit, colorType, raw) {
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = bit;
+  ihdr[9] = colorType;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk("IHDR", ihdr),
+    pngChunk("IDAT", deflateSync(raw)),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
 function encodePngRgb(w, h, rgb) {
   const stride = w * 3;
   const raw = Buffer.alloc((stride + 1) * h);
@@ -769,25 +792,35 @@ function encodePngRgb(w, h, rgb) {
     raw[(stride + 1) * y] = 0;
     rgb.copy(raw, (stride + 1) * y + 1, y * stride, (y + 1) * stride);
   }
-  const chunk = (tag, data) => {
-    const payload = Buffer.concat([Buffer.from(tag), data]);
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(data.length);
-    const crc = Buffer.alloc(4);
-    crc.writeUInt32BE(crc32(payload) >>> 0);
-    return Buffer.concat([len, payload, crc]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(w, 0);
-  ihdr.writeUInt32BE(h, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 2;
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", ihdr),
-    chunk("IDAT", deflateSync(raw)),
-    chunk("IEND", Buffer.alloc(0)),
-  ]);
+  return encodePng(w, h, 8, 2, raw);
+}
+
+function encodePngRgb16(w, h, rgb) {
+  const stride = w * 6;
+  const raw = Buffer.alloc((stride + 1) * h);
+  for (let y = 0; y < h; y++) {
+    raw[(stride + 1) * y] = 0;
+    for (let x = 0; x < w; x++) {
+      const s = (y * w + x) * 3;
+      const d = (stride + 1) * y + 1 + x * 6;
+      for (let c = 0; c < 3; c++) {
+        const v16 = rgb[s + c] * 257;
+        raw[d + c * 2] = v16 >> 8;
+        raw[d + c * 2 + 1] = v16 & 255;
+      }
+    }
+  }
+  return encodePng(w, h, 16, 2, raw);
+}
+
+function encodePngRgba(w, h, rgba) {
+  const stride = w * 4;
+  const raw = Buffer.alloc((stride + 1) * h);
+  for (let y = 0; y < h; y++) {
+    raw[(stride + 1) * y] = 0;
+    rgba.copy(raw, (stride + 1) * y + 1, y * stride, (y + 1) * stride);
+  }
+  return encodePng(w, h, 8, 6, raw);
 }
 
 function rgbCanvas(w, h, color) {
@@ -1168,6 +1201,66 @@ test("hv-shotdiff accepts typical antialiasing under default TOL", () => {
   const run = runShotdiff(cap, base, dif, env);
   assert.equal(run.status, 0, `out=${run.stdout} err=${run.stderr}`);
   assert.match(run.stdout, /OK {3}edge\.png/);
+  assert.doesNotMatch(run.stdout, /DIFF/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("hv-shotdiff accepts a lossless 16-bit PNG re-encode under default TOL", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-16-"));
+  const cap = join(dir, "cap");
+  const base = join(dir, "base");
+  const dif = join(dir, "dif");
+  mkdirSync(cap);
+  mkdirSync(base);
+  mkdirSync(dif);
+  const w = 40;
+  const h = 30;
+  const rgb = rgbCanvas(w, h, [40, 80, 120]);
+  blitRgb(rgb, w, 10, 8, 12, 10, [200, 30, 30]);
+  writeFileSync(join(base, "depth.png"), encodePngRgb(w, h, rgb));
+  writeFileSync(join(cap, "depth.png"), encodePngRgb16(w, h, rgb));
+  const env = shotdiffIhdrEnv(dir, "0");
+  const run = runShotdiff(cap, base, dif, env);
+  assert.equal(run.status, 0, `out=${run.stdout} err=${run.stderr}`);
+  assert.match(run.stdout, /OK {3}depth\.png/);
+  assert.doesNotMatch(run.stdout, /DIFF/);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("hv-shotdiff ignores RGB that is fully transparent under default TOL", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-shot-alpha-"));
+  const cap = join(dir, "cap");
+  const base = join(dir, "base");
+  const dif = join(dir, "dif");
+  mkdirSync(cap);
+  mkdirSync(base);
+  mkdirSync(dif);
+  const w = 200;
+  const h = 200;
+  const baseRgba = Buffer.alloc(w * h * 4);
+  const capRgba = Buffer.alloc(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    baseRgba[i * 4] = 240;
+    baseRgba[i * 4 + 1] = 240;
+    baseRgba[i * 4 + 2] = 240;
+    capRgba[i * 4] = 240;
+    capRgba[i * 4 + 1] = 240;
+    capRgba[i * 4 + 2] = 240;
+  }
+  for (let y = 90; y < 110; y++) {
+    for (let x = 90; x < 110; x++) {
+      const o = (y * w + x) * 4;
+      capRgba[o] = 255;
+      capRgba[o + 1] = 141;
+      capRgba[o + 2] = 40;
+    }
+  }
+  writeFileSync(join(base, "ghost.png"), encodePngRgba(w, h, baseRgba));
+  writeFileSync(join(cap, "ghost.png"), encodePngRgba(w, h, capRgba));
+  const env = shotdiffIhdrEnv(dir, "0");
+  const run = runShotdiff(cap, base, dif, env);
+  assert.equal(run.status, 0, `out=${run.stdout} err=${run.stderr}`);
+  assert.match(run.stdout, /OK {3}ghost\.png/);
   assert.doesNotMatch(run.stdout, /DIFF/);
   rmSync(dir, { recursive: true, force: true });
 });
