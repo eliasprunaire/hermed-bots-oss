@@ -28,25 +28,13 @@ function firstBlock(source, marker) {
   assert.fail(marker);
 }
 
-test("HVShot masque le caret avant la seule capture XCUITest, et le compositeur le rend transparent en mode test", () => {
-  const shot = read("HermedBotsUITests/HVShot.swift");
-  const capture = firstBlock(shot, "static func capture(_ name: String, _ window: XCUIElement)");
-  const hideAt = capture.indexOf("hideCaret(");
-  const shotAt = capture.indexOf("window.screenshot()");
-  assert.notEqual(hideAt, -1, "HVShot.capture n'appelle pas hideCaret");
-  assert.notEqual(shotAt, -1, "HVShot.capture n'appelle pas screenshot()");
-  assert.ok(hideAt < shotAt, "hideCaret doit précéder screenshot()");
-  assert.match(shot, /static func hideCaret\(in /);
-  assert.match(shot, /hasKeyboardFocus/);
-  assert.match(shot, /composerInput/);
-  assert.doesNotMatch(shot, /\.escape/);
-
+test("le compositeur rend le caret transparent en mode test, sans API XCTest inexistante", () => {
   const composer = read("HermedBots/Conversation/ComposerView.swift");
   const tint = firstBlock(composer, "private struct ComposerCaretTint");
   assert.match(composer, /@Environment\(\\\.hideComposerCaret\)/);
   assert.match(composer, /\.modifier\(ComposerCaretTint\(hidden: hideComposerCaret\)\)/);
-  assert.match(tint, /tint\(\.clear\)/);
   assert.match(tint, /if hidden/);
+  assert.match(tint, /tint\(\.clear\)/);
 
   const app = read("HermedBots/App/HermedBotsApp.swift");
   assert.match(app, /\.environment\(\\\.hideComposerCaret, model\.isTestMode\)/);
@@ -58,11 +46,6 @@ test("HVShot masque le caret avant la seule capture XCUITest, et le compositeur 
   for (const name of readdirSync(uiTests)) {
     if (!name.endsWith(".swift")) continue;
     const source = read(join("HermedBotsUITests", name));
-    const hits = source.match(/\.screenshot\(\)/g) || [];
-    if (name === "HVShot.swift") {
-      assert.equal(hits.length, 1, "HVShot.swift doit garder un seul screenshot()");
-      continue;
-    }
-    assert.equal(hits.length, 0, `${name} capture hors HVShot`);
+    assert.doesNotMatch(source, /hasKeyboardFocus/, `${name} : hasKeyboardFocus`);
   }
 });
