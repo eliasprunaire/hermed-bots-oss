@@ -17,6 +17,7 @@ enum HVShot {
 
     @discardableResult
     static func capture(_ name: String, _ window: XCUIElement) -> XCUIScreenshot {
+        hideCaret(in: window)
         let screenshot = window.screenshot()
         print("HV-SHOT \(name)")
         XCTContext.runActivity(named: "capture \(name)") { activity in
@@ -26,5 +27,17 @@ enum HVShot {
             activity.add(attachment)
         }
         return screenshot
+    }
+
+    /// Masque le caret du compositeur avant la capture : retire le focus s'il est encore sur le champ.
+    /// Ne jamais envoyer Escape : une feuille d'approbation se fermerait.
+    /// Le masquage visuel tient aussi au `tint(.clear)` du champ en mode test, y compris derrière une feuille.
+    static func hideCaret(in root: XCUIElement) {
+        let input = root.descendants(matching: .any).matching(identifier: AccessibilityID.composerInput.rawValue).firstMatch
+        guard input.exists, input.hasKeyboardFocus else { return }
+        let status = root.descendants(matching: .any).matching(identifier: AccessibilityID.statusVersion.rawValue).firstMatch
+        if status.exists, status.isHittable {
+            status.click()
+        }
     }
 }

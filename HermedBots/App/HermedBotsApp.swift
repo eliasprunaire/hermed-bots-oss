@@ -63,6 +63,7 @@ struct ContentView: View {
         }
         .frame(minWidth: 720, minHeight: 480)
         .environment(\.motion, !model.isTestMode && !reduceMotion)
+        .environment(\.hideComposerCaret, model.isTestMode)
         .preferredColorScheme(model.testDarkAppearance ? .dark : nil)
         .background { if let size = model.testWindowSize { TestWindowSize(size: size) } }
         #if DEBUG

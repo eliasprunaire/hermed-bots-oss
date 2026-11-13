@@ -3,6 +3,8 @@ import SwiftUI
 extension EnvironmentValues {
     /// Faux en mode test et quand macOS demande moins d'animations : les captures de référence exigent une image fixe
     @Entry var motion = true
+    /// Vrai seulement en mode test : le caret du compositeur est transparent, pour que les captures XCUITest ne varient pas d'une passe à l'autre
+    @Entry var hideComposerCaret = false
 }
 
 extension Color {
