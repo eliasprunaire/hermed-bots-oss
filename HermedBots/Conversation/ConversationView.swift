@@ -133,18 +133,24 @@ struct ConversationView: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                // l'état du tour reste hors de la pile paresseuse : après un message très haut, une pile paresseuse ne le créait pas
+                // l'état du tour et la dernière ligne restent hors de la pile paresseuse : après un message très haut, une pile paresseuse ne les créait pas
+                let entries = model.conversation.entries
+                let tail = entries.suffix(1)
+                let head = entries.dropLast(tail.count)
                 VStack(alignment: .leading, spacing: 18) {
-                    LazyVStack(alignment: .leading, spacing: 18) {
-                        ForEach(model.conversation.entries) { entry in
-                            MessageRow(entry: entry, bot: bot, isStreaming: model.conversation.phase == .running && entry.id == model.conversation.entries.last?.id)
-                                .id(entry.id)
-                                .transition(motion ? .opacity.combined(with: .offset(y: 6)) : .identity)
+                    if !head.isEmpty {
+                        LazyVStack(alignment: .leading, spacing: 18) {
+                            ForEach(head) { entry in
+                                messageRow(for: entry)
+                            }
                         }
                     }
-                    .animation(motion ? .easeOut(duration: 0.24) : nil, value: model.conversation.entries.count)
+                    ForEach(tail) { entry in
+                        messageRow(for: entry)
+                    }
                     footer.id("footer")
                 }
+                .animation(motion ? .easeOut(duration: 0.24) : nil, value: entries.count)
                 .column()
                 .padding(.vertical, 12)
             }
@@ -153,6 +159,12 @@ struct ConversationView: View {
             .onChange(of: model.conversation.entries.count) { proxy.scrollTo("footer", anchor: .bottom) }
         }
         .overlay { placeholder }
+    }
+
+    private func messageRow(for entry: ConversationEntry) -> some View {
+        MessageRow(entry: entry, bot: bot, isStreaming: model.conversation.phase == .running && entry.id == model.conversation.entries.last?.id)
+            .id(entry.id)
+            .transition(motion ? .opacity.combined(with: .offset(y: 6)) : .identity)
     }
 
     @ViewBuilder private var placeholder: some View {
@@ -197,7 +209,7 @@ struct ConversationView: View {
                     CurrentToolRow(tool: tool).padding(.leading, 36)
                 }
             }
-            if let end = model.conversation.end {
+            if model.conversation.showsEnd, let end = model.conversation.end {
                 TurnEndRow(end: end, detail: model.conversation.endDetail).padding(.leading, 36)
             }
             if let failure = model.displayedFailure {

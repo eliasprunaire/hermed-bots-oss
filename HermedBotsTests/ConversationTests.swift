@@ -170,9 +170,33 @@ final class ConversationTests: XCTestCase {
         conversation.open(transcript)
         _ = conversation.begin("suite")
         conversation.finish(.completed)
+        XCTAssertTrue(conversation.showsEnd)
         conversation.open([])
         XCTAssertTrue(conversation.entries.isEmpty)
         XCTAssertEqual(conversation.end, .completed)
+        XCTAssertFalse(conversation.showsEnd, "un transcript vide ne montre pas Tour terminé")
         XCTAssertEqual(conversation.phase, .idle)
+    }
+
+    func testAnEmptyThreadDoesNotShowAPhantomCompletedTurn() {
+        var conversation = Conversation()
+        XCTAssertFalse(conversation.showsEnd)
+        _ = conversation.begin("Bonjour")
+        conversation.receive(reply: "Réponse de test")
+        conversation.finish(.completed)
+        XCTAssertTrue(conversation.showsEnd)
+        conversation.open([])
+        XCTAssertFalse(conversation.showsEnd, "pas de tour fantôme sur un fil vide")
+    }
+
+    func testALongAssistantReplyStaysOnTheLastLineAfterAHugeUserMessage() {
+        var conversation = Conversation()
+        let long = String(repeating: "é", count: 100_000)
+        XCTAssertEqual(conversation.begin(long)?.count, 100_000)
+        conversation.receive(reply: "Réponse de test")
+        conversation.finish(.completed)
+        XCTAssertEqual(conversation.entries.map(\.role), [.user, .assistant])
+        XCTAssertEqual(conversation.entries.last?.text, "Réponse de test")
+        XCTAssertTrue(conversation.showsEnd)
     }
 }
