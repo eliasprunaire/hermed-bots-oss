@@ -32,8 +32,8 @@ enum FakeServer {
         post("/_hv/cut", ["seconds": String(seconds)])
     }
 
-    static func configure(mode: String = "normal", drop: String = "set_model", profiles: [String]? = nil) {
-        var body: [String: Any] = ["mode": mode, "drop": drop]
+    static func configure(mode: String = "normal", drop: String = "set_model", profiles: [String]? = nil, failWithoutText: Bool = false) {
+        var body: [String: Any] = ["mode": mode, "drop": drop, "fail_without_text": failWithoutText]
         if let profiles { body["profiles"] = profiles }
         XCTAssertTrue(post("/_hv/config", body), "Le faux serveur refuse la configuration du test")
     }

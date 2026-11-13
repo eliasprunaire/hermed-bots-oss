@@ -7,8 +7,9 @@ Routes de contrôle (test uniquement, hors contrat) :
   POST /_hv/cut {"seconds":N} simule une coupure réseau (503 sur les routes de contrat) ;
   GET /_hv/log journal des requêtes reçues (preuve : pas de double envoi) ;
   GET /_hv/profile-list sortie de `hermes profile list` (stand-in du canal SSH en lecture seule, décision S6) ;
-  POST /_hv/config {mode, drop, reject_key, omit_tokens, version, profiles} règle l'état (400 si corps ou mode invalide) ;
+  POST /_hv/config {mode, drop, reject_key, omit_tokens, fail_without_text, version, profiles} règle l'état (400 si corps ou mode invalide) ;
   POST /_hv/reset rétablit l'état initial (injections, journaux, tours, mode). GET /_hv/config lit l'état courant.
+  fail_without_text (opt-in, hd09) : aucun texte assistant pour l'échec ; delta tronqué si le flux est coupé (annulation, interruption).
 Mode malformed (HV_MALFORMED=null|string|noid|leak|nolock) : contrôles négatifs du validateur de conteneurs et de la liste des profils.
 Exige l'en-tête Authorization: Bearer de la clé du profil dans HV_TEST_API_KEYS (JSON objet), ou HV_TEST_API_KEY si cette carte est absente, sauf sur un contrat `auth: false` sans profil.
 Différence voulue avec Hermes : le flux d'événements est fermé après `: stream closed`."""
@@ -71,9 +72,67 @@ STATE = {
     "drop": DROP,
     "reject_key": False,
     "omit_tokens": False,
+    "fail_without_text": False,
     "version": C["version"],
     "profiles": None,
 }
+
+# Réponse visiblement coupée : l'annulation et l'interruption arrêtent le flux en cours.
+FAIL_WITHOUT_TEXT_PARTIAL = "Réponse de t"
+FAIL_WITHOUT_TEXT_TERMINALS = {
+    "run.failed": "failed",
+    "run.cancelled": "cancelled",
+    "run.interrupted": "interrupted",
+}
+
+def fail_without_text_kind(ev):
+    if not isinstance(ev, dict):
+        return None
+    name = ev.get("event")
+    if name == "run.completed" and ev.get("status") == "failed":
+        return "failed"
+    return FAIL_WITHOUT_TEXT_TERMINALS.get(name)
+
+def injected_fail_kind(inj=None):
+    for ev in reversed(list(INJ if inj is None else inj)):
+        kind = fail_without_text_kind(ev)
+        if kind:
+            return kind
+    return None
+
+def strip_fixture_assistant(events):
+    """Retire le texte assistant de la fixture : un tour en échec ne doit pas montrer « Réponse de test »."""
+    out = []
+    for e in events:
+        if not isinstance(e, dict):
+            out.append(e)
+            continue
+        name = e.get("event")
+        if name in ("message.delta", "reasoning.available"):
+            continue
+        if name == "run.completed":
+            e = dict(e)
+            e["output"] = ""
+            out.append(e)
+            continue
+        out.append(e)
+    return out
+
+def apply_fail_without_text(events, run):
+    """Après la fixture : pas de texte pour l'échec ; delta tronqué pour l'annulation et l'interruption."""
+    events = strip_fixture_assistant(events)
+    kind = injected_fail_kind()
+    if kind not in ("cancelled", "interrupted"):
+        return events
+    rebuilt, inserted = [], False
+    for e in events:
+        if not inserted and fail_without_text_kind(e) in ("cancelled", "interrupted"):
+            rebuilt.append({"event": "message.delta", "run_id": run, "delta": FAIL_WITHOUT_TEXT_PARTIAL})
+            inserted = True
+        rebuilt.append(e)
+    if not inserted:
+        rebuilt.append({"event": "message.delta", "run_id": run, "delta": FAIL_WITHOUT_TEXT_PARTIAL})
+    return rebuilt
 
 def _seed_profiles():
     if STATE["profiles"] is not None:
@@ -191,6 +250,8 @@ def apply_config(obj):
         STATE["reject_key"] = bool(obj["reject_key"])
     if "omit_tokens" in obj:
         STATE["omit_tokens"] = bool(obj["omit_tokens"])
+    if "fail_without_text" in obj:
+        STATE["fail_without_text"] = bool(obj["fail_without_text"])
     if "version" in obj and obj["version"] is not None:
         STATE["version"] = obj["version"]
     if "profiles" in obj:
@@ -209,7 +270,7 @@ def reset_state():
     RECORDED_RUNS.clear()
     RUN_SSE.clear()
     CUT_UNTIL[0] = 0.0
-    STATE.update(mode=a.mode, drop=DROP, reject_key=False, omit_tokens=False, version=C["version"], profiles=None)
+    STATE.update(mode=a.mode, drop=DROP, reject_key=False, omit_tokens=False, fail_without_text=False, version=C["version"], profiles=None)
     seed_session_messages()
 
 def compile_path(path):
@@ -517,11 +578,15 @@ class H(BaseHTTPRequestHandler):
         # Garder approval.* pour HV_APPROVAL (UI) et HV_TOOL_DETACH (acceptance approve du contract-check).
         if "HV_APPROVAL" not in inp and "HV_TOOL_DETACH" not in inp:
             events = [e for e in events if not (isinstance(e, dict) and str(e.get("event", "")).startswith("approval."))]
+        if STATE.get("fail_without_text"):
+            events = apply_fail_without_text(events, run)
         if STATE["omit_tokens"]:
             events = [strip_usage(ev) for ev in events]
         out = self._emit_sse(events, pace)
         # texte assistant de la fixture (ou dernier message.delta injecté)
         assistant = "Réponse de test"
+        if STATE.get("fail_without_text"):
+            assistant = FAIL_WITHOUT_TEXT_PARTIAL if injected_fail_kind() in ("cancelled", "interrupted") else ""
         for e in reversed(events):
             if isinstance(e, dict) and e.get("event") == "message.delta" and e.get("delta"):
                 assistant = e.get("delta")
@@ -543,7 +608,7 @@ class H(BaseHTTPRequestHandler):
         if path == "/_hv/log": return self._send(200, LOG)
         if path == "/_hv/config":
             if method == "GET":
-                return self._send(200, {k: STATE[k] for k in ("mode", "drop", "reject_key", "omit_tokens", "version", "profiles")})
+                return self._send(200, {k: STATE[k] for k in ("mode", "drop", "reject_key", "omit_tokens", "fail_without_text", "version", "profiles")})
             try:
                 obj = json.loads(body or "{}")
             except ValueError:

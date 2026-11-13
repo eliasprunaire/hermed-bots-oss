@@ -562,6 +562,7 @@ final class SixActions: XCTestCase {
         ]
         for item in cases {
             serverPost("/_hv/reset")
+            FakeServer.configure(failWithoutText: true)
             serverPost("/_hv/inject", item.event)
             let app = launch()
             try openBot(in: app)
@@ -571,6 +572,12 @@ final class SixActions: XCTestCase {
             XCTAssertFalse(element(.conversationError, in: app).exists, "un état terminal de Hermes n'est pas une erreur de lecture")
             if let error = item.event["error"] as? String {
                 XCTAssertTrue(element(.conversationState, in: app).label.contains(error), "l'erreur de Hermes accompagne l'état")
+            }
+            let shown = shownMessages(in: app)
+            if item.state == "cancelled" || item.state == "interrupted" {
+                XCTAssertEqual(shown.last, "Réponse de t", "\(item.shot) : l'annulation ou l'interruption laisse une réponse partielle")
+            } else {
+                XCTAssertEqual(shown.last, "etat \(item.state)", "\(item.shot) : aucun texte assistant pour l'échec")
             }
             // on peut écrire de nouveau après chaque fin
             XCTAssertTrue(element(.composerInput, in: app).isEnabled)
