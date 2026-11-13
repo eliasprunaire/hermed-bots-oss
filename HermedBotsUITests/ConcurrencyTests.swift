@@ -15,9 +15,12 @@ final class ConcurrencyTests: HD12Harness {
         app.launchArguments += ["-AppleLanguages", "(fr)"]
         app.launchEnvironment["HV_TEST_MODE"] = "1"
         app.launchEnvironment["HV_PROFILE_LOCKS"] = "1"
+        // 1024×680 pt → capture 2048×1360 à @2x, comme hd14-drop et les autres lanes
+        app.launchEnvironment["HV_WINDOW_SIZE"] = "1024x680"
         for key in ["HV_API_URL", "HV_TEST_API_KEY", "HV_TEST_API_KEYS"] { app.launchEnvironment[key] = environment[key] }
         app.launch()
         self.app = app
+        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10))
         return app
     }
 

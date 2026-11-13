@@ -2,6 +2,25 @@
 # Lancer uniquement par le script de VM de test
 set -uo pipefail
 [ "$(id -un)" = hvtest ] && [ -n "${HV_XCTESTRUN:-}" ] || { echo 'VM hvtest requise'; exit 2; }
+# relevé vide = aucune destination interdite = succès ; une destination interdite reste un échec
+hd14_net_check() {
+  local net=$1 destinations others
+  if [ ! -f "$net" ] || [ ! -r "$net" ]; then
+    echo "HD14 lane=10 NET relevé absent ou illisible"
+    return 1
+  fi
+  destinations=$(awk '{ n = split($3, parts, "->"); if (n == 2) print parts[2] }' "$net" | sort -u) || {
+    echo "HD14 lane=10 NET relevé illisible"
+    return 1
+  }
+  others=$(printf '%s\n' "$destinations" | grep -vx -e '' -e '127.0.0.1:18642' || true)
+  if [ -z "$others" ]; then
+    echo "HD14 lane=10 NET OK destinations=${destinations:-aucune}"
+    return 0
+  fi
+  echo "HD14 lane=10 NET destination interdite"
+  return 1
+}
 SK=${HV_SKILL_SCRIPTS:-.local-skills/verify-hermed-bots/scripts}
 WORK=${HV_WORK:?}
 export HV_EVIDENCE="$WORK/evidence/hd14-ui-$(date +%Y%m%d-%H%M%S)"
@@ -74,10 +93,6 @@ touch "$STOP"; wait "$NET"
 bash "$SK/hv-guard.sh" check "$HV_EVIDENCE/guard-before.txt" > "$HV_EVIDENCE/guard-after.txt"; guard=$?
 echo "HD14 lane=9 GUARD rc=$guard"
 [ $guard -eq 0 ] || rc=$guard
-destinations=$(awk '{ n = split($3, parts, "->"); if (n == 2) print parts[2] }' "$HV_EVIDENCE/net.txt" | sort -u)
-if [ -s "$HV_EVIDENCE/net.txt" ] && ! echo "$destinations" | grep -vx -e '' -e '127.0.0.1:18642'; then
-  echo "HD14 lane=10 NET OK destinations=$destinations"
-else
-  echo "HD14 lane=10 NET sans preuve ou destination interdite"; rc=1
-fi
+# relevé vide = aucune destination interdite = succès ; une destination interdite reste un échec
+hd14_net_check "$HV_EVIDENCE/net.txt" || rc=1
 exit "$rc"
