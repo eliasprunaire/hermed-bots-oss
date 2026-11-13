@@ -83,12 +83,35 @@ test("hd09-blank part d'un fil vide, sans tour fantôme", () => {
   assert.ok(typeAt !== -1 && typeAt < captureAt, "les espaces précèdent la capture");
 });
 
-test("hd09-long attend la réponse assistant avant la capture", () => {
+test("hd09-long remet le faux serveur à zéro et exige la dernière ligne avant la capture", () => {
   const source = read("HermedBotsUITests/SixActions.swift");
   const body = firstBlock(source, "func testAHundredThousandCharacterMessageGoesOutOnce()");
   assert.match(body, /HVShot\.capture\("hd09-long"/);
-  assert.match(body, /waitForMessage\(containing: "Réponse de test"/);
-  const replyAt = body.indexOf('waitForMessage(containing: "Réponse de test"');
+  const resetAt = body.indexOf("FakeServer.reset()");
+  const sendAt = body.indexOf("composerSend");
+  assert.notEqual(resetAt, -1, "FakeServer.reset() absent");
+  assert.notEqual(sendAt, -1, "composerSend absent");
+  assert.ok(resetAt < sendAt, "reset() doit précéder l'envoi");
+  assert.match(body, /shownMessages\(in: app\)\.last/);
+  assert.match(body, /== "Réponse de test"/);
+  assert.equal(
+    /waitForMessage\(containing: "Réponse de test"/.test(body),
+    false,
+    "waitForMessage passerait sur la ligne d'historique 14",
+  );
+  const replyAt = body.indexOf("shownMessages(in: app).last");
   const captureAt = body.indexOf('HVShot.capture("hd09-long"');
-  assert.ok(replyAt !== -1 && replyAt < captureAt, "la réponse visible précède la capture");
+  assert.ok(replyAt !== -1 && replyAt < captureAt, "la dernière ligne précède la capture");
+});
+
+test("la sonde lit la ligne hors pile, pas le dernier descendant", () => {
+  const source = read("HermedBotsUITests/ConversationPerfProbe.swift");
+  const body = firstBlock(source, "private func lastMessageText");
+  assert.match(body, /hd\.conversation\.message\./);
+  assert.match(body, /firstMatch/);
+  assert.equal(
+    /boundBy:\s*count\s*-/.test(body),
+    false,
+    "boundBy count-1 lirait un message du LazyVStack, pas la dernière ligne",
+  );
 });

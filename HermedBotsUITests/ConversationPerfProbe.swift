@@ -70,12 +70,11 @@ final class ConversationPerfProbe: XCTestCase {
         return sorted[min(sorted.count - 1, Int((Double(sorted.count) * fraction).rounded(.up)) - 1)]
     }
 
-    /// Le texte de la dernière ligne de la conversation, la réponse en cours : quelques lectures seulement à chaque appel, pour ne pas ralentir la mesure
+    /// Le texte de la dernière ligne du fil, la réponse en cours : hors pile paresseuse, donc première dans l'arbre d'accessibilité
+    /// Quelques lectures seulement à chaque appel, pour ne pas ralentir la mesure : `firstMatch` est cette ligne, pas un descendant du `LazyVStack`
     private func lastMessageText(in app: XCUIApplication) -> String? {
-        let rows = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "hd.conversation.message."))
-        let count = rows.count
-        guard count > 0 else { return nil }
-        let last = rows.element(boundBy: count - 1)
+        let last = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "hd.conversation.message.")).firstMatch
+        guard last.exists else { return nil }
         return last.value as? String ?? last.label
     }
 
