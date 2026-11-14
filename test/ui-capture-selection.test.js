@@ -53,7 +53,7 @@ test("au moment de la capture, la plage sélectionnée du champ a une longueur n
 
   const selection = read("HermedBots/Conversation/CaptureSelection.swift");
   const apply = firstBlock(selection, "static func apply(to editor: NSText)");
-  assert.match(apply, /setSelectedRange\(ComposerSubmit\.collapsedRange\(of: editor\.string\)\)/);
+  assert.match(apply, /selectedRange = ComposerSubmit\.collapsedRange\(of: editor\.string\)/);
   assert.doesNotMatch(apply, /makeFirstResponder/);
   assert.doesNotMatch(apply, /resignFirstResponder/);
 

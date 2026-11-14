@@ -2,6 +2,7 @@ import AppKit
 import XCTest
 
 // compilé dans le paquet de tests lui-même, sans l'app comme hôte
+@MainActor
 final class CaptureSelectionTests: XCTestCase {
     func testAFullSelectionCollapsesToAZeroLengthInsertionPointWithoutResigningFirstResponder() {
         let editor = NSTextView(frame: NSRect(x: 0, y: 0, width: 240, height: 48))
