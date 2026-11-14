@@ -23,7 +23,8 @@ final class BotCardContentTests: XCTestCase {
         XCTAssertNil(lock.sidebarLabel(bot.id))
         XCTAssertNil(lock.reason(bot.id))
 
-        XCTAssertFalse(await lock.refresh())
+        let unknownRefresh: Bool = await lock.refresh()
+        XCTAssertFalse(unknownRefresh)
         XCTAssertEqual(lock.state(bot.id), .unknown)
         XCTAssertEqual(lock.shownState(bot.id), .degraded)
         content = BotCardContent(bot: bot, lockLabel: lock.sidebarLabel(bot.id), lockHelp: lock.reason(bot.id))
@@ -35,7 +36,8 @@ final class BotCardContentTests: XCTestCase {
         XCTAssertEqual(lock.sidebarLabel(bot.id), "Dégradé")
 
         answering = true
-        XCTAssertTrue(await lock.refresh())
+        let healthyRefresh: Bool = await lock.refresh()
+        XCTAssertTrue(healthyRefresh)
         XCTAssertEqual(lock.state(bot.id), .free)
         XCTAssertEqual(lock.shownState(bot.id), .free)
         content = BotCardContent(bot: bot, lockLabel: lock.sidebarLabel(bot.id), lockHelp: lock.reason(bot.id))
