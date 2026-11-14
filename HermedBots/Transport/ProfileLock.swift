@@ -17,7 +17,7 @@ final class ProfileLock {
             }
         }
 
-        /// Pastille courte de la barre latérale ; le bandeau de conversation garde `reason`
+        /// Pastille courte de la carte et de la barre latérale ; le bandeau de conversation garde `reason`
         var sidebarLabel: String? {
             switch self {
             case .free: nil
@@ -57,7 +57,7 @@ final class ProfileLock {
         return base + "\n" + String(localized: "Cause : \(cause)")
     }
 
-    /// Pastille de la barre latérale pour ce profil ; nil s'il est libre
+    /// Pastille de la carte et de la barre latérale pour ce profil ; nil s'il est libre
     func sidebarLabel(_ profile: String, on host: String? = nil) -> String? {
         state(profile, on: host).sidebarLabel
     }

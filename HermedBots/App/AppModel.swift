@@ -841,7 +841,9 @@ final class AppModel {
             apiError = SSHFailure.tunnelClosed.message
             version = .unknown
         case .bannerDegraded:
-            bots.seedShown([bot])
+            // Un nom assez long pour se tronquer à côté de la pastille, sur la carte et dans la barre latérale
+            let longName = Bot(id: "shot-bot-long", name: "Bot de capture au nom assez long pour se tronquer avant la pastille Dégradé", model: "demo")
+            bots.seedShown([bot, longName])
             capabilities = CapabilityMap(version: "0.22.2", states: [.listSessions: .disabled(message: "Fonction désactivée (la liste des fils passés) : capture.")])
             version = .known("0.22.2")
         case .connection:
