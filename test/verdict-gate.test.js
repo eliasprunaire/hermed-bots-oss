@@ -290,38 +290,15 @@ test("matchesHead and a patch-id in the comment body do not make a foreign SHA m
   }
 });
 
-test("an abbreviated SHA of at least 7 characters of the head qualifies", () => {
+test("a SHA that is a prefix of the head does not qualify", () => {
   for (const cited of [HEAD.slice(0, 7), HEAD.slice(0, 39)]) {
     const decision = decide({
       headSha: HEAD,
       comments: [comment("1", 1, `VERDICT: PASS @ ${cited}\n${MARKER}`)],
     });
-    assert.equal(decision.kind, "pass");
-    assert.equal(decision.verdict, "PASS");
-    assert.equal(decision.sha, cited);
-    assert.equal(decision.description, `VERDICT PASS @ ${cited}`);
+    assert.equal(decision.kind, "fail");
+    assert.equal(decision.reason.code, "none");
   }
-});
-
-test("a prefix of fewer than 7 characters does not qualify", () => {
-  const decision = decide({
-    headSha: HEAD,
-    comments: [comment("1", 1, `VERDICT: PASS @ ${HEAD.slice(0, 6)}\n${MARKER}`)],
-  });
-  assert.equal(decision.kind, "fail");
-  assert.equal(decision.reason.code, "none");
-  assert.equal(decision.reason.hint, "marker-without-line");
-});
-
-test("an abbreviated SHA that is not a prefix of the head does not qualify", () => {
-  const cited = OTHER.slice(0, 7);
-  const decision = decide({
-    headSha: HEAD,
-    comments: [comment("1", 1, `VERDICT: PASS @ ${cited}\n${MARKER}`)],
-  });
-  assert.equal(decision.kind, "fail");
-  assert.equal(decision.reason.code, "sha-mismatch");
-  assert.equal(decision.description, staleDescription(cited, HEAD));
 });
 
 test("git is invoked only through io.run as git argv, never from comment text", () => {
@@ -402,7 +379,7 @@ test("uppercase hex in the verdict line matches a lowercase head", () => {
 
 test("a short SHA, a mid-sentence verdict, and a trailing space do not qualify", () => {
   const bodies = [
-    `VERDICT: PASS @ ${HEAD.slice(0, 6)}\n${MARKER}`,
+    `VERDICT: PASS @ ${"a".repeat(7)}\n${MARKER}`,
     `Ship VERDICT: PASS @ ${HEAD} now\n${MARKER}`,
     `VERDICT: PASS @ ${HEAD} \n${MARKER}`,
   ];
@@ -1343,6 +1320,53 @@ test("an empty patch-id is refused even when both sides are empty", () => {
     comments: [comment("1", 1, marked("PASS", OTHER))],
   });
   assert.equal(decision.description, `empty patch-id refused for ${OTHER}`);
+});
+
+test("main refuses an abbreviated SHA of the head", async () => {
+  const { dir, git } = initGitDir();
+  try {
+    writeFileSync(join(dir, "note.txt"), "base\n");
+    git(["add", "note.txt"]);
+    assert.equal(git(["commit", "-qm", "base"]).status, 0);
+    const baseSha = git(["rev-parse", "HEAD"]).stdout.trim();
+    writeFileSync(join(dir, "note.txt"), "feature\n");
+    git(["add", "note.txt"]);
+    assert.equal(git(["commit", "-qm", "feature"]).status, 0);
+    const headSha = git(["rev-parse", "HEAD"]).stdout.trim();
+    assert.equal(headSha.length, 40);
+    for (const cited of [headSha.slice(0, 7), headSha.slice(0, 39)]) {
+      const { io, posts } = harness({
+        eventName: "pull_request",
+        payload: {
+          action: "synchronize",
+          pull_request: {
+            number: 7,
+            head: { sha: headSha },
+            base: { sha: baseSha },
+            user: { login: "eliasprunaire" },
+          },
+        },
+        pages: [
+          {
+            url: `${API}/issues/7/comments?per_page=100`,
+            comments: [
+              rawComment(1, "2026-10-15T18:00:00Z", marked("PASS", cited)),
+            ],
+          },
+        ],
+        routes: {
+          commits: [{ sha: headSha }],
+          timeline: [],
+          graphql: historyPayload({ commits: [headSha], force: [] }),
+        },
+      });
+      attachGit(io, dir);
+      assert.equal(await main([], io), 0);
+      assert.equal(posts[0].body.state, "failure");
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("main refuses a clean rebase PASS even with the same patch-id from git objects", async () => {

@@ -1,7 +1,7 @@
 "use strict";
 
 const MARKER = "<!-- dev-lead-verifier -->";
-const VERDICT_LINE = /^VERDICT: (PASS\+NOTES|PASS|FAIL) @ ([0-9a-fA-F]{7,40})$/;
+const VERDICT_LINE = /^VERDICT: (PASS\+NOTES|PASS|FAIL) @ ([0-9a-fA-F]{40})$/;
 
 function fenceOpen(line) {
   const match = /^( {0,3})(`{3,}|~{3,})(.*)$/.exec(line);

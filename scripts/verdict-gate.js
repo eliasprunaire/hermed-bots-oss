@@ -266,13 +266,10 @@ function headIdOf(value) {
   return HEX_PATCH.test(id) ? id : null;
 }
 
-// only the exact head SHA qualifies, or a prefix of at least 7 hex digits of that head;
+// only the exact head SHA qualifies;
 // a prior SHA of this PR, even with matching patch-ids and replay tree, does not
 function matchesHeadSha(sha, headSha) {
-  if (sha === headSha) {
-    return true;
-  }
-  return sha.length >= 7 && sha.length < 40 && headSha.startsWith(sha);
+  return sha === headSha;
 }
 
 function qualifies(sha, headSha, ids) {
