@@ -101,6 +101,7 @@ enum AccessibilityID: String, CaseIterable {
     static func threadRow(_ sessionID: String) -> String { "hd.threads.row.\(sessionID)" }
     /// La carte d'un bot à l'accueil : un autre préfixe que la ligne de la barre latérale, que les tests comptent
     static func homeBot(_ profileID: String) -> String { "hd.home.bot.\(profileID)" }
+    static func homeBotLock(_ profileID: String) -> String { "\(homeBot(profileID)).lock" }
     /// Message des fils d'un bot : fonction `list_sessions` désactivée, aucun fil, ou lecture en échec
     static func threadsDisabled(_ profileID: String) -> String { "hd.threads.disabled.\(profileID)" }
     static func threadsEmpty(_ profileID: String) -> String { "hd.threads.empty.\(profileID)" }

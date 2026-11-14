@@ -268,7 +268,7 @@ Modèle : aucun.
 
 Côté API seule (sans app) : `scripts/hv-contract-check.py` vérifie chaque contrat de la fixture (la liste des profils par `hermes profile list` via `--profile-cmd`) et sonde les bords (message vide, id inexistant, id négatif, JSON invalide, sans clé) en mode fake et en mode orb. En mode orb, `hv-run.sh api orb` lance ensuite `scripts/hv-spike-probe.py` (scénarios S1 à S7 du spike : coupure réseau, annulation d'un outil).
 
-**À la main (A3)** : jugement visuel final, veille réelle du Mac (fermer le capot pendant un tour long et pendant une approbation en attente), Trousseau au premier lancement. Utilisateur présent ; consigner le résultat dans `<evd>/manuel.md`.
+**À la main (A3)** : relecture locale du designer, veille réelle du Mac (fermer le capot pendant un tour long et pendant une approbation en attente), Trousseau au premier lancement. Seuls la veille réelle du Mac et le Trousseau au premier lancement restent manuels, utilisateur présent ; consigner le résultat dans `<evd>/manuel.md`.
 
 ## Evidence
 

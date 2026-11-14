@@ -23,6 +23,24 @@ struct Bot: Equatable, Identifiable, Sendable {
     }
 }
 
+/// Textes de la carte d'un bot : le modèle en sous-titre, la pastille à part, jamais le texte du bandeau
+struct BotCardContent: Equatable {
+    /// Le modèle du profil, ou le repli « Modèle du profil » ; jamais le texte du verrou
+    let subtitle: String
+    let lockLabel: String?
+    let lockHelp: String?
+
+    init(bot: Bot, lockLabel: String?, lockHelp: String?) {
+        if let model = bot.model {
+            subtitle = model
+        } else {
+            subtitle = String(localized: "Modèle du profil")
+        }
+        self.lockLabel = lockLabel
+        self.lockHelp = lockHelp
+    }
+}
+
 /// La liste affichée et, à part, le changement que l'utilisateur n'a pas encore validé
 /// Le premier relevé s'affiche tout de suite, il n'y a rien à comparer ; ensuite une liste d'identifiants différente attend `validate()`
 struct BotList: Equatable {
