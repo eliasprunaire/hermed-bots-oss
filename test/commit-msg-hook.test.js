@@ -4,6 +4,7 @@ const {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   realpathSync,
   renameSync,
   rmSync,
@@ -56,6 +57,19 @@ test("a Co-authored-by trailer is rejected", () => {
   const { code, err } = runMain([file]);
   assert.equal(code, 1);
   assert.match(err, /commit message contains Co-authored-by/);
+});
+
+test("--strip removes trailer lines and does not refuse", () => {
+  const file = messageFile(
+    "strip",
+    "feat: add the commit-msg hook\n\nCo-authored-by: Bot <bot@example.com>\nco-authored-by: Other <other@example.com>\n",
+  );
+  const { code, err } = runMain(["--strip", file]);
+  assert.equal(code, 0);
+  assert.match(err, /trailer Co-authored-by retiré/);
+  const text = readFileSync(file, "utf8");
+  assert.doesNotMatch(text, /^[ \t]*#*[ \t]*Co-authored-by[ \t]*:/im);
+  assert.match(text, /feat: add the commit-msg hook/);
 });
 
 test("a human Co-authored-by trailer is rejected with no allowlist", () => {
@@ -115,6 +129,14 @@ test("the installer sets core.hooksPath in a git checkout", () => {
   assert.equal(resolve(dir, configured), expected);
   assert.equal(configured.startsWith("/"), false);
   assert.equal(statSync(join(expected, "commit-msg")).mode & 0o111, 0o111);
+  assert.match(
+    readFileSync(join(expected, "prepare-commit-msg"), "utf8"),
+    /--strip/,
+  );
+  assert.doesNotMatch(
+    readFileSync(join(expected, "commit-msg"), "utf8"),
+    /--strip/,
+  );
 });
 
 test("the installer does not set hooksPath on a sibling worktree", () => {
@@ -179,9 +201,13 @@ test("git commit rejects a trailer and accepts a clean message", () => {
     "-m",
     "Co-authored-by: Bot <bot@example.com>",
   ]);
-  assert.notEqual(bad.status, 0);
-  assert.match(`${bad.stderr}\n${bad.stdout}`, /Co-authored-by/);
-  assert.equal(git(dir, ["rev-parse", "HEAD"]).stdout.trim(), head);
+  assert.equal(bad.status, 0, `${bad.stderr}\n${bad.stdout}`);
+  assert.match(`${bad.stderr}\n${bad.stdout}`, /trailer Co-authored-by retiré/);
+  assert.doesNotMatch(
+    git(dir, ["log", "-1", "--format=%B"]).stdout,
+    /^[ \t]*Co-authored-by:/m,
+  );
+  assert.notEqual(git(dir, ["rev-parse", "HEAD"]).stdout.trim(), head);
 });
 
 test("git commit -F rejects a comment-prefixed co-author trailer", () => {
@@ -220,9 +246,13 @@ test("git commit -F rejects a comment-prefixed co-author trailer", () => {
     "-F",
     badFile,
   ]);
-  assert.notEqual(bad.status, 0);
-  assert.match(`${bad.stderr}\n${bad.stdout}`, /commit message contains Co-authored-by/);
-  assert.equal(git(dir, ["rev-parse", "HEAD"]).stdout.trim(), head);
+  assert.equal(bad.status, 0, `${bad.stderr}\n${bad.stdout}`);
+  assert.match(`${bad.stderr}\n${bad.stdout}`, /trailer Co-authored-by retiré/);
+  assert.doesNotMatch(
+    git(dir, ["log", "-1", "--format=%B"]).stdout,
+    /^[ \t]*#*[ \t]*Co-authored-by[ \t]*:/im,
+  );
+  assert.notEqual(git(dir, ["rev-parse", "HEAD"]).stdout.trim(), head);
 });
 
 test("git commit -F rejects a co-author trailer with a space before the colon", () => {
@@ -258,12 +288,13 @@ test("git commit -F rejects a co-author trailer with a space before the colon", 
     "-F",
     badFile,
   ]);
-  assert.notEqual(bad.status, 0);
-  assert.match(
-    `${bad.stderr}\n${bad.stdout}`,
-    /commit message contains Co-authored-by/,
+  assert.equal(bad.status, 0, `${bad.stderr}\n${bad.stdout}`);
+  assert.match(`${bad.stderr}\n${bad.stdout}`, /trailer Co-authored-by retiré/);
+  assert.doesNotMatch(
+    git(dir, ["log", "-1", "--format=%B"]).stdout,
+    /^[ \t]*#*[ \t]*Co-authored-by[ \t]*:/im,
   );
-  assert.equal(git(dir, ["rev-parse", "HEAD"]).stdout.trim(), head);
+  assert.notEqual(git(dir, ["rev-parse", "HEAD"]).stdout.trim(), head);
 });
 
 test("a moved checkout still rejects a co-author trailer", () => {
@@ -290,10 +321,11 @@ test("a moved checkout still rejects a co-author trailer", () => {
     "-m",
     "Co-authored-by: Bot <bot@example.com>",
   ]);
-  assert.notEqual(bad.status, 0);
-  assert.match(
-    `${bad.stderr}\n${bad.stdout}`,
-    /commit message contains Co-authored-by/,
+  assert.equal(bad.status, 0, `${bad.stderr}\n${bad.stdout}`);
+  assert.match(`${bad.stderr}\n${bad.stdout}`, /trailer Co-authored-by retiré/);
+  assert.doesNotMatch(
+    git(moved, ["log", "-1", "--format=%B"]).stdout,
+    /^[ \t]*Co-authored-by:/m,
   );
 });
 
@@ -348,12 +380,13 @@ test("a worktree added after install rejects a co-author trailer", () => {
     "-m",
     "Co-authored-by: Bot <bot@example.com>",
   ]);
-  assert.notEqual(bad.status, 0);
-  assert.match(
-    `${bad.stderr}\n${bad.stdout}`,
-    /commit message contains Co-authored-by/,
+  assert.equal(bad.status, 0, `${bad.stderr}\n${bad.stdout}`);
+  assert.match(`${bad.stderr}\n${bad.stdout}`, /trailer Co-authored-by retiré/);
+  assert.doesNotMatch(
+    git(sib, ["log", "-1", "--format=%B"]).stdout,
+    /^[ \t]*Co-authored-by:/m,
   );
-  assert.equal(git(sib, ["rev-parse", "HEAD"]).stdout.trim(), head);
+  assert.notEqual(git(sib, ["rev-parse", "HEAD"]).stdout.trim(), head);
 });
 
 test("a later checkout does not retarget a worktree added with --no-checkout", () => {
@@ -392,6 +425,10 @@ test("a later checkout does not retarget a worktree added with --no-checkout", (
     "Co-authored-by: Bot <bot@example.com>",
   ]);
   assert.equal(bad.status, 0, `${bad.stderr}\n${bad.stdout}`);
+  assert.match(
+    git(sib, ["log", "-1", "--format=%B"]).stdout,
+    /^[ \t]*Co-authored-by:/m,
+  );
 });
 
 test("renaming the primary checkout leaves the linked worktree hook stale after repair", () => {
@@ -423,7 +460,11 @@ test("renaming the primary checkout leaves the linked worktree hook stale after 
     "-m",
     "Co-authored-by: Bot <bot@example.com>",
   ]);
-  assert.notEqual(before.status, 0);
+  assert.equal(before.status, 0, `${before.stderr}\n${before.stdout}`);
+  assert.doesNotMatch(
+    git(sib, ["log", "-1", "--format=%B"]).stdout,
+    /^[ \t]*Co-authored-by:/m,
+  );
   const renamed = join(parent, "renamed");
   renameSync(main, renamed);
   const repair = git(renamed, ["worktree", "repair", sib]);
@@ -437,6 +478,10 @@ test("renaming the primary checkout leaves the linked worktree hook stale after 
     "Co-authored-by: Bot <bot@example.com>",
   ]);
   assert.equal(after.status, 0, `${after.stderr}\n${after.stdout}`);
+  assert.match(
+    git(sib, ["log", "-1", "--format=%B"]).stdout,
+    /^[ \t]*Co-authored-by:/m,
+  );
   const primary = git(renamed, [
     "commit",
     "--allow-empty",
@@ -445,9 +490,10 @@ test("renaming the primary checkout leaves the linked worktree hook stale after 
     "-m",
     "Co-authored-by: Bot <bot@example.com>",
   ]);
-  assert.notEqual(primary.status, 0);
-  assert.match(
-    `${primary.stderr}\n${primary.stdout}`,
-    /commit message contains Co-authored-by/,
+  assert.equal(primary.status, 0, `${primary.stderr}\n${primary.stdout}`);
+  assert.match(`${primary.stderr}\n${primary.stdout}`, /trailer Co-authored-by retiré/);
+  assert.doesNotMatch(
+    git(renamed, ["log", "-1", "--format=%B"]).stdout,
+    /^[ \t]*Co-authored-by:/m,
   );
 });
