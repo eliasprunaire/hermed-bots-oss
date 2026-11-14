@@ -5,6 +5,7 @@ const { spawnSync } = require("node:child_process");
 const http = require("node:http");
 const {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -16,6 +17,10 @@ const { test } = require("node:test");
 
 const ROOT = join(__dirname, "..");
 const HV_RUN = join(ROOT, ".cursor/skills/verify-hermed-bots/scripts/hv-run.sh");
+const HV_REGEN = join(
+  ROOT,
+  ".cursor/skills/verify-hermed-bots/scripts/hv-regen-baselines.sh",
+);
 const PIXEL = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
   "base64",
@@ -145,6 +150,48 @@ test("hv-run ui respecte une valeur explicite de HV_RUNNER_DIR", () => {
     assert.equal(run.status, 3, out);
     assert.match(out, /PAUSE présent/);
     assert.ok(out.includes(runner), out);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function regenEnv(extra = {}) {
+  const env = { ...process.env, ...extra };
+  if (!Object.prototype.hasOwnProperty.call(extra, "HV_RUNNER_DIR")) {
+    delete env.HV_RUNNER_DIR;
+  }
+  return env;
+}
+
+test("hv-regen-baselines sans HV_RUNNER_DIR ni vm.sh s'arrête avec un message", () => {
+  const run = spawnSync("bash", [HV_REGEN], {
+    encoding: "utf8",
+    env: regenEnv(),
+    timeout: 10000,
+  });
+  const out = combined(run);
+  assert.notEqual(run.status, 0, out);
+  assert.notEqual(run.status, 127, out);
+  assert.match(out, /HV_RUNNER_DIR/);
+});
+
+test("hv-regen-baselines avec un faux vm.sh exécutable l'appelle", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-regen-vm-"));
+  try {
+    const marker = join(dir, "called");
+    writeFileSync(
+      join(dir, "vm.sh"),
+      `#!/bin/sh\n: > "${marker}"\nexit 0\n`,
+      { mode: 0o755 },
+    );
+    const run = spawnSync("bash", [HV_REGEN], {
+      encoding: "utf8",
+      env: regenEnv({ HV_RUNNER_DIR: dir }),
+      timeout: 10000,
+    });
+    const out = combined(run);
+    assert.equal(run.status, 0, out);
+    assert.equal(existsSync(marker), true, out);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
