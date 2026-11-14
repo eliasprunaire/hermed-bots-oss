@@ -48,7 +48,7 @@ Tests alone are not sufficient verification. A PR is verified only when its unit
 ### Verdict and merge, for every PR
 
 - [ ] A full swarm runs once, at the code-ready head. Another full swarm runs only for new behavior, a redesign, or a large new diff. A rebase, a merge-conflict resolution, or a minor fix gets a single verifier at the new head, and a wording-only change gets none. This run does not launch that swarm and does not post `<!-- dev-lead-verifier -->`. An independent verifier outside this agent owns the marked comment. The root still audits unit, lint, and CI receipts in the merge-ready report.
-- [ ] Judge every finding by the execution playbook's blocking rule. The verdict is clean when none blocks. A failure on trunk behavior in a lane marked `Regression lane against trunk.` is recorded against trunk and does not block the PR. A new head gets a fresh verdict, except for results that stay valid under the patch-id rule in `playbooks/shipping.md`.
+- [ ] Judge every finding by the execution playbook's blocking rule. The verdict is clean when none blocks. A failure on trunk behavior in a lane marked `Regression lane against trunk.` is recorded against trunk and does not block the PR. A new head gets a fresh verdict on the exact 40-character SHA. A light re-check is allowed when the patch-id is identical, but the verdict must be posted again on the new SHA.
 - [ ] Stop at merge-ready. The repository owner squash-merges with `scripts/squash-merge.js` after a marked `PASS` or `PASS+NOTES` comment with `<!-- dev-lead-verifier -->` on the head SHA, `verdict-gate` green, all CI green, no conflict with `main`, and a non-draft PR. This agent never squash-merges, never force-pushes `main`, and never posts the marker.
 
 ### Boot recipe, for every live lane
@@ -121,7 +121,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `npm test`
 
 - [ ] Independent marked `PASS` or `PASS+NOTES` on the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The repository owner squash-merges SI-01. This agent does not merge.
 
 ## Default the temporary agent and name SSH failures (SI-02)
@@ -188,7 +188,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `npm test`
 
 - [ ] Independent marked `PASS` or `PASS+NOTES` on the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged. If SI-01 has landed, the base is `main`.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA. If SI-01 has landed, the base is `main`.
 - [ ] The repository owner squash-merges SI-02. This agent does not merge.
 
 ## Close the program
