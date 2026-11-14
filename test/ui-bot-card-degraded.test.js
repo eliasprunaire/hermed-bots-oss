@@ -75,6 +75,35 @@ test("en mode dégradé la carte produit le modèle, la pastille Dégradé et l'
   assert.match(init, /self\.lockHelp = lockHelp/);
 });
 
+test("état inconnu : aucune pastille ; dégradation constatée : pastille Dégradé ; état sain : aucune pastille", () => {
+  const unknown = { subtitle: "demo", lockLabel: null, lockHelp: null };
+  const degraded = degradedCardCopy();
+  const healthy = { subtitle: "demo", lockLabel: null, lockHelp: null };
+  assert.equal(unknown.lockLabel, null);
+  assert.equal(unknown.lockHelp, null);
+  assert.equal(degraded.lockLabel, "Dégradé");
+  assert.match(degraded.lockHelp, /la détection de Hermes/);
+  assert.equal(healthy.lockLabel, null);
+  assert.equal(healthy.lockHelp, null);
+
+  const lock = read("HermedBots/Transport/ProfileLock.swift");
+  const sidebarLabel = firstBlock(lock, "var sidebarLabel: String?");
+  assert.match(sidebarLabel, /case \.free, \.unknown: nil/);
+  assert.match(sidebarLabel, /case \.degraded: String\(localized: "Dégradé"\)/);
+  const reason = firstBlock(lock, "var reason: String?");
+  assert.match(reason, /case \.free, \.unknown: nil/);
+  assert.match(reason, /case \.degraded: String\(localized: "Mode dégradé/);
+
+  const swift = read("HermedBotsTests/BotCardContentTests.swift");
+  assert.match(swift, /testUnknownLockHasNoPillObservedDegradationShowsDegradedAndHealthyHasNone/);
+  assert.match(swift, /shownState\(bot\.id\), \.unknown/);
+  assert.match(swift, /shownState\(bot\.id\), \.degraded/);
+  assert.match(swift, /shownState\(bot\.id\), \.free/);
+  assert.match(swift, /XCTAssertNil\(content\.lockLabel\)/);
+  assert.match(swift, /XCTAssertNil\(lock\.sidebarLabel\(bot\.id\)\)/);
+  assert.match(swift, /content\.lockLabel, "Dégradé"/);
+});
+
 test("l'écran banner-degraded de la piste 1 a un nom assez long pour se tronquer à côté de la pastille", () => {
   const app = read("HermedBots/App/AppModel.swift");
   const start = app.indexOf("case .bannerDegraded:");
@@ -83,4 +112,5 @@ test("l'écran banner-degraded de la piste 1 a un nom assez long pour se tronque
   const scene = app.slice(start, next);
   assert.match(scene, /tronquer/);
   assert.match(scene, /pastille/);
+  assert.match(scene, /seedDegraded/);
 });

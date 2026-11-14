@@ -844,6 +844,8 @@ final class AppModel {
             // Un nom assez long pour se tronquer à côté de la pastille, sur la carte et dans la barre latérale
             let longName = Bot(id: "shot-bot-long", name: "Bot de capture au nom assez long pour se tronquer avant la pastille Dégradé", model: "demo")
             bots.seedShown([bot, longName])
+            // Capture : la sonde a constaté la dégradation
+            profileLock.seedDegraded()
             capabilities = CapabilityMap(version: "0.22.2", states: [.listSessions: .disabled(message: "Fonction désactivée (la liste des fils passés) : capture.")])
             version = .known("0.22.2")
         case .connection:

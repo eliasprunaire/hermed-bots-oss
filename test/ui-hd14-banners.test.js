@@ -83,6 +83,9 @@ test("la barre latérale affiche les pastilles courtes, pas le texte long du ban
   const ui = read("HermedBotsUITests/ConcurrencyTests.swift");
   assert.match(lock, new RegExp(`"${PILL_HELD}"`));
   assert.match(lock, new RegExp(`"${PILL_DEGRADED}"`));
+  const sidebarLabel = firstBlock(lock, "var sidebarLabel: String?");
+  assert.match(sidebarLabel, /case \.free, \.unknown: nil/);
+  assert.match(sidebarLabel, /case \.degraded:/);
   assert.match(row, /profileLock\.sidebarLabel\(bot\.id\)/);
   assert.match(row, /lockLabel:/);
   const pill = firstBlock(row, "if let lockLabel");
