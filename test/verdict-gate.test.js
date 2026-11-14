@@ -36,6 +36,10 @@ function marked(verdict, sha) {
   return `VERDICT: ${verdict} @ ${sha}\n${MARKER}`;
 }
 
+function staleDescription(citedSha, headSha) {
+  return `verdict sur ${citedSha}, tête ${headSha} : nouveau verdict requis`;
+}
+
 function rawComment(id, createdAt, body, updatedAt, user = REAL_USER) {
   return {
     id,
@@ -190,6 +194,19 @@ test("the newest qualifying comment wins over an older PASS", () => {
   });
 });
 
+test("PASS then FAIL on the head stays red", () => {
+  const decision = decide({
+    headSha: HEAD,
+    comments: [
+      comment("1", 1, marked("PASS", HEAD)),
+      comment("2", 2, marked("FAIL", HEAD)),
+    ],
+  });
+  assert.equal(decision.kind, "fail");
+  assert.equal(decision.reason.code, "verdict-fail");
+  assert.equal(decision.description, `VERDICT FAIL @ ${HEAD}`);
+});
+
 test("a later unmarked verdict does not hide the newest qualifying comment", () => {
   const decision = decide({
     headSha: HEAD,
@@ -268,20 +285,43 @@ test("matchesHead and a patch-id in the comment body do not make a foreign SHA m
         headSha: HEAD,
         commentId: "1",
       },
-      description: `VERDICT ${verdict} @ ${OTHER} does not match head ${HEAD}`,
+      description: staleDescription(OTHER, HEAD),
     });
   }
 });
 
-test("a SHA that is a prefix of the head does not qualify", () => {
+test("an abbreviated SHA of at least 7 characters of the head qualifies", () => {
   for (const cited of [HEAD.slice(0, 7), HEAD.slice(0, 39)]) {
     const decision = decide({
       headSha: HEAD,
       comments: [comment("1", 1, `VERDICT: PASS @ ${cited}\n${MARKER}`)],
     });
-    assert.equal(decision.kind, "fail");
-    assert.equal(decision.reason.code, "none");
+    assert.equal(decision.kind, "pass");
+    assert.equal(decision.verdict, "PASS");
+    assert.equal(decision.sha, cited);
+    assert.equal(decision.description, `VERDICT PASS @ ${cited}`);
   }
+});
+
+test("a prefix of fewer than 7 characters does not qualify", () => {
+  const decision = decide({
+    headSha: HEAD,
+    comments: [comment("1", 1, `VERDICT: PASS @ ${HEAD.slice(0, 6)}\n${MARKER}`)],
+  });
+  assert.equal(decision.kind, "fail");
+  assert.equal(decision.reason.code, "none");
+  assert.equal(decision.reason.hint, "marker-without-line");
+});
+
+test("an abbreviated SHA that is not a prefix of the head does not qualify", () => {
+  const cited = OTHER.slice(0, 7);
+  const decision = decide({
+    headSha: HEAD,
+    comments: [comment("1", 1, `VERDICT: PASS @ ${cited}\n${MARKER}`)],
+  });
+  assert.equal(decision.kind, "fail");
+  assert.equal(decision.reason.code, "sha-mismatch");
+  assert.equal(decision.description, staleDescription(cited, HEAD));
 });
 
 test("git is invoked only through io.run as git argv, never from comment text", () => {
@@ -341,19 +381,13 @@ test("a different SHA fails with both SHAs in the description", () => {
     headSha: HEAD,
     comments: [comment("2", 2, marked("FAIL", OTHER))],
   });
-  assert.equal(
-    pass.description,
-    `VERDICT PASS @ ${OTHER} does not match head ${HEAD}`,
-  );
+  assert.equal(pass.description, staleDescription(OTHER, HEAD));
   assert.equal(pass.reason.code, "sha-mismatch");
   assert.equal(pass.reason.citedSha, OTHER);
   assert.equal(pass.reason.verdict, "PASS");
   assert.equal(fail.reason.code, "sha-mismatch");
   assert.equal(fail.reason.verdict, "FAIL");
-  assert.equal(
-    fail.description,
-    `VERDICT FAIL @ ${OTHER} does not match head ${HEAD}`,
-  );
+  assert.equal(fail.description, staleDescription(OTHER, HEAD));
 });
 
 test("uppercase hex in the verdict line matches a lowercase head", () => {
@@ -368,7 +402,7 @@ test("uppercase hex in the verdict line matches a lowercase head", () => {
 
 test("a short SHA, a mid-sentence verdict, and a trailing space do not qualify", () => {
   const bodies = [
-    `VERDICT: PASS @ ${"a".repeat(7)}\n${MARKER}`,
+    `VERDICT: PASS @ ${HEAD.slice(0, 6)}\n${MARKER}`,
     `Ship VERDICT: PASS @ ${HEAD} now\n${MARKER}`,
     `VERDICT: PASS @ ${HEAD} \n${MARKER}`,
   ];
@@ -663,14 +697,8 @@ test("every description is at most 140 characters", () => {
       comments: [comment("6", 6, marked("PASS", HEAD))],
     }),
   ];
-  assert.equal(
-    notesOnOther.description,
-    `VERDICT PASS+NOTES @ ${OTHER} does not match head ${HEAD}`,
-  );
-  assert.equal(
-    viaPatch.description,
-    `VERDICT PASS+NOTES @ ${OTHER} pid ${"d".repeat(40)}`,
-  );
+  assert.equal(notesOnOther.description, staleDescription(OTHER, HEAD));
+  assert.equal(viaPatch.description, staleDescription(OTHER, HEAD));
   for (const decision of cases) {
     assert.ok(decision.description.length <= 140);
     assert.equal(decision.description.length > 0, true);
@@ -1131,7 +1159,7 @@ const PID = "e".repeat(40);
 const XID = "a".repeat(40);
 const TID = "9".repeat(40);
 
-test("a clean rebase PASS with the same patch-id passes and names origin sha and patch-id", () => {
+test("PASS on an ancestor SHA with matching patch-ids does not qualify", () => {
   const decision = decide({
     headSha: HEAD,
     headPatchId: PID,
@@ -1143,13 +1171,10 @@ test("a clean rebase PASS with the same patch-id passes and names origin sha and
     replayIds: { [OTHER]: TID },
     comments: [comment("1", 1, marked("PASS+NOTES", OTHER))],
   });
-  assert.deepEqual(decision, {
-    kind: "pass",
-    verdict: "PASS+NOTES",
-    sha: OTHER,
-    commentId: "1",
-    description: `VERDICT PASS+NOTES @ ${OTHER} pid ${PID}`,
-  });
+  assert.equal(decision.kind, "fail");
+  assert.equal(decision.reason.code, "sha-mismatch");
+  assert.equal(decision.reason.citedSha, OTHER);
+  assert.equal(decision.description, staleDescription(OTHER, HEAD));
   assert.ok(decision.description.length <= 140);
 });
 
@@ -1167,10 +1192,7 @@ test("a modified diff with a different patch-id is refused", () => {
   });
   assert.equal(decision.kind, "fail");
   assert.equal(decision.reason.code, "sha-mismatch");
-  assert.equal(
-    decision.description,
-    `VERDICT PASS @ ${OTHER} does not match head ${HEAD}`,
-  );
+  assert.equal(decision.description, staleDescription(OTHER, HEAD));
 });
 
 test("the same patch-id with a different verbatim id is refused", () => {
@@ -1187,10 +1209,7 @@ test("the same patch-id with a different verbatim id is refused", () => {
   });
   assert.equal(decision.kind, "fail");
   assert.equal(decision.reason.code, "sha-mismatch");
-  assert.equal(
-    decision.description,
-    `VERDICT PASS @ ${OTHER} does not match head ${HEAD}`,
-  );
+  assert.equal(decision.description, staleDescription(OTHER, HEAD));
 });
 
 test("a missing verbatim id on either side is refused", () => {
@@ -1220,10 +1239,7 @@ test("the same patch-ids with a different replay tree are refused", () => {
   });
   assert.equal(decision.kind, "fail");
   assert.equal(decision.reason.code, "sha-mismatch");
-  assert.equal(
-    decision.description,
-    `VERDICT PASS @ ${OTHER} does not match head ${HEAD}`,
-  );
+  assert.equal(decision.description, staleDescription(OTHER, HEAD));
 });
 
 test("a missing replay tree on either side is refused", () => {
@@ -1241,7 +1257,7 @@ test("a missing replay tree on either side is refused", () => {
   assert.equal(decide({ ...noReplay, replayIds: { [OTHER]: TID } }).kind, "fail");
   assert.equal(
     decide({ ...noReplay, headReplayId: TID, replayIds: { [OTHER]: TID } }).kind,
-    "pass",
+    "fail",
   );
 });
 
@@ -1257,7 +1273,7 @@ test("author verdict is refused even with a matching patch-id", () => {
     patchIds: { [OTHER]: PID },
     exactIds: { [OTHER]: XID },
     replayIds: { [OTHER]: TID },
-    comments: [comment("1", 1, marked("PASS", OTHER), AUTHOR)],
+    comments: [comment("1", 1, marked("PASS", HEAD), AUTHOR)],
   });
   assert.equal(decision.reason.code, "author-match");
   assert.equal(decision.description, "author eliasprunaire wrote the marked VERDICT");
@@ -1282,7 +1298,7 @@ test("a SHA that is not on the pull is refused even with the same patch-id", () 
   );
 });
 
-test("a later FAIL on the same patch-id or on the head wins", () => {
+test("a later FAIL on the head wins; a FAIL on an ancestor does not qualify", () => {
   const older = comment("1", 1, marked("PASS", OTHER));
   const failHead = decide({
     headSha: HEAD,
@@ -1310,8 +1326,8 @@ test("a later FAIL on the same patch-id or on the head wins", () => {
     comments: [older, comment("3", 3, marked("FAIL", OTHER))],
   });
   assert.equal(failPatch.kind, "fail");
-  assert.equal(failPatch.reason.code, "verdict-fail");
-  assert.equal(failPatch.description, `VERDICT FAIL @ ${OTHER} pid ${PID}`);
+  assert.equal(failPatch.reason.code, "sha-mismatch");
+  assert.equal(failPatch.description, staleDescription(OTHER, HEAD));
 });
 
 test("an empty patch-id is refused even when both sides are empty", () => {
@@ -1329,7 +1345,7 @@ test("an empty patch-id is refused even when both sides are empty", () => {
   assert.equal(decision.description, `empty patch-id refused for ${OTHER}`);
 });
 
-test("main accepts a clean rebase with the same patch-id computed from git objects", async () => {
+test("main refuses a clean rebase PASS even with the same patch-id from git objects", async () => {
   const repo = featureRepo();
   try {
     const { code, posts, stderr } = await gateOnReplay({
@@ -1339,15 +1355,15 @@ test("main accepts a clean rebase with the same patch-id computed from git objec
       force: [[repo.sha1, repo.sha2]],
     });
     assert.equal(code, 0);
-    const description = `VERDICT PASS @ ${repo.sha1} pid ${repo.patchId}`;
+    const description = staleDescription(repo.sha1, repo.sha2);
     assert.deepEqual(posts[0].body, {
-      state: "success",
+      state: "failure",
       context: "verdict-gate",
       description,
     });
     assert.deepEqual(stderr, [description]);
     assert.ok(description.includes(repo.sha1));
-    assert.ok(description.includes(repo.patchId));
+    assert.ok(description.includes(repo.sha2));
     assert.ok(description.length <= 140);
   } finally {
     rmSync(repo.dir, { recursive: true, force: true });
@@ -1390,10 +1406,7 @@ test("main refuses a cited SHA whose diff against the current base changed", asy
     attachGit(io, repo.dir);
     assert.equal(await main([], io), 0);
     assert.equal(posts[0].body.state, "failure");
-    assert.equal(
-      posts[0].body.description,
-      `VERDICT PASS @ ${repo.sha1} does not match head ${head}`,
-    );
+    assert.equal(posts[0].body.description, staleDescription(repo.sha1, head));
   } finally {
     rmSync(repo.dir, { recursive: true, force: true });
   }
@@ -1434,10 +1447,7 @@ test("main refuses a PASS when only the indentation changed behaviour", async ()
     });
     assert.equal(code, 0);
     assert.equal(posts[0].body.state, "failure");
-    assert.equal(
-      posts[0].body.description,
-      `VERDICT PASS @ ${sha1} does not match head ${sha2}`,
-    );
+    assert.equal(posts[0].body.description, staleDescription(sha1, sha2));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1485,16 +1495,13 @@ test("main refuses a PASS when the same hunk moved to another place in the file"
     });
     assert.equal(code, 0);
     assert.equal(posts[0].body.state, "failure");
-    assert.equal(
-      posts[0].body.description,
-      `VERDICT PASS @ ${sha1} does not match head ${sha2}`,
-    );
+    assert.equal(posts[0].body.description, staleDescription(sha1, sha2));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("main accepts a rebase onto a moved base when the replay is exact", async () => {
+test("main refuses a rebase onto a moved base even when the replay is exact", async () => {
   const { dir, git } = initGitDir();
   try {
     writeFileSync(join(dir, "app.py"), twinFunctions("old", "old"));
@@ -1525,8 +1532,74 @@ test("main accepts a rebase onto a moved base when the replay is exact", async (
       force: [[sha1, sha2]],
     });
     assert.equal(code, 0);
-    assert.equal(posts[0].body.state, "success");
-    assert.match(posts[0].body.description, new RegExp(`^VERDICT PASS @ ${sha1} pid `));
+    assert.equal(posts[0].body.state, "failure");
+    assert.equal(posts[0].body.description, staleDescription(sha1, sha2));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("PASS on the head before an Update branch does not qualify the merge head", async () => {
+  const { dir, git } = initGitDir();
+  try {
+    writeFileSync(join(dir, "shared.txt"), "base\n");
+    git(["add", "shared.txt"]);
+    assert.equal(git(["commit", "-qm", "base"]).status, 0);
+    const rootSha = git(["rev-parse", "HEAD"]).stdout.trim();
+
+    assert.equal(git(["checkout", "-qb", "feature"]).status, 0);
+    writeFileSync(join(dir, "feature.txt"), "feature\n");
+    git(["add", "feature.txt"]);
+    assert.equal(git(["commit", "-qm", "feature"]).status, 0);
+    const oldHead = git(["rev-parse", "HEAD"]).stdout.trim();
+
+    assert.equal(git(["checkout", "-q", "-b", "trunk", rootSha]).status, 0);
+    writeFileSync(join(dir, "trunk.txt"), "moved\n");
+    git(["add", "trunk.txt"]);
+    assert.equal(git(["commit", "-qm", "trunk moved"]).status, 0);
+    const newBase = git(["rev-parse", "HEAD"]).stdout.trim();
+
+    assert.equal(git(["checkout", "-q", "feature"]).status, 0);
+    const merge = git(["merge", "--no-ff", "-m", "update branch", newBase]);
+    assert.equal(merge.status, 0, merge.stderr);
+    const newHead = git(["rev-parse", "HEAD"]).stdout.trim();
+    assert.notEqual(oldHead, newHead);
+    assert.equal(git(["merge-base", "--is-ancestor", oldHead, newHead]).status, 0);
+    assert.equal(
+      patchIdAgainst(git, oldHead, rootSha),
+      patchIdAgainst(git, newHead, newBase),
+    );
+
+    const { io, posts } = harness({
+      eventName: "pull_request",
+      payload: {
+        action: "synchronize",
+        pull_request: {
+          number: 7,
+          head: { sha: newHead },
+          base: { sha: newBase },
+          user: { login: "eliasprunaire" },
+        },
+      },
+      pages: [
+        {
+          url: `${API}/issues/7/comments?per_page=100`,
+          comments: [rawComment(1, "2026-10-15T18:00:00Z", marked("PASS", oldHead))],
+        },
+      ],
+      routes: {
+        commits: [{ sha: oldHead }, { sha: newHead }],
+        timeline: [],
+        graphql: historyPayload({
+          commits: [oldHead, newHead],
+          force: [],
+        }),
+      },
+    });
+    attachGit(io, dir);
+    assert.equal(await main([], io), 0);
+    assert.equal(posts[0].body.state, "failure");
+    assert.equal(posts[0].body.description, staleDescription(oldHead, newHead));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1717,7 +1790,7 @@ test("main refuses a SHA that only a referenced or closed timeline event names",
   }
 });
 
-test("main accepts a SHA that a committed timeline event names", async () => {
+test("main refuses a SHA that a committed timeline event names", async () => {
   const repo = featureRepo();
   try {
     const { code, posts } = await gateOnReplay({
@@ -1728,17 +1801,14 @@ test("main accepts a SHA that a committed timeline event names", async () => {
       timeline: [{ event: "committed", sha: repo.sha1 }],
     });
     assert.equal(code, 0);
-    assert.equal(posts[0].body.state, "success");
-    assert.equal(
-      posts[0].body.description,
-      `VERDICT PASS @ ${repo.sha1} pid ${repo.patchId}`,
-    );
+    assert.equal(posts[0].body.state, "failure");
+    assert.equal(posts[0].body.description, staleDescription(repo.sha1, repo.sha2));
   } finally {
     rmSync(repo.dir, { recursive: true, force: true });
   }
 });
 
-test("main fetches the old head with its ancestors into a fresh clone", async () => {
+test("main fetches the old head in a fresh clone but a PASS on it does not qualify", async () => {
   const repo = featureRepo();
   const cloneDir = mkdtempSync(join(tmpdir(), "verdict-gate-clone-"));
   try {
@@ -1765,10 +1835,10 @@ test("main fetches the old head with its ancestors into a fresh clone", async ()
       force: [[repo.sha1, repo.sha2]],
     });
     assert.equal(code, 0);
-    assert.equal(posts[0].body.state, "success");
+    assert.equal(posts[0].body.state, "failure");
     assert.equal(
       posts[0].body.description,
-      `VERDICT PASS @ ${repo.sha1} pid ${repo.patchId}`,
+      staleDescription(repo.sha1, repo.sha2),
     );
   } finally {
     rmSync(repo.dir, { recursive: true, force: true });

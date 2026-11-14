@@ -213,7 +213,7 @@ function readableComment(comment) {
   );
 }
 
-function signalVerdict(comments, headSha, onPull, ids) {
+function signalVerdict(comments, headSha, ids) {
   let newest = null;
   let verdict = null;
   for (const comment of comments) {
@@ -224,7 +224,7 @@ function signalVerdict(comments, headSha, onPull, ids) {
       continue;
     }
     const match = verdictLines(comment.body).find(
-      (line) => qualifies(line.sha, headSha, onPull, ids) != null,
+      (line) => qualifies(line.sha, headSha, ids) != null,
     );
     if (match == null) {
       continue;
@@ -266,37 +266,20 @@ function headIdOf(value) {
   return HEX_PATCH.test(id) ? id : null;
 }
 
-// a reused verdict needs three equal fingerprints: --stable ignores whitespace, --verbatim ignores
-// hunk position, and only the replay tree proves the head holds exactly the cited changes
-function qualifies(sha, headSha, onPull, ids) {
+// only the exact head SHA qualifies, or a prefix of at least 7 hex digits of that head;
+// a prior SHA of this PR, even with matching patch-ids and replay tree, does not
+function matchesHeadSha(sha, headSha) {
   if (sha === headSha) {
+    return true;
+  }
+  return sha.length >= 7 && sha.length < 40 && headSha.startsWith(sha);
+}
+
+function qualifies(sha, headSha, ids) {
+  if (matchesHeadSha(sha, headSha)) {
     return { via: "head", patchId: ids.headPatchId };
   }
-  if (!onPull.has(sha)) {
-    return null;
-  }
-  for (const id of [ids.headPatchId, ids.headExactId, ids.headReplayId]) {
-    if (id == null || id === "") {
-      return null;
-    }
-  }
-  const patchId = ids.patches[sha];
-  const exactId = ids.exacts[sha];
-  const replayId = ids.replays[sha];
-  if (
-    typeof patchId !== "string" ||
-    patchId === "" ||
-    patchId !== ids.headPatchId ||
-    typeof exactId !== "string" ||
-    exactId === "" ||
-    exactId !== ids.headExactId ||
-    typeof replayId !== "string" ||
-    replayId === "" ||
-    replayId !== ids.headReplayId
-  ) {
-    return null;
-  }
-  return { via: "patch", patchId };
+  return null;
 }
 
 function mismatchDescription(
@@ -318,7 +301,7 @@ function mismatchDescription(
   ) {
     return render(`empty patch-id refused for ${citedSha}`);
   }
-  return render(`VERDICT ${verdict} @ ${citedSha} does not match head ${headSha}`);
+  return render(`verdict sur ${citedSha}, tête ${headSha} : nouveau verdict requis`);
 }
 
 function passDescription(verdict, sha, via, patchId) {
@@ -364,7 +347,7 @@ function decide(input) {
       continue;
     }
     const anyQualifies = lines.some(
-      (line) => qualifies(line.sha, headSha, onPull, ids) != null,
+      (line) => qualifies(line.sha, headSha, ids) != null,
     );
     const row = {
       id: comment.id,
@@ -418,7 +401,7 @@ function decide(input) {
         reason: { code: "none", headSha, hint },
         description: render(noneDescription(hint, headSha)),
       },
-      signalVerdict(input.comments, headSha, onPull, ids),
+      signalVerdict(input.comments, headSha, ids),
     );
   }
 
@@ -434,7 +417,7 @@ function decide(input) {
     };
   }
 
-  const match = qualifies(first.sha, headSha, onPull, ids);
+  const match = qualifies(first.sha, headSha, ids);
   if (match == null) {
     return {
       kind: "fail",
