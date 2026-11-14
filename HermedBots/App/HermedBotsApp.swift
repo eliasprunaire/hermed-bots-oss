@@ -154,7 +154,7 @@ private struct SidebarFooter: View {
                         .help(footerLabel)
                         .accessibilityID(.statusCompat)
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(verbatim: "Version Hermes")
+                        Text("Version Hermes")
                             .accessibilityHidden(true)
                         Text(verbatim: model.version.token)
                             .fixedSize(horizontal: false, vertical: true)
@@ -184,7 +184,13 @@ private struct SidebarFooter: View {
     }
 
     private var footerLabel: String {
-        var label = model.compatibility.footerLabel
+        var label: String
+        switch model.compatibility {
+        case .connecting: label = String(localized: "Connexion…")
+        case .ready: label = String(localized: "Prêt")
+        case .untested: label = String(localized: "Compatibilité · voir Réglages")
+        case .failed(let message): label = message
+        }
         if model.compatibility == .ready, model.conversation.compaction.percent > 0 {
             let compaction = model.conversation.compaction
             label += " · contexte \(compaction.percent) %"
