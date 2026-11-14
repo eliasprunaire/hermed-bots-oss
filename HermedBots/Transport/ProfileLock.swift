@@ -7,22 +7,25 @@ final class ProfileLock {
     enum State: Equatable {
         case free
         case held
+        /// Aucune sonde, ou sonde pas encore revenue
         case unknown
+        /// La sonde a constaté que la détection de Hermes Desktop est indisponible
+        case degraded
 
         var reason: String? {
             switch self {
-            case .free: nil
+            case .free, .unknown: nil
             case .held: String(localized: "Hermes Desktop tient ce profil. Libérez-le dans Desktop avant de continuer.")
-            case .unknown: String(localized: "Mode dégradé : la détection de Hermes Desktop est indisponible. Les écritures de ce profil sont bloquées.")
+            case .degraded: String(localized: "Mode dégradé : la détection de Hermes Desktop est indisponible. Les écritures de ce profil sont bloquées.")
             }
         }
 
-        /// Pastille courte de la barre latérale ; le bandeau de conversation garde `reason`
+        /// Pastille courte de la carte et de la barre latérale ; le bandeau de conversation garde `reason`
         var sidebarLabel: String? {
             switch self {
-            case .free: nil
+            case .free, .unknown: nil
             case .held: String(localized: "Tenu par Desktop")
-            case .unknown: String(localized: "Dégradé")
+            case .degraded: String(localized: "Dégradé")
             }
         }
     }
@@ -32,6 +35,8 @@ final class ProfileLock {
         let at: ContinuousClock.Instant
     }
     private var snapshots: [String: Snapshot] = [:]
+    /// Hôtes dont la dernière sonde a échoué : l'état runtime reste inconnu, l'écran montre la dégradation
+    private var unavailable: Set<String> = []
     /// Pourquoi la dernière lecture de cet hôte a échoué ; absent quand elle a réussi ou que l'erreur n'a rien à dire
     private var causes: [String: String] = [:]
     private var applied: [String: ContinuousClock.Instant] = [:]
@@ -50,20 +55,36 @@ final class ProfileLock {
         return snapshot.held.contains(profile) ? .held : .free
     }
 
-    /// Le texte de `state(_:on:).reason`, suivi de la cause de la panne de la sonde quand elle est connue
+    /// L'état montré : dégradé seulement si une sonde l'a constaté, pas si le verrou est encore inconnu
+    func shownState(_ profile: String, on host: String? = nil) -> State {
+        let key = host ?? connection()
+        if unavailable.contains(key) { return .degraded }
+        return state(profile, on: key)
+    }
+
+    /// Le texte de `shownState(_:on:).reason`, suivi de la cause de la panne de la sonde quand elle est connue
     func reason(_ profile: String, on host: String? = nil) -> String? {
-        let state = state(profile, on: host)
-        guard state == .unknown, let base = state.reason, let cause = causes[host ?? connection()] else { return state.reason }
+        let shown = shownState(profile, on: host)
+        guard shown == .degraded, let base = shown.reason, let cause = causes[host ?? connection()] else { return shown.reason }
         return base + "\n" + String(localized: "Cause : \(cause)")
     }
 
-    /// Pastille de la barre latérale pour ce profil ; nil s'il est libre
+    /// Pastille de la carte et de la barre latérale pour ce profil ; nil s'il est libre ou inconnu
     func sidebarLabel(_ profile: String, on host: String? = nil) -> String? {
-        state(profile, on: host).sidebarLabel
+        shownState(profile, on: host).sidebarLabel
     }
 
+    #if DEBUG
+    /// Capture : la sonde a constaté la dégradation, sans lancer de lecture
+    func seedDegraded() {
+        unavailable.insert(connection())
+    }
+    #endif
+
     func run() async {
-        snapshots[connection()] = nil
+        let host = connection()
+        snapshots[host] = nil
+        unavailable.remove(host)
         while !Task.isCancelled {
             await refresh()
             do { try await Task.sleep(for: .seconds(1)) } catch { return }
@@ -103,7 +124,13 @@ final class ProfileLock {
             return snapshots[host] != nil
         }
         applied[host] = started
-        snapshots[host] = held.map { Snapshot(held: $0, at: .now) }
+        if let held {
+            snapshots[host] = Snapshot(held: held, at: .now)
+            unavailable.remove(host)
+        } else {
+            snapshots[host] = nil
+            unavailable.insert(host)
+        }
         causes[host] = cause
         return held != nil
     }
@@ -135,7 +162,7 @@ final class ProfileLock {
         switch state(profile, on: host) {
         case .free: return true
         case .held: return false
-        case .unknown:
+        case .unknown, .degraded:
             _ = await refresh()
             guard host == connection() else { return false }
             return state(profile, on: host) == .free

@@ -56,7 +56,7 @@ struct BotListView: View {
     }
 }
 
-/// Une ligne de bot : son avatar, son nom et son modèle ; un clic ouvre le fil unique ; un nom ou un modèle trop long est coupé en fin de ligne, le nom entier reste dans l'infobulle
+/// Une ligne de bot : son avatar, son nom et son modèle ; un clic ouvre le fil unique ; un nom trop long est coupé avant la pastille, le nom entier reste dans l'infobulle
 /// Pas de `Button` : un bouton fusionne ses enfants et `.name` et `.model` perdraient leur identifiant ; l'action par défaut garde la ligne utilisable au clavier d'accessibilité
 struct BotRow: View {
     let bot: Bot
@@ -71,11 +71,17 @@ struct BotRow: View {
         HStack(spacing: 9) {
             BotAvatar(bot: bot, size: 28, activity: activity)
             VStack(alignment: .leading, spacing: 1) {
-                Text(bot.name)
-                    .fontWeight(isSelected ? .semibold : .regular)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .accessibilityIdentifier(AccessibilityID.botName(bot.id))
+                HStack(spacing: BotLockPill.nameSpacing) {
+                    Text(bot.name)
+                        .fontWeight(isSelected ? .semibold : .regular)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier(AccessibilityID.botName(bot.id))
+                    if let lockLabel {
+                        BotLockPill(label: lockLabel, help: lockHelp ?? lockLabel, accessibilityID: AccessibilityID.botLock(bot.id))
+                    }
+                }
                 if let model = bot.model {
                     Text(model)
                         .font(.caption)
@@ -85,18 +91,11 @@ struct BotRow: View {
                         .accessibilityIdentifier(AccessibilityID.botModel(bot.id))
                 }
             }
-            if let lockLabel {
-                Text(lockLabel)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .lineLimit(1)
-                    .help(lockHelp ?? lockLabel)
-                    .accessibilityIdentifier(AccessibilityID.botLock(bot.id))
-            }
-            Spacer(minLength: 0)
+            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 4)
-        .padding(.horizontal, 6)
+        .padding(.leading, 6)
+        .padding(.trailing, BotLockPill.sidebarTrailing)
         .background {
             if isSelected {
                 RoundedRectangle(cornerRadius: 10).fill(Palette.gradient(Palette.colors(bot)).opacity(0.16))

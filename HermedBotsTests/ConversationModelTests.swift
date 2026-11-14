@@ -2070,8 +2070,8 @@ final class ConversationModelTests: XCTestCase {
         let model = makeModel(profileLock: lock)
         model.select(bot: bot)
         let reason = try XCTUnwrap(model.profileLockReason)
-        let unknown = ProfileLock.State.unknown.reason ?? "?"
-        XCTAssertTrue(reason.hasPrefix(unknown))
+        let degraded = ProfileLock.State.degraded.reason ?? "?"
+        XCTAssertTrue(reason.hasPrefix(degraded))
         XCTAssertTrue(reason.contains(ProfileLock.unreachableCause), reason)
         XCTAssertFalse(reason.contains("détection Desktop indisponible"), reason)
         XCTAssertEqual(reason.split(whereSeparator: \.isNewline).count, 2)

@@ -102,9 +102,12 @@ final class AccessibilityIDTests: XCTestCase {
 
     func testDynamicIdsAppendTheHermesIdentifier() {
         XCTAssertEqual(AccessibilityID.botRow("hv-bot-a"), "hd.bots.row.hv-bot-a")
+        XCTAssertEqual(AccessibilityID.botLock("hv-bot-a"), "hd.bots.row.hv-bot-a.lock")
         XCTAssertEqual(AccessibilityID.botName("hv-bot-a"), "hd.bots.row.hv-bot-a.name")
         XCTAssertEqual(AccessibilityID.botModel("hv-bot-a"), "hd.bots.row.hv-bot-a.model")
         XCTAssertEqual(AccessibilityID.botThreads("hv-bot-a"), "hd.bots.row.hv-bot-a.threads")
+        XCTAssertEqual(AccessibilityID.homeBot("hv-bot-a"), "hd.home.bot.hv-bot-a")
+        XCTAssertEqual(AccessibilityID.homeBotLock("hv-bot-a"), "hd.home.bot.hv-bot-a.lock")
         XCTAssertEqual(AccessibilityID.threadRow("s1"), "hd.threads.row.s1")
         XCTAssertEqual(AccessibilityID.conversationMessage(7), "hd.conversation.message.7")
         XCTAssertEqual(AccessibilityID.modelOption("gpt-x"), "hd.model.option.gpt-x")

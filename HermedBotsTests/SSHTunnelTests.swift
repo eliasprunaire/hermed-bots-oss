@@ -1596,9 +1596,11 @@ final class RemoteLoginShellTests: XCTestCase {
             if answering { return Data(#"{"held": ["hv-bot-b"]}"#.utf8) }
             throw failure
         })
-        // avant toute lecture : l'état est inconnu, sans cause à dire
+        // avant toute lecture : l'état est inconnu, sans pastille ni bandeau
         XCTAssertEqual(lock.state("hv-bot-a"), .unknown)
-        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.unknown.reason)
+        XCTAssertEqual(lock.shownState("hv-bot-a"), .unknown)
+        XCTAssertNil(lock.reason("hv-bot-a"))
+        XCTAssertNil(lock.sidebarLabel("hv-bot-a"))
 
         for (error, expected) in [
             (ProfileProbeFailure.moduleMissing("psutil") as Error, "psutil"),
@@ -1612,18 +1614,19 @@ final class RemoteLoginShellTests: XCTestCase {
             let read = await lock.refresh()
             XCTAssertFalse(read)
             XCTAssertEqual(lock.state("hv-bot-a"), .unknown)
+            XCTAssertEqual(lock.shownState("hv-bot-a"), .degraded)
             let reason = lock.reason("hv-bot-a") ?? ""
-            XCTAssertTrue(reason.hasPrefix(ProfileLock.State.unknown.reason ?? "?"), reason)
+            XCTAssertTrue(reason.hasPrefix(ProfileLock.State.degraded.reason ?? "?"), reason)
             XCTAssertTrue(reason.contains(expected), "\(expected) absent de : \(reason)")
         }
         // une panne sans cause nommée garde le message d'origine
         failure = CocoaError(.fileReadUnknown)
         _ = await lock.refresh()
-        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.unknown.reason)
+        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.degraded.reason)
         // un tunnel fermé a sa propre bannière : il n'est pas une cause de la sonde
         failure = SSHFailure.tunnelClosed
         _ = await lock.refresh()
-        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.unknown.reason)
+        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.degraded.reason)
 
         // la sonde répond : la cause disparaît avec l'état inconnu
         answering = true
@@ -1650,8 +1653,8 @@ final class RemoteLoginShellTests: XCTestCase {
         let refreshed: Bool = await lock.refresh()
         XCTAssertFalse(refreshed)
         let reason = lock.reason("hv-bot-a") ?? ""
-        let unknown = ProfileLock.State.unknown.reason ?? ""
-        let expected = unknown + "\nCause : " + ProfileLock.unreachableCause
+        let degraded = ProfileLock.State.degraded.reason ?? ""
+        let expected = degraded + "\nCause : " + ProfileLock.unreachableCause
         XCTAssertEqual(reason, expected)
         XCTAssertFalse(reason.contains("détection Desktop indisponible"), reason)
         XCTAssertEqual(reason.split(whereSeparator: \.isNewline).count, 2)
@@ -1685,7 +1688,8 @@ final class RemoteLoginShellTests: XCTestCase {
         XCTAssertTrue(lock.reason("hv-bot-a")?.contains("psutil") == true)
         host = "host-b"
         broken = false
-        XCTAssertEqual(lock.reason("hv-bot-a"), ProfileLock.State.unknown.reason)
+        XCTAssertNil(lock.reason("hv-bot-a"))
+        XCTAssertNil(lock.sidebarLabel("hv-bot-a"))
         _ = await lock.refresh()
         XCTAssertNil(lock.reason("hv-bot-a"))
         host = "host-a"
