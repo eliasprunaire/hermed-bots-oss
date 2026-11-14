@@ -59,8 +59,15 @@ struct LoopPauseBanner: View {
 
 final class LoopPauseNotifications: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = LoopPauseNotifications()
+    /// Mode test : texte d'autorisation distinct de `AppEnvironment.testPauseNotification`, sans `UNUserNotificationCenter`
+    static let testAuthorizationGranted = "Autorisation des notifications : accordée (faux déterministe)."
 
     func post(cause: LoopGuard.Cause) async -> String {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["HV_TEST_MODE"] == "1" {
+            return Self.testAuthorizationGranted
+        }
+        #endif
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         do {
