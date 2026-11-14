@@ -45,9 +45,9 @@ Aucun repli ne lance l'app sur l'hôte.
 ## Régénérer les références
 
 1. Lancer la commande VM ci-dessus sur le changement à examiner.
-2. Joindre l'avant/après du dossier de preuves indiqué par `HV-UI`. Le designer relit visuellement les captures et leurs différences.
+2. Le designer relit visuellement l'avant/après (captures et différences du dossier indiqué par `HV-UI`) sur la machine de vérification. Les preuves et captures brutes restent hors dépôt ; la PR n'en cite qu'un résumé caviardé.
 3. Dev Lead décide, avec l'ingénieur. Sans question d'accord à l'utilisateur. La décision et son auteur sont journalisés. En cas de désaccord, Dev Lead tranche.
-4. Promouvoir uniquement dans une PR dédiée, jamais par le vérificateur ni par l'auteur d'une PR de fonctionnalité. Cette PR passe les mêmes portes que les autres (verdict sur la tête exacte, CI). Y commiter les PNG et la provenance.
+4. Promouvoir uniquement dans une PR dédiée, jamais par le vérificateur ni par l'auteur d'une PR de fonctionnalité. Cette PR passe les mêmes portes que les autres (verdict sur la tête exacte, CI). Y commiter les PNG de référence et la provenance.
 
 ```bash
 shots="$HV_WORK/evidence/ui-<horodatage>-vm/reference-shots"
