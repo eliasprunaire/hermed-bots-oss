@@ -1,7 +1,7 @@
 import AppKit
 
 /// Réduit la sélection des champs éditables à un point d'insertion, sans toucher au premier répondant
-/// Mode test : `HVShot` demande cette réduction juste avant chaque capture
+/// Mode test : `HVShot` demande cette réduction juste avant chaque capture, et ferme les info-bulles ouvertes
 @MainActor
 enum CaptureSelection {
     static let requestName = Notification.Name("com.hermedbots.hv.collapse-selection")
@@ -16,6 +16,7 @@ enum CaptureSelection {
         center.addObserver(forName: requestName, object: nil, queue: .main) { _ in
             Task { @MainActor in
                 collapseOpenEditors()
+                dismissOpenToolTips()
                 DistributedNotificationCenter.default().postNotificationName(
                     doneName, object: nil, userInfo: nil, deliverImmediately: true
                 )
@@ -51,5 +52,32 @@ enum CaptureSelection {
         for child in view.subviews {
             collapse(in: child)
         }
+    }
+
+    /// Panneau AppKit `NSToolTipPanel` : le refermer ne touche ni au focus ni à l'état affiché
+    static func isTooltipWindow(_ window: NSWindow) -> Bool {
+        NSStringFromClass(type(of: window)).localizedCaseInsensitiveContains("tooltip")
+    }
+
+    static func dismissOpenToolTips() {
+        for window in NSApp.windows where isTooltipWindow(window) {
+            window.orderOut(nil)
+        }
+    }
+
+    /// Point fenêtre : milieu du haut, hors des contrôles `.help` du contenu
+    static func neutralPoint(in window: NSWindow) -> NSPoint {
+        NSPoint(x: window.frame.width / 2, y: window.frame.height - 8)
+    }
+
+    static func helpTag(at pointInWindow: NSPoint, in window: NSWindow) -> String? {
+        guard let content = window.contentView else { return nil }
+        let pointInView = content.convert(pointInWindow, from: nil)
+        var node = content.hitTest(pointInView)
+        while let view = node {
+            if let tip = view.toolTip, !tip.isEmpty { return tip }
+            node = view.superview
+        }
+        return nil
     }
 }
