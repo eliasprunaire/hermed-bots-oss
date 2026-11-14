@@ -45,7 +45,7 @@ function producedAuthorizationLine(pauseSource) {
 }
 
 test("hd12-notification-authorization montre l'autorisation déterministe, pas hd12-loop-pause", () => {
-  const pause = read("HermedBots/Banners/LoopPauseBanner.swift");
+  const pause = read("HermedBots/Banners/LoopPauseNotifications.swift");
   const env = read("HermedBots/App/AppEnvironment.swift");
   const errors = read("HermedBotsUITests/Errors.swift");
   const native = firstBlock(errors, "final class NativeNotifications");

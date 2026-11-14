@@ -79,7 +79,7 @@ struct ApprovalSheet: View {
                     .padding(12)
                     .accessibilityID(.approvalParams)
             }
-            .scrollBounceBehavior(.never)
+            .scrollBounceBehavior(.basedOnSize)
             .transaction { $0.animation = nil }
             .frame(minHeight: 100, maxHeight: 260)
             .background(Color(rgb: 0x0D1117), in: .rect(cornerRadius: 12))
