@@ -85,8 +85,8 @@ Tests alone are not sufficient verification. A PR is verified only when its unit
 ### Verdict and merge, for every PR
 
 - [ ] A full swarm runs once, at the code-ready head. Another full swarm runs only for new behavior, a redesign, or a large new diff. A rebase, a merge-conflict resolution, or a minor fix gets a single verifier at the new head. Run each full swarm per `.cursor/skills/swarm/SKILL.md`. One gates lane. The ten live lanes from the PR's **Verify, live** block. The perf lane from its **Verify, perf** block. Two or more audit lanes, each with its own focus, that read the diff and the receipts and distrust the PR body. The root audits the receipts in the merge-ready report before the verdict.
-- [ ] Clean only when every lane is `PASS`. Findings go back to the owner, including a defect that a lane filed as a note. A new head gets a fresh verdict, except for results that stay valid under the patch-id rule in `.cursor/skills/poteto-mode/playbooks/shipping.md`.
-- [ ] The owner squash-merges its own PR with the base-revision copy of `scripts/squash-merge.js`, per `playbooks/shipping.md`. It merges only when a marked `PASS` or `PASS+NOTES` comment with `<!-- dev-lead-verifier -->` cites the head SHA or a SHA with the same `git patch-id`, the comment login differs from the PR author login, and `verdict-gate` is success on that head. The author never launches the verifier. Codex verifies a Claude author and Claude verifies a Codex author.
+- [ ] Clean only when every lane is `PASS`. Findings go back to the owner, including a defect that a lane filed as a note. A new head gets a fresh verdict on the exact 40-character SHA. A light re-check is allowed when the patch-id is identical, but the verdict must be posted again on the new SHA.
+- [ ] The owner squash-merges its own PR with the base-revision copy of `scripts/squash-merge.js`, per `playbooks/shipping.md`. It merges only when a marked `PASS` or `PASS+NOTES` comment with `<!-- dev-lead-verifier -->` cites the exact 40-character head SHA, the comment login differs from the PR author login, and `verdict-gate` is success on that head. The author never launches the verifier. Codex verifies a Claude author and Claude verifies a Codex author.
 
 ### Boot recipe, for every live lane
 
@@ -159,7 +159,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR.
 
 ## Replace the contract fixtures with the spike observations (HD-02)
@@ -218,7 +218,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR.
 
 ## Build the HermesAdapter package with tolerant decoding (HD-03)
@@ -278,7 +278,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR.
 
 ## Disable only the affected feature in degraded mode and read the version (HD-04)
@@ -333,7 +333,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR.
 
 ## Pause a looping turn with the loop guard (HD-05)
@@ -391,7 +391,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR.
 
 ## Open the app shell with stable accessibility ids (HD-06)
@@ -452,7 +452,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR after the operator's click.
 
 ## Open the SSH tunnel from an SSH alias (HD-07)
@@ -513,7 +513,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR after the operator's click.
 
 ## List the bots and their past threads (HD-08)
@@ -572,7 +572,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR after the operator's click.
 
 ## Chat with a bot and start a new session (HD-09)
@@ -632,7 +632,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR after the operator's click.
 
 ## Switch the session model with /model (HD-10)
@@ -688,7 +688,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR after the operator's click.
 
 ## Answer tool approvals and show the current tool (HD-11)
@@ -745,7 +745,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR after the operator's click.
 
 ## Show degraded mode, errors, and the loop pause (HD-12)
@@ -804,7 +804,7 @@ The chat does not show calibration or a turn count.
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR after the operator's click.
 
 ## Resume a turn after sleep without a duplicate send (HD-13)
@@ -862,7 +862,7 @@ The chat does not show calibration or a turn count.
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR after the operator's click.
 
 ## Refuse a profile that Hermes Desktop holds (HD-14)
@@ -920,7 +920,7 @@ The chat does not show calibration or a turn count.
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR after the operator's click.
 
 ## Stop every running turn with the kill switch (HD-15)
@@ -978,7 +978,7 @@ The chat does not show calibration or a turn count.
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR after the operator's click.
 
 ## Run the daily compatibility test and the acceptance pass (HD-16)
@@ -1034,7 +1034,7 @@ The chat does not show calibration or a turn count.
 
 - [ ] Root's clean verdict at the exact head SHA.
 - [ ] Bugbot triage done.
-- [ ] Rebased onto current trunk after the verdict, patch-id unchanged.
+- [ ] Rebased onto current trunk after the verdict, then a new verdict on the exact 40-character head SHA.
 - [ ] The owner squash-merges its own PR.
 
 ## Close the program

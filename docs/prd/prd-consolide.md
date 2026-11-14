@@ -190,7 +190,7 @@ Le producteur du code (Claude Code, Codex) ne vérifie jamais seul. Engineer ex�
 | Kill switch | Déclenchement pendant un tour ; le travail s'arrête côté VM (test) | Ayo, avec Engineer | Avant livraison |
 | Aucune connexion hors tunnel | Observation des connexions sortantes | Engineer | Avant livraison |
 | Chemins protégés inchangés | Contrôle avant et après chaque passe | Engineer | Chaque passe |
-| Tests à la main : jugement visuel final, veille réelle du Mac, Trousseau au premier lancement | Manuel | Utilisateur | Avant livraison |
+| Tests à la main : relecture locale du designer, veille réelle du Mac, Trousseau au premier lancement | Manuel pour la veille et le Trousseau | Designer, puis utilisateur | Avant livraison |
 | **Test quotidien de compatibilité** | Rapport daté : date et heure (Paris), version de Hermes, PASS/FAIL par contrat, écarts, durée, vérification des chemins protégés | Engineer → Dev Lead ; alerte utilisateur seulement si FAIL ou chemin protégé modifié | Chaque jour, 13 h 00 (Paris) |
 | Validation finale de la v1 | Revue des rapports + tests à la main | Utilisateur | Une fois |
 
