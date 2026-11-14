@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# hv-regen-baselines.sh — régénère les PNG de baselines/ sur le Mac, via la VM.
-# Linux ne produit pas ces captures. Liste : baselines/LACUNES-PNG.md.
-# Modèle : aucun. Promotion Dev Lead, avec l'ingénieur, après relecture designer (--bless). Aucune UI sur l'hôte.
+# hv-regen-baselines.sh — régénère les PNG de baselines/ sur le Mac, via la VM
+# Linux ne produit pas ces captures. Liste : baselines/LACUNES-PNG.md
+# Modèle : aucun. Promotion Dev Lead, avec l'ingénieur, après relecture designer (--bless). Aucune UI sur l'hôte
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 BASE=$(cd "$HERE/../baselines" && pwd)

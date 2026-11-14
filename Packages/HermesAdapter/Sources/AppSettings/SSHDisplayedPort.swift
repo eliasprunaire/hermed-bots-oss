@@ -17,7 +17,7 @@ public struct SSHDisplayedPort: Equatable, Sendable {
         fromSSHConfig ? "Port SSH \(number) (config SSH)" : "Port SSH \(number)"
     }
 
-    /// `resolvedPort` est le champ `port` d'un dump `ssh -G` réussi. `nil` : la résolution a échoué, on garde 22.
+    /// `resolvedPort` est le champ `port` d'un dump `ssh -G` réussi. `nil` : la résolution a échoué, on garde 22
     public static func readOnly(resolvedPort: Int?) -> SSHDisplayedPort {
         guard let resolvedPort else {
             return SSHDisplayedPort(number: fallback, fromSSHConfig: false)

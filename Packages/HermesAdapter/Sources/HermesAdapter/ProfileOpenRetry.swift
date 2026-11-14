@@ -1,6 +1,6 @@
 import Foundation
 
-/// Tentatives d'ouverture d'un profil : immédiat, 400 ms, 1,2 s, puis seulement l'erreur.
+/// Tentatives d'ouverture d'un profil : immédiat, 400 ms, 1,2 s, puis seulement l'erreur
 public enum ProfileOpenRetry: Sendable {
     public static let delays: [Duration] = [.zero, .milliseconds(400), .milliseconds(1_200)]
 
@@ -11,7 +11,7 @@ public enum ProfileOpenRetry: Sendable {
         return delays[index]
     }
 
-    /// Exécute `work` jusqu'à trois fois. `work` rend `true` pour s'arrêter (succès).
+    /// Exécute `work` jusqu'à trois fois. `work` rend `true` pour s'arrêter (succès)
     public nonisolated(nonsending) static func run(_ work: () async throws -> Bool) async throws -> Bool {
         for attempt in 0..<attemptCount {
             let wait = delay(beforeAttempt: attempt)

@@ -1,5 +1,5 @@
 "use strict";
-// Positive samples are built by concatenation so this file never contains a real-looking value.
+// Positive samples are built by concatenation so this file never contains a real-looking value
 const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");

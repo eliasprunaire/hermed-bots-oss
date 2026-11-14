@@ -2014,7 +2014,7 @@ final class AppModelConnectTests: XCTestCase {
         XCTAssertFalse(probes.contains { $0.status == 401 }, "une requête du nouveau profil a reçu 401")
     }
 
-    /// Deux profils listés : la clé du second n'est pas encore en cache, un troisième n'en a pas. KillSwitch ne part pas sans Bearer.
+    /// Deux profils listés : la clé du second n'est pas encore en cache, un troisième n'en a pas. KillSwitch ne part pas sans Bearer
     func testKillSwitchAcquiresListedKeysAndNeverSendsWithoutOne() async throws {
         let recorder = try KillSwitchProbeRecorder()
         addTeardownBlock { recorder.stop() }

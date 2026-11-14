@@ -27,7 +27,7 @@ struct AppEnvironment {
     /// Hors mode test, le bandeau montre d'abord cette ligne pendant la demande d'autorisation macOS
     static let pauseNotificationPending = "Autorisation des notifications en attente."
 
-    /// Le mode test refuse l'hôte factice `example-host`. Hors mode test, aucun hôte n'est refusé.
+    /// Le mode test refuse l'hôte factice `example-host`. Hors mode test, aucun hôte n'est refusé
     var refuseTestHost: Bool { isTestMode }
 
     /// Faux en mode test, sauf `HV_NATIVE_PAUSE_NOTIFICATION=1` : alors le produit (`LoopPauseNotifications`) est conservé

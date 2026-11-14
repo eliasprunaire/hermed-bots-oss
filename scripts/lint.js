@@ -2,6 +2,10 @@
 
 const { spawnSync } = require("node:child_process");
 const path = require("node:path");
+const {
+  scanFiles,
+  trackedSourceFiles,
+} = require("./check-comment-period");
 
 const root = path.resolve(__dirname, "..");
 
@@ -21,6 +25,10 @@ function trackedJs() {
     process.exit(listed.status || 1);
   }
   return listed.stdout.toString("utf8").split("\0").filter(Boolean);
+}
+
+function isJs(file) {
+  return path.extname(file) === ".js";
 }
 
 function checkFile(file) {
@@ -44,12 +52,18 @@ function checkFile(file) {
 }
 
 function main(argv = process.argv.slice(2)) {
-  const files = argv.length > 0 ? argv : trackedJs();
+  const jsFiles = argv.length > 0 ? argv.filter(isJs) : trackedJs();
   let failed = false;
-  for (const file of files) {
+  for (const file of jsFiles) {
     if (!checkFile(file)) {
       failed = true;
     }
+  }
+  const periodFiles = argv.length > 0 ? argv : trackedSourceFiles(root);
+  const findings = scanFiles(periodFiles, root);
+  for (const line of findings) {
+    process.stderr.write(`${line}\n`);
+    failed = true;
   }
   return failed ? 1 : 0;
 }
