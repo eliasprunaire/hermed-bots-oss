@@ -17,6 +17,7 @@ enum HVShot {
 
     @discardableResult
     static func capture(_ name: String, _ window: XCUIElement) -> XCUIScreenshot {
+        collapseBeforeCapture()
         let screenshot = window.screenshot()
         print("HV-SHOT \(name)")
         XCTContext.runActivity(named: "capture \(name)") { activity in
@@ -26,5 +27,32 @@ enum HVShot {
             activity.add(attachment)
         }
         return screenshot
+    }
+
+    /// Demande à l'app de réduire chaque sélection de champ à un point d'insertion, sans clic ni frappe
+    static func collapseBeforeCapture() {
+        final class Flag: @unchecked Sendable {
+            var finished = false
+        }
+        let flag = Flag()
+        let center = DistributedNotificationCenter.default()
+        let observer = center.addObserver(
+            forName: Notification.Name("com.hermedbots.hv.collapse-selection.done"),
+            object: nil,
+            queue: .main
+        ) { _ in
+            flag.finished = true
+        }
+        defer { center.removeObserver(observer) }
+        center.postNotificationName(
+            Notification.Name("com.hermedbots.hv.collapse-selection"),
+            object: nil,
+            userInfo: nil,
+            deliverImmediately: true
+        )
+        let deadline = Date().addingTimeInterval(0.25)
+        while !flag.finished, Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
     }
 }
