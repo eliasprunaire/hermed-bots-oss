@@ -1,7 +1,7 @@
 "use strict";
 // Rule 13 CI check: no infrastructure information (local paths, private IPs, internal
-// hosts, Apple signing identity / Team ID) in PR diffs, PR bodies, pushes or comments
-// Generic patterns only. Findings print "label:line: TYPE", never the matched value
+// hosts, Apple signing identity / Team ID) in PR diffs, PR bodies, pushes or comments.
+// Generic patterns only. Findings print "label:line: TYPE", never the matched value.
 
 const { execFileSync } = require("node:child_process");
 const fs = require("node:fs");
@@ -29,7 +29,7 @@ function scanText(label, text) {
   return findings;
 }
 
-// Only added lines of a unified diff count; line numbers are those of the new file
+// Only added lines of a unified diff count; line numbers are those of the new file.
 function scanDiff(diff) {
   const findings = [];
   let file = "(diff)"; let n = 0;

@@ -18,6 +18,12 @@ const EXCLUDED_OPEN_PRS = Object.freeze([
 // Portes CI (GATE_FILES) : ne pas modifier ces fichiers
 const EXCLUDED_GATE = Object.freeze(["scripts/check-protected-paths.js"]);
 
+// Fichiers réservés (code du lanceur, portes CI)
+const EXCLUDED_RESERVED = Object.freeze([
+  "scripts/dev-lead-runner/",
+  "scripts/infra-guard-ci.js",
+]);
+
 function trackedSourceFiles(root) {
   const listed = spawnSync(
     "git",
@@ -53,6 +59,15 @@ function isExcluded(rel) {
   }
   for (const item of EXCLUDED_OPEN_PRS) {
     const p = item.path;
+    if (p.endsWith("/")) {
+      if (rel === p.slice(0, -1) || rel.startsWith(p)) {
+        return true;
+      }
+    } else if (rel === p) {
+      return true;
+    }
+  }
+  for (const p of EXCLUDED_RESERVED) {
     if (p.endsWith("/")) {
       if (rel === p.slice(0, -1) || rel.startsWith(p)) {
         return true;
@@ -172,6 +187,7 @@ function main(argv = process.argv.slice(2), root = path.resolve(__dirname, "..")
 module.exports = {
   EXCLUDED_GATE,
   EXCLUDED_OPEN_PRS,
+  EXCLUDED_RESERVED,
   SOURCE_EXT,
   hasPointFinal,
   isExcluded,

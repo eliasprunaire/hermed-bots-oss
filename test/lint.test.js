@@ -90,3 +90,26 @@ test("lint exits non-zero on a shell comment with a final period", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("lint skips a period comment in reserved paths and still flags it elsewhere", () => {
+  const probe = join(root, "scripts", "dev-lead-runner", "lint-period-probe.sh");
+  const dir = mkdtempSync(join(tmpdir(), "lint-period-reserved-"));
+  const other = join(dir, "bad.js");
+  writeFileSync(probe, "# commentaire fautif.\n");
+  writeFileSync(other, "// commentaire fautif.\n");
+  try {
+    const result = runLint([
+      probe,
+      join(root, "scripts", "infra-guard-ci.js"),
+      other,
+    ]);
+    assert.notEqual(result.status, 0, result.stderr);
+    assert.match(result.stderr, /bad\.js:\d+: POINT_FINAL/);
+    assert.doesNotMatch(result.stderr, /dev-lead-runner/);
+    assert.doesNotMatch(result.stderr, /infra-guard-ci/);
+    assert.doesNotMatch(result.stderr, /SyntaxError/);
+  } finally {
+    rmSync(probe, { force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

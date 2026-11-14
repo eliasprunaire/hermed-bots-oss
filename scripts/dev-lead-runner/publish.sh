@@ -1,5 +1,5 @@
 # Script de publication : publication du verdict et réessai passager du lanceur (sourcé par le lanceur, 2026-10-22, issue #62)
-# Copie de référence testée par test/runner-publish.test.js ; la copie active vit dans le dossier local du lanceur (hors dépôt)
+# Copie de référence testée par test/runner-publish.test.js ; la copie active vit dans le dossier local du lanceur (hors dépôt).
 # Attend : R, S, NAME, REPO, LOG et les fonctions log et notify (script de notification) et gh_post (script d'appel GitHub, règle 13)
 typeset -f gh_post >/dev/null 2>&1 || source "$R/gh-post.sh"
 
