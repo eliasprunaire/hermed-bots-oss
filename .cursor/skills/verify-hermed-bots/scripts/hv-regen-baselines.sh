@@ -12,14 +12,7 @@ if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   exit 0
 fi
 
-if [ ! -f "$RUNNER/vm.sh" ] || [ ! -x "$RUNNER/vm.sh" ]; then
-  echo "Aucun vm.sh exécutable dans le répertoire retenu. Définir HV_RUNNER_DIR." >&2
-  exit 2
-fi
-# Prouve que l'exécutable est lançable sans démarrer la passe UI (`ui fake`).
-rc=0
-"$RUNNER/vm.sh" >/dev/null 2>&1 || rc=$?
-if [ "$rc" -eq 127 ]; then
+if [ ! -f "$RUNNER/vm.sh" ] || [ ! -r "$RUNNER/vm.sh" ]; then
   echo "Aucun vm.sh exécutable dans le répertoire retenu. Définir HV_RUNNER_DIR." >&2
   exit 2
 fi

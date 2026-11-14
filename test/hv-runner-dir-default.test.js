@@ -170,20 +170,35 @@ test("hv-regen-baselines sans HV_RUNNER_DIR ni vm.sh s'arrête avec un message",
     timeout: 10000,
   });
   const out = combined(run);
-  assert.notEqual(run.status, 0, out);
-  assert.notEqual(run.status, 127, out);
+  assert.equal(run.status, 2, out);
   assert.match(out, /HV_RUNNER_DIR/);
 });
 
-test("hv-regen-baselines avec un faux vm.sh exécutable l'appelle", () => {
+test("hv-regen-baselines sans vm.sh s'arrête avec le code 2", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-regen-novm-"));
+  try {
+    const run = spawnSync("bash", [HV_REGEN], {
+      encoding: "utf8",
+      env: regenEnv({ HV_RUNNER_DIR: dir }),
+      timeout: 10000,
+    });
+    const out = combined(run);
+    assert.equal(run.status, 2, out);
+    assert.match(out, /Définir HV_RUNNER_DIR/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("hv-regen-baselines avec un faux vm.sh non exécutable affiche la recette sans l'appeler", () => {
   const dir = mkdtempSync(join(tmpdir(), "hv-regen-vm-"));
   try {
     const marker = join(dir, "called");
-    writeFileSync(
-      join(dir, "vm.sh"),
-      `#!/bin/sh\n: > "${marker}"\nexit 0\n`,
-      { mode: 0o755 },
-    );
+    const vm = join(dir, "vm.sh");
+    writeFileSync(vm, `#!/bin/sh\n: > "${marker}"\nexit 0\n`, {
+      mode: 0o644,
+    });
+    chmodSync(vm, 0o644);
     const run = spawnSync("bash", [HV_REGEN], {
       encoding: "utf8",
       env: regenEnv({ HV_RUNNER_DIR: dir }),
@@ -191,7 +206,9 @@ test("hv-regen-baselines avec un faux vm.sh exécutable l'appelle", () => {
     });
     const out = combined(run);
     assert.equal(run.status, 0, out);
-    assert.equal(existsSync(marker), true, out);
+    assert.match(out, /timeout 3600 zsh/);
+    assert.match(out, /vm\.sh ui fake/);
+    assert.equal(existsSync(marker), false, out);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
