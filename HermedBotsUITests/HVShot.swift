@@ -15,8 +15,12 @@ enum HVShot {
         capture(name, app.windows.firstMatch)
     }
 
+    /// Milieu de la barre de titre : aucun contrôle `.help`, aucun clic
+    static let neutralPointerOffset = CGVector(dx: 0.5, dy: 0.02)
+
     @discardableResult
     static func capture(_ name: String, _ window: XCUIElement) -> XCUIScreenshot {
+        parkPointer(in: window)
         collapseBeforeCapture()
         let screenshot = window.screenshot()
         print("HV-SHOT \(name)")
@@ -27,6 +31,15 @@ enum HVShot {
             activity.add(attachment)
         }
         return screenshot
+    }
+
+    /// Éloigne le pointeur vers la barre de titre, sans clic, pour fermer l'info-bulle de survol
+    static func parkPointer(in window: XCUIElement) {
+        window.coordinate(withNormalizedOffset: Self.neutralPointerOffset).hover()
+        let deadline = Date().addingTimeInterval(0.15)
+        while Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+        }
     }
 
     /// Demande à l'app de réduire chaque sélection de champ à un point d'insertion, sans clic ni frappe
