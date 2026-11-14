@@ -1,12 +1,11 @@
 "use strict";
 
-const { spawnSync } = require("node:child_process");
 const {
   chmodSync,
+  copyFileSync,
   mkdtempSync,
   readFileSync,
   rmSync,
-  writeFileSync,
 } = require("node:fs");
 const { tmpdir } = require("node:os");
 const { join } = require("node:path");
@@ -20,19 +19,11 @@ const {
 } = require("../test/shotdiff-harness.js");
 
 const REPS = 3;
-const MAIN_SCRIPT = "origin/main:.cursor/skills/verify-hermed-bots/scripts/hv-shotdiff.sh";
+const MAIN_SCRIPT = join(ROOT, "test/fixtures/shotdiff/hv-shotdiff-main.sh");
 
 function extractMainScript(dir) {
-  const shown = spawnSync("git", ["show", MAIN_SCRIPT], {
-    cwd: ROOT,
-    encoding: "buffer",
-    maxBuffer: 2 * 1024 * 1024,
-  });
-  if (shown.status !== 0) {
-    throw new Error(`git show ${MAIN_SCRIPT} a échoué`);
-  }
   const path = join(dir, "hv-shotdiff-main.sh");
-  writeFileSync(path, shown.stdout);
+  copyFileSync(MAIN_SCRIPT, path);
   chmodSync(path, 0o755);
   return path;
 }
@@ -106,4 +97,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { main, median };
+module.exports = { main, median, extractMainScript };
