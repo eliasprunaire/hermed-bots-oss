@@ -280,6 +280,9 @@ struct HermedBotsApp: App {
 
     init() {
         let environment = AppEnvironment.resolve(ProcessInfo.processInfo.environment)
+        if environment.isTestMode {
+            CaptureSelection.install()
+        }
         let notifyPause: @Sendable (LoopGuard.Cause) async -> String = { await LoopPauseNotifications.shared.post(cause: $0) }
         #if DEBUG
         let updates = UpdateCheck(driver: NullUpdateDriver())
