@@ -20,8 +20,18 @@ enum HVShot {
 
     @discardableResult
     static func capture(_ name: String, _ window: XCUIElement) -> XCUIScreenshot {
-        parkPointer(in: window)
-        collapseBeforeCapture()
+        // hd11-current-tool : fermer les info-bulles sans survol, puis attendre hd.tool.current
+        if name == "hd11-current-tool" {
+            collapseBeforeCapture()
+            let tool = window.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier == %@", "hd.tool.current")
+            ).firstMatch
+            waitUntilPresent(tool, timeout: 2)
+            XCTAssertTrue(tool.exists, "hd.tool.current absent au moment de la capture")
+        } else {
+            parkPointer(in: window)
+            collapseBeforeCapture()
+        }
         let screenshot = window.screenshot()
         print("HV-SHOT \(name)")
         XCTContext.runActivity(named: "capture \(name)") { activity in
@@ -33,12 +43,18 @@ enum HVShot {
         return screenshot
     }
 
-    /// Éloigne le pointeur vers la barre de titre, sans clic, pour fermer l'info-bulle de survol
+    /// Éloigne le pointeur vers la barre de titre, sans clic ni attente fixe, pour fermer l'info-bulle de survol
     static func parkPointer(in window: XCUIElement) {
         window.coordinate(withNormalizedOffset: Self.neutralPointerOffset).hover()
-        let deadline = Date().addingTimeInterval(0.15)
+    }
+
+    /// Attend l'identifiant d'accessibilité : lecture immédiate, puis toutes les 10 ms, délai maximal
+    static func waitUntilPresent(_ element: XCUIElement, timeout: TimeInterval) {
+        if element.exists { return }
+        let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            if element.exists { return }
         }
     }
 
