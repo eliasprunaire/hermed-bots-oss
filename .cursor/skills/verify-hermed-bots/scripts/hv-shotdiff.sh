@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hv-shotdiff.sh — compare les captures d'une passe aux références. Modèle : aucun.
+# hv-shotdiff.sh — compare les captures d'une passe aux références. Modèle : aucun
 # Usage : hv-shotdiff.sh <dossier-captures> <dossier-baselines> <dossier-diffs> [tolérance=0.02]
 #         hv-shotdiff.sh --export <xcresult> <dossier-captures> [nom-attendu...]   # pièces jointes PNG -> <nom>.png
 #         hv-shotdiff.sh --bless <dossier-captures> <dossier-baselines>   # promeut (Dev Lead, avec l'ingénieur, après relecture designer)
@@ -7,9 +7,9 @@
 # (brew install imagemagick). Un écart franc localisé (zone connexe après érosion d'un pixel,
 # ΔE élevé) échoue aussi, même si le ratio global reste sous la tolérance. Codes : 0 OK ; 2 usage ;
 # 11 écart > tolérance ou zone locale ; 12 baseline manquante ; 13 outil absent ; 15 captures
-# absentes (dossier absent ou sans PNG, export impossible, nom attendu manquant).
-# Le runner XCUITest est sandboxé : il n'écrit pas dans le dossier des captures, qui vient de --export.
-# La relecture locale du designer (A3) n'est pas ce script : il ne fait que trier.
+# absentes (dossier absent ou sans PNG, export impossible, nom attendu manquant)
+# Le runner XCUITest est sandboxé : il n'écrit pas dans le dossier des captures, qui vient de --export
+# La relecture locale du designer (A3) n'est pas ce script : il ne fait que trier
 set -euo pipefail
 if [ "${1:-}" = --bless ]; then
   [ $# -eq 3 ] || { echo "usage: $0 --bless <captures> <baselines>" >&2; exit 2; }
@@ -49,7 +49,7 @@ CAP=$1; BASE=$2; DIF=$3; TOL=${4:-0.02}
 compgen -G "$CAP/*.png" >/dev/null || { echo "SHOT FAIL (15): aucune capture dans $CAP" >&2; exit 15; }
 command -v compare >/dev/null 2>&1 || { echo "SHOT FAIL (13): ImageMagick 'compare' absent" >&2; exit 13; }
 mkdir -p "$DIF"; rc=0
-# Locale C : compare/identify/awk doivent produire un point décimal (fr_FR sinon → virgule → faux OK).
+# Locale C : compare/identify/awk doivent produire un point décimal (fr_FR sinon → virgule → faux OK)
 export LC_ALL=C
 export LC_NUMERIC=C
 for f in "$CAP"/*.png; do
@@ -66,7 +66,7 @@ for f in "$CAP"/*.png; do
     continue
   fi
   px=$(compare -metric AE -fuzz 5% "$BASE/$n" "$f" null: 2>&1 >/dev/null || true)
-  # Normalise une éventuelle virgule décimale (locale parent) avant awk.
+  # Normalise une éventuelle virgule décimale (locale parent) avant awk
   px=${px%% *}
   px=$(printf '%s' "$px" | tr ',' '.')
   tot=$(identify -format '%[fx:w*h]' "$BASE/$n")

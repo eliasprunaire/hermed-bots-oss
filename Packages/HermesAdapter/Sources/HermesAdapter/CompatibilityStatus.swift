@@ -1,6 +1,6 @@
 import Foundation
 
-/// Ce que le pied et Réglages disent de la version Hermes, sans bandeau tant que tout répond.
+/// Ce que le pied et Réglages disent de la version Hermes, sans bandeau tant que tout répond
 public enum CompatibilityStatus: Equatable, Sendable {
     case connecting
     case ready

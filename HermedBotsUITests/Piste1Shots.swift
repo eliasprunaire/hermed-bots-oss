@@ -1,10 +1,10 @@
 import XCTest
 
-/// Captures des états de la piste 1 : pied, bandeau, connexion, vides, Markdown, compaction, À propos.
-/// Données fictives (`HV_SHOT_SCENE`) ; aucune image n'est écrite dans le dépôt.
+/// Captures des états de la piste 1 : pied, bandeau, connexion, vides, Markdown, compaction, À propos
+/// Données fictives (`HV_SHOT_SCENE`) ; aucune image n'est écrite dans le dépôt
 @MainActor
 final class Piste1Shots: XCTestCase {
-    /// Même identifiants que `ShotScene.rawValue`.
+    /// Même identifiants que `ShotScene.rawValue`
     private let scenes = [
         "footer-ready", "footer-connecting", "footer-untested", "footer-failed", "footer-missing-key", "footer-tunnel",
         "banner-degraded", "connection", "error", "empty-home", "empty-conversation",

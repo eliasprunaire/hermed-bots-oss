@@ -39,7 +39,7 @@ exit 0
 
 // snapshot / allowed come from the environment. The refusal arm is a glob
 // the extractor can read (`*fixture-forbidden*)` then 22), plus `*.invalid`
-// for an operator override. An accept-all stub has no such glob.
+// for an operator override. An accept-all stub has no such glob
 const GUARD_STUB = `#!/usr/bin/env bash
 case "$1" in
   snapshot) exit "\${GUARD_SNAPSHOT:-0}" ;;

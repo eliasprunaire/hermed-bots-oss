@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# hv-run.sh — point d'entrée unique, non interactif, pour ${HV_RUNNER_DIR}. Modèle : aucun.
+# hv-run.sh — point d'entrée unique, non interactif, pour ${HV_RUNNER_DIR}. Modèle : aucun
 # Usage :
 #   hv-run.sh api   [orb|fake]   # contrats API seuls (pas d'app) ; orb ajoute les scénarios du spike — modèle : aucun
 #   hv-run.sh ui    [orb|fake]   # passe complète XCUITest + captures + réseau — modèle : aucun
@@ -7,9 +7,9 @@
 #   hv-run.sh compat             # 3 tests de compatibilité A7 sur le faux serveur
 # Variables : HV_WORK (défaut ~/hermed-bots-work, dossier dédié A12),
 #   HV_RUNNER_DIR (défaut : dossier du script), HV_XCTESTRUN (fichier .xctestrun produit par build-for-testing), HV_APP_BUNDLE_ID,
-#   HV_TEST_API_KEY (secret, mode orb), HV_UNDER_RUNNER=1 si lancé par runner.sh (qui tient déjà .lock).
-#   HV_BASELINES (défaut ../baselines, remplacé par les références temporaires du selftest).
-#   HV_UI_PLAN (ui-core | ui-full, défaut ui-full) : filtre XCUITest aligné sur la Feature Map.
+#   HV_TEST_API_KEY (secret, mode orb), HV_UNDER_RUNNER=1 si lancé par runner.sh (qui tient déjà .lock)
+#   HV_BASELINES (défaut ../baselines, remplacé par les références temporaires du selftest)
+#   HV_UI_PLAN (ui-core | ui-full, défaut ui-full) : filtre XCUITest aligné sur la Feature Map
 # Codes de sortie :
 #   0 PASS | 2 usage | 3 PAUSE présent (rien lancé) | 4 verrou pris (rien lancé)
 #   10 au moins un contrat/test FAIL | 11 écart visuel > tolérance | 14 connexion interdite
@@ -191,7 +191,7 @@ PYKEYS
     esac
     cp "$shot" "$HV_EVIDENCE/reference-shots/" || worst 15
   done
-  # Tolérance visuelle : orb 3 % (drift Hermes réel vs baselines fake), fake/autres 2 %.
+  # Tolérance visuelle : orb 3 % (drift Hermes réel vs baselines fake), fake/autres 2 %
   case "${HV_UI_BACKEND:-$ENVMODE}" in
     orb) SHOT_TOL=0.03 ;;
     *) SHOT_TOL=0.02 ;;

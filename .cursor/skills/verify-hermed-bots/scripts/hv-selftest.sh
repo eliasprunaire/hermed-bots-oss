@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2015,SC2012  # ok/ko ne peuvent pas échouer ; ls sur un chemin maîtrisé
-# hv-selftest.sh — auto-tests Linux/macOS des scripts (sans app, sans OrbStack). Modèle : aucun.
-# Usage : hv-selftest.sh   ; code 0 si tout passe, 1 sinon.
+# hv-selftest.sh — auto-tests Linux/macOS des scripts (sans app, sans OrbStack). Modèle : aucun
+# Usage : hv-selftest.sh   ; code 0 si tout passe, 1 sinon
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd); fail=0
 ok() { echo "PASS $*"; }; ko() { echo "FAIL $*"; fail=1; }

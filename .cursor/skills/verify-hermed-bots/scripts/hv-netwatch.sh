@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# hv-netwatch.sh — relève les connexions sortantes de l'app pendant une passe. Modèle : aucun.
+# hv-netwatch.sh — relève les connexions sortantes de l'app pendant une passe. Modèle : aucun
 # Usage : hv-netwatch.sh <pid-app> <durée-s> <sortie.txt> [ports-autorisés="18642 22"]
 # Échantillonne `lsof -nP -iTCP -iUDP -a -p PID` chaque seconde (et `nettop -P -L 1 -p PID`
-# si disponible, macOS). Toute destination hors 127.0.0.1/::1 sur un port autorisé = violation.
-# Codes : 0 aucune connexion interdite ; 2 usage ; 14 connexion interdite vue ; 15 lsof absent.
+# si disponible, macOS). Toute destination hors 127.0.0.1/::1 sur un port autorisé = violation
+# Codes : 0 aucune connexion interdite ; 2 usage ; 14 connexion interdite vue ; 15 lsof absent
 set -euo pipefail
 PATH="$PATH:/usr/sbin"  # lsof est dans /usr/sbin, absent du PATH du lanceur le planificateur du lanceur
 [ $# -ge 3 ] || { echo "usage: $0 <pid> <durée> <sortie> [ports]" >&2; exit 2; }

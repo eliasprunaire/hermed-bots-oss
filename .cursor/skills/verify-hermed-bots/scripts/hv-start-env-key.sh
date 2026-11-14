@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# hv-start-env-key.sh — .env au premier volume, clé distincte conservée, chmod 600.
+# hv-start-env-key.sh — .env au premier volume, clé distincte conservée, chmod 600
 # Usage : hv-start-env-key.sh [HERMES_HOME]
 # Sans argument : $HERMES_HOME, sinon le premier volume du conteneur
-# ${HV_CONTAINER:-hv-hermes-test} (destination du montage n°0).
-# N'écrit API_SERVER_KEY que si la ligne manque. Ne jamais afficher une clé.
-# Modèle : aucun.
+# ${HV_CONTAINER:-hv-hermes-test} (destination du montage n°0)
+# N'écrit API_SERVER_KEY que si la ligne manque. Ne jamais afficher une clé
+# Modèle : aucun
 set -euo pipefail
 
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then

@@ -14,7 +14,7 @@ class HD12Harness: XCTestCase {
         FakeServer.reset()
     }
 
-    /// `/_hv/ready` n'existe que sur hv-fake-hermes : la lane orb (Hermes réel) saute ces scénarios.
+    /// `/_hv/ready` n'existe que sur hv-fake-hermes : la lane orb (Hermes réel) saute ces scénarios
     private static func fakeServerReady() -> Bool {
         guard let base = ProcessInfo.processInfo.environment["HV_API_URL"],
               let url = URL(string: base + "/_hv/ready"),

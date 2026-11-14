@@ -77,7 +77,7 @@ STATE = {
     "profiles": None,
 }
 
-# Réponse visiblement coupée : l'annulation et l'interruption arrêtent le flux en cours.
+# Réponse visiblement coupée : l'annulation et l'interruption arrêtent le flux en cours
 FAIL_WITHOUT_TEXT_PARTIAL = "Réponse de t"
 FAIL_WITHOUT_TEXT_TERMINALS = {
     "run.failed": "failed",
@@ -179,7 +179,7 @@ def record_run_transcript(run_id, assistant_text):
     user_txt = meta.get("input") or ""
     if not sid or not profile:
         return
-    # Déduplique par identifiant de run (deux tours à même texte restent distincts).
+    # Déduplique par identifiant de run (deux tours à même texte restent distincts)
     if run_id in RECORDED_RUNS:
         return
     RECORDED_RUNS.add(run_id)
@@ -303,7 +303,7 @@ def _profile_row(name, model, gateway, diamond=False):
     return " %s%-15s %-28s %-12s %-12s %s\n" % (mark, name, model, gateway, "\u2014", "\u2014")
 
 def profile_list_text():
-    # Construit la table depuis la configuration (profils ajoutés et noms longs inclus).
+    # Construit la table depuis la configuration (profils ajoutés et noms longs inclus)
     out = C["contracts"]["list_profiles"]["output"]
     if STATE["mode"] == "malformed" and MALFORMED == "leak":
         out = out.replace("stopped", "running")
@@ -469,7 +469,7 @@ class H(BaseHTTPRequestHandler):
                 self.wfile.write(b": open\n\n")
                 last = int(self.headers.get("Last-Event-ID") or -1)
                 i = 0
-                # Reprise : rejouer head+tail déjà émis après Last-Event-ID, sans recréer l'approbation.
+                # Reprise : rejouer head+tail déjà émis après Last-Event-ID, sans recréer l'approbation
                 with LOCK:
                     cached = RUN_SSE.get(run) or {}
                     prior_choice = cached.get("choice")
@@ -502,7 +502,7 @@ class H(BaseHTTPRequestHandler):
                     gate = PENDING.get(run, {}).get("gate")
                     # attend la décision (ou coupure / kill) ; keepalives pour le client
                     # Coupure / down : garder le flux ouvert (la feuille reste) ; seul POST /approval
-                    # reçoit 503 — sinon un break émet deny et hd.approval.status n'apparaît jamais.
+                    # reçoit 503 — sinon un break émet deny et hd.approval.status n'apparaît jamais
                     while gate is not None and not gate.wait(1.0):
                         self.wfile.write(b": keepalive\n\n"); self.wfile.flush()
                     choice = (PENDING.get(run) or {}).get("choice") or "deny"
@@ -574,8 +574,8 @@ class H(BaseHTTPRequestHandler):
             record_run_transcript(run, "Outil terminé")
             return
         events = [fill(e, v) for e in C["events"]] + list(INJ)
-        # tours ordinaires : retirer l'auto-réponse d'approbation de la fixture (sinon la feuille HV_APPROVAL ne s'ouvre jamais).
-        # Garder approval.* pour HV_APPROVAL (UI) et HV_TOOL_DETACH (acceptance approve du contract-check).
+        # tours ordinaires : retirer l'auto-réponse d'approbation de la fixture (sinon la feuille HV_APPROVAL ne s'ouvre jamais)
+        # Garder approval.* pour HV_APPROVAL (UI) et HV_TOOL_DETACH (acceptance approve du contract-check)
         if "HV_APPROVAL" not in inp and "HV_TOOL_DETACH" not in inp:
             events = [e for e in events if not (isinstance(e, dict) and str(e.get("event", "")).startswith("approval."))]
         if STATE.get("fail_without_text"):
