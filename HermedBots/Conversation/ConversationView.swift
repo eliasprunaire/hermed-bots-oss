@@ -1,3 +1,4 @@
+import AppSettings
 import HermesAdapter
 import SwiftUI
 
@@ -10,6 +11,8 @@ struct ConversationView: View {
     /// La bannière d'API a déjà tranché : la pastille d'ouverture ne reste pas sur un échec définitif
     let apiFailed: Bool
     @Environment(\.motion) private var motion
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var colors: [Color] { Palette.colors(bot) }
 
@@ -101,6 +104,10 @@ struct ConversationView: View {
                 .accessibilityLabel("Nouvelle session")
                 .accessibilityID(.sessionNew)
                 .disabled(model.stopInProgress || model.profileLockReason != nil)
+                .padding(.leading, ToolbarCapsuleGap.extraLeadingPadding(
+                    dark: colorScheme == .dark,
+                    largeText: dynamicTypeSize > .large
+                ))
             }
             .visibilityPriority(.high)
         }
