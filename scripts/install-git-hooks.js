@@ -67,6 +67,9 @@ function installDispatcher(cwd) {
   const hook = path.join(dest, "commit-msg");
   writeFileSync(hook, HOOK_SCRIPT);
   chmodSync(hook, 0o755);
+  const prepare = path.join(dest, "prepare-commit-msg");
+  writeFileSync(prepare, HOOK_SCRIPT);
+  chmodSync(prepare, 0o755);
   const postCheckout = path.join(dest, "post-checkout");
   writeFileSync(postCheckout, POST_CHECKOUT);
   chmodSync(postCheckout, 0o755);

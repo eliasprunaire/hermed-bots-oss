@@ -24,6 +24,9 @@ function main(argv = process.argv.slice(2)) {
     return 0;
   }
   for (const id of hits) {
+    if (id === "Co-authored-by") {
+      console.error("trailer Co-authored-by interdit dans le message de commit");
+    }
     console.error(`commit message contains ${id}`);
   }
   return 1;
