@@ -5,7 +5,7 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 BASE=$(cd "$HERE/../baselines" && pwd)
-RUNNER=${HV_RUNNER_DIR:?HV_RUNNER_DIR requis}
+RUNNER=${HV_RUNNER_DIR:-$HERE}
 
 if [ "${1:-}" = "--help" ] || [ "${1:-}" = "-h" ]; then
   sed -n '2,12p' "$0"

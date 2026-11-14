@@ -170,6 +170,7 @@ Les plans versionnés `TestPlans/UICore.xctestplan` et `TestPlans/UIFull.xctestp
 - **`none`** si `needs_ui` est faux.
 
 Exporter `HV_UI_PLAN` depuis `ui_plan` avant `hv-run.sh ui` / `hv-vm-ui.py`. Défaut `ui-full`. Avec `test-without-building`, `ui-core` ajoute `-only-testing` pour les trois classes (le `.xctestplan` sert à `xcodebuild test -scheme HermedBots -testPlan UICore`).
+Sans `HV_RUNNER_DIR`, `hv-run.sh` prend le dossier du script et conserve une valeur explicite ; sans `HV_UI_PLAN`, le mode `ui` prend `ui-full`.
 
 ```bash
 node .cursor/skills/verify-hermed-bots/scripts/hv-classify.js --dry-run --files-from liste.txt

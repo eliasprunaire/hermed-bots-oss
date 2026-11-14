@@ -6,7 +6,7 @@
 #   hv-run.sh daily [orb|fake]   # test quotidien A11 (13 h 00 Paris) + rapport — modèle : aucun
 #   hv-run.sh compat             # 3 tests de compatibilité A7 sur le faux serveur
 # Variables : HV_WORK (défaut ~/hermed-bots-work, dossier dédié A12),
-#   HV_XCTESTRUN (fichier .xctestrun produit par build-for-testing), HV_APP_BUNDLE_ID,
+#   HV_RUNNER_DIR (défaut : dossier du script), HV_XCTESTRUN (fichier .xctestrun produit par build-for-testing), HV_APP_BUNDLE_ID,
 #   HV_TEST_API_KEY (secret, mode orb), HV_UNDER_RUNNER=1 si lancé par runner.sh (qui tient déjà .lock).
 #   HV_BASELINES (défaut ../baselines, remplacé par les références temporaires du selftest).
 #   HV_UI_PLAN (ui-core | ui-full, défaut ui-full) : filtre XCUITest aligné sur la Feature Map.
@@ -22,7 +22,7 @@ set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 MODE=${1:-}; ENVMODE=${2:-fake}; REQUESTED_ENV=$ENVMODE; FALLBACK=aucun
 ENV_STARTED=0; NOT_RUN=
-RUNNER=${HV_RUNNER_DIR:?HV_RUNNER_DIR requis}
+RUNNER=${HV_RUNNER_DIR:-$HERE}
 WORK=${HV_WORK:-$HOME/hermed-bots-work}
 STAMP=$(TZ=Europe/Paris date +%Y%m%d-%H%M%S)
 case "$ENVMODE" in orb|fake) ;; *) echo "environnement inconnu : $ENVMODE" >&2; exit 2 ;; esac
