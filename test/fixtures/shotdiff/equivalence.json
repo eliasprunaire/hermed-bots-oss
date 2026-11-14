@@ -1,0 +1,75 @@
+{
+  "frozenFrom": "origin/main",
+  "cases": [
+    {
+      "id": "identical",
+      "status": 0,
+      "stdout": "OK   ident.png ratio=0.00000\n",
+      "stderr": "",
+      "zone": null
+    },
+    {
+      "id": "noise-2px",
+      "status": 0,
+      "stdout": "OK   noise.png ratio=0.00005\n",
+      "stderr": "",
+      "zone": null
+    },
+    {
+      "id": "frank-local",
+      "status": 11,
+      "stdout": "DIFF pill.png ratio=0.01000 zone=90,90,20x20 px=400 dE=79.1\n",
+      "stderr": "",
+      "zone": "90,90,20x20"
+    },
+    {
+      "id": "diffuse-under-tol",
+      "status": 0,
+      "stdout": "OK   diffuse.png ratio=0.00122\n",
+      "stderr": "",
+      "zone": null
+    },
+    {
+      "id": "antialias",
+      "status": 0,
+      "stdout": "OK   edge.png ratio=0.00745\n",
+      "stderr": "",
+      "zone": null
+    },
+    {
+      "id": "depth16-lossless",
+      "status": 0,
+      "stdout": "OK   depth.png ratio=0.00083\n",
+      "stderr": "",
+      "zone": null
+    },
+    {
+      "id": "transparent-rgb",
+      "status": 0,
+      "stdout": "OK   ghost.png ratio=0.00003\n",
+      "stderr": "",
+      "zone": null
+    },
+    {
+      "id": "black-to-transparent",
+      "status": 11,
+      "stdout": "DIFF hole.png ratio=0.01000 zone=90,90,20x20 px=400 dE=100.0\n",
+      "stderr": "",
+      "zone": "90,90,20x20"
+    },
+    {
+      "id": "hd09-cancelled-historic",
+      "status": 11,
+      "stdout": "DIFF hd09-cancelled.png ratio=0.00015 zone=654,657,25x25 px=430 dE=79.0\n",
+      "stderr": "",
+      "zone": "654,657,25x25"
+    },
+    {
+      "id": "hd09-cancelled-self",
+      "status": 0,
+      "stdout": "OK   hd09-cancelled.png ratio=0.00000\n",
+      "stderr": "",
+      "zone": null
+    }
+  ]
+}
