@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const { spawnSync } = require("node:child_process");
 const {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -18,6 +19,8 @@ const repoRoot = join(__dirname, "..");
 const hooksDir = join(repoRoot, ".githooks");
 const trailer = ["Co-authored-by:", "x <x@y>"].join(" ");
 const frenchRefusal = /trailer Co-authored-by interdit/;
+const frenchStrip = /trailer Co-authored-by retiré/;
+const trailerLine = /^[ \t]*Co-authored-by:/m;
 
 function git(cwd, args, extraEnv = {}) {
   return spawnSync("git", args, {
@@ -73,6 +76,24 @@ function writeChainedPrepare(dir) {
   return hooks;
 }
 
+function writeEditor(dir, mode) {
+  const marker = join(dir, "editor-ran");
+  const editor = join(dir, "editor.sh");
+  const body =
+    mode === "add"
+      ? `printf '\\n${trailer}\\n' >> "$1"`
+      : [
+          `grep -viE '^[ \\t]*#*[ \\t]*Co-authored-by[ \\t]*:' "$1" > "$1.strip" || true`,
+          `mv "$1.strip" "$1"`,
+        ].join("\n");
+  writeFileSync(
+    editor,
+    `#!/bin/sh\nprintf 'ran\\n' > ${JSON.stringify(marker)}\n${body}\n`,
+  );
+  chmodSync(editor, 0o755);
+  return { editor, marker };
+}
+
 test("without the hook, a trailer commit and a revert that adds the trailer both land", () => {
   const commitDir = seedRepo();
   const revertDir = seedRepo();
@@ -117,8 +138,12 @@ test("with the hook, a trailer commit is refused in French, a clean commit lands
       "-m",
       trailer,
     ]);
-    assert.notEqual(bad.status, 0);
-    assert.match(`${bad.stderr}\n${bad.stdout}`, frenchRefusal);
+    assert.equal(bad.status, 0, `${bad.stderr}\n${bad.stdout}`);
+    assert.match(`${bad.stderr}\n${bad.stdout}`, frenchStrip);
+    assert.doesNotMatch(
+      git(commitDir, ["log", "-1", "--format=%B"]).stdout,
+      trailerLine,
+    );
 
     const clean = git(commitDir, [
       "commit",
@@ -129,7 +154,7 @@ test("with the hook, a trailer commit is refused in French, a clean commit lands
     assert.equal(clean.status, 0, `${clean.stderr}\n${clean.stdout}`);
     assert.doesNotMatch(
       git(commitDir, ["log", "-1", "--format=%B"]).stdout,
-      /^[ \t]*Co-authored-by:/m,
+      trailerLine,
     );
 
     const chained = writeChainedPrepare(revertDir);
@@ -137,13 +162,10 @@ test("with the hook, a trailer commit is refused in French, a clean commit lands
     const head = git(revertDir, ["rev-parse", "HEAD"]).stdout.trim();
     const reverted = git(revertDir, ["revert", "--no-edit", "HEAD"]);
     const body = git(revertDir, ["log", "-1", "--format=%B"]).stdout;
-    if (reverted.status === 0) {
-      assert.doesNotMatch(body, /^[ \t]*Co-authored-by:/m);
-      assert.notEqual(git(revertDir, ["rev-parse", "HEAD"]).stdout.trim(), head);
-    } else {
-      assert.match(`${reverted.stderr}\n${reverted.stdout}`, frenchRefusal);
-      assert.equal(git(revertDir, ["rev-parse", "HEAD"]).stdout.trim(), head);
-    }
+    assert.equal(reverted.status, 0, `${reverted.stderr}\n${reverted.stdout}`);
+    assert.match(`${reverted.stderr}\n${reverted.stdout}`, frenchStrip);
+    assert.doesNotMatch(body, trailerLine);
+    assert.notEqual(git(revertDir, ["rev-parse", "HEAD"]).stdout.trim(), head);
   } finally {
     rmSync(commitDir, { recursive: true, force: true });
     rmSync(revertDir, { recursive: true, force: true });
@@ -156,4 +178,55 @@ test("the cloud install step sets core.hooksPath to the versioned hooks", () => 
   );
   assert.match(String(env.install), /core\.hooksPath/);
   assert.match(String(env.install), /\.githooks/);
+});
+
+test("git commit --amend of a trailer message opens the editor and accepts the cleaned message", () => {
+  const dir = seedRepo();
+  try {
+    writeFileSync(join(dir, "file.txt"), "three\n");
+    assert.equal(git(dir, ["add", "file.txt"]).status, 0);
+    const planted = git(dir, [
+      "-c",
+      "core.hooksPath=/dev/null",
+      "commit",
+      "-m",
+      "feat: note a amender",
+      "-m",
+      trailer,
+    ]);
+    assert.equal(planted.status, 0, `${planted.stderr}\n${planted.stdout}`);
+    assert.match(git(dir, ["log", "-1", "--format=%B"]).stdout, trailerLine);
+
+    assert.equal(git(dir, ["config", "core.hooksPath", hooksDir]).status, 0);
+    const { editor, marker } = writeEditor(dir, "strip");
+    const amended = git(dir, ["commit", "--amend"], { GIT_EDITOR: editor });
+    assert.equal(amended.status, 0, `${amended.stderr}\n${amended.stdout}`);
+    assert.match(`${amended.stderr}\n${amended.stdout}`, frenchStrip);
+    assert.equal(existsSync(marker), true);
+    assert.match(readFileSync(marker, "utf8"), /^ran$/m);
+    assert.doesNotMatch(git(dir, ["log", "-1", "--format=%B"]).stdout, trailerLine);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("when the editor adds a trailer, commit-msg refuses in French", () => {
+  const dir = seedRepo();
+  try {
+    assert.equal(git(dir, ["config", "core.hooksPath", hooksDir]).status, 0);
+    const { editor, marker } = writeEditor(dir, "add");
+    const head = git(dir, ["rev-parse", "HEAD"]).stdout.trim();
+    const bad = git(
+      dir,
+      ["commit", "--allow-empty", "--edit", "-m", "feat: note propre"],
+      { GIT_EDITOR: editor },
+    );
+    assert.notEqual(bad.status, 0);
+    assert.match(`${bad.stderr}\n${bad.stdout}`, frenchRefusal);
+    assert.equal(existsSync(marker), true);
+    assert.match(readFileSync(marker, "utf8"), /^ran$/m);
+    assert.equal(git(dir, ["rev-parse", "HEAD"]).stdout.trim(), head);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
