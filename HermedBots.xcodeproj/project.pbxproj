@@ -19,6 +19,7 @@
 		B0B0D8A1C2E3F40596A7B801 /* BotList.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0B0D8A1C2E3F40596A7B802 /* BotList.swift */; };
 		B0B0D8A1C2E3F40596A7B811 /* BotsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0B0D8A1C2E3F40596A7B812 /* BotsModel.swift */; };
 		C0C0D9B1C2E3F40596A7C801 /* Conversation.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C802 /* Conversation.swift */; };
+		C0C0D9B1C2E3F40596A7C841 /* ComposerSubmit.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C842 /* ComposerSubmit.swift */; };
 		C0C0D9B1C2E3F40596A7C811 /* ConversationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C812 /* ConversationModel.swift */; };
 		C0C0D9B1C2E3F40596A7C831 /* ConversationMachine.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C832 /* ConversationMachine.swift */; };
 		C0C0D9B1C2E3F40596A7C821 /* MainThreadWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = C0C0D9B1C2E3F40596A7C822 /* MainThreadWatch.swift */; };
@@ -63,6 +64,7 @@
 		B0B0D8A1C2E3F40596A7B802 /* BotList.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotList.swift; sourceTree = "<group>"; };
 		B0B0D8A1C2E3F40596A7B812 /* BotsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BotsModel.swift; sourceTree = "<group>"; };
 		C0C0D9B1C2E3F40596A7C802 /* Conversation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Conversation.swift; sourceTree = "<group>"; };
+		C0C0D9B1C2E3F40596A7C842 /* ComposerSubmit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ComposerSubmit.swift; sourceTree = "<group>"; };
 		C0C0D9B1C2E3F40596A7C812 /* ConversationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationModel.swift; sourceTree = "<group>"; };
 		C0C0D9B1C2E3F40596A7C832 /* ConversationMachine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationMachine.swift; sourceTree = "<group>"; };
 		C0C0D9B1C2E3F40596A7C822 /* MainThreadWatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainThreadWatch.swift; sourceTree = "<group>"; };
@@ -236,6 +238,7 @@
 			isa = PBXGroup;
 			children = (
 				C0C0D9B1C2E3F40596A7C802 /* Conversation.swift */,
+				C0C0D9B1C2E3F40596A7C842 /* ComposerSubmit.swift */,
 				C0C0D9B1C2E3F40596A7C812 /* ConversationModel.swift */,
 				C0C0D9B1C2E3F40596A7C832 /* ConversationMachine.swift */,
 			);
@@ -432,6 +435,7 @@
 				B0B0D8A1C2E3F40596A7B801 /* BotList.swift in Sources */,
 				B0B0D8A1C2E3F40596A7B811 /* BotsModel.swift in Sources */,
 				C0C0D9B1C2E3F40596A7C801 /* Conversation.swift in Sources */,
+				C0C0D9B1C2E3F40596A7C841 /* ComposerSubmit.swift in Sources */,
 				C0C0D9B1C2E3F40596A7C811 /* ConversationModel.swift in Sources */,
 				C0C0D9B1C2E3F40596A7C831 /* ConversationMachine.swift in Sources */,
 				C0C0D9B1C2E3F40596A7C821 /* MainThreadWatch.swift in Sources */,
