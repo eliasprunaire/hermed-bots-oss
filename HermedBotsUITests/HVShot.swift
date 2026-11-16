@@ -15,9 +15,23 @@ enum HVShot {
         capture(name, app.windows.firstMatch)
     }
 
+    /// Milieu de la barre de titre : aucun contrôle `.help`, aucun clic
+    static let neutralPointerOffset = CGVector(dx: 0.5, dy: 0.02)
+
     @discardableResult
     static func capture(_ name: String, _ window: XCUIElement) -> XCUIScreenshot {
-        collapseBeforeCapture()
+        // hd11-current-tool : fermer les info-bulles sans survol, puis attendre hd.tool.current
+        if name == "hd11-current-tool" {
+            collapseBeforeCapture()
+            let tool = window.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier == %@", "hd.tool.current")
+            ).firstMatch
+            waitUntilPresent(tool, timeout: 2)
+            XCTAssertTrue(tool.exists, "hd.tool.current absent au moment de la capture")
+        } else {
+            parkPointer(in: window)
+            collapseBeforeCapture()
+        }
         let screenshot = window.screenshot()
         print("HV-SHOT \(name)")
         XCTContext.runActivity(named: "capture \(name)") { activity in
@@ -27,6 +41,21 @@ enum HVShot {
             activity.add(attachment)
         }
         return screenshot
+    }
+
+    /// Éloigne le pointeur vers la barre de titre, sans clic ni attente fixe, pour fermer l'info-bulle de survol
+    static func parkPointer(in window: XCUIElement) {
+        window.coordinate(withNormalizedOffset: Self.neutralPointerOffset).hover()
+    }
+
+    /// Attend l'identifiant d'accessibilité : lecture immédiate, puis toutes les 10 ms, délai maximal
+    static func waitUntilPresent(_ element: XCUIElement, timeout: TimeInterval) {
+        if element.exists { return }
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.01))
+            if element.exists { return }
+        }
     }
 
     /// Demande à l'app de réduire chaque sélection de champ à un point d'insertion, sans clic ni frappe

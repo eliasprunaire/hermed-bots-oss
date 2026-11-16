@@ -7,7 +7,8 @@
       "paths": [
         { "glob": "HermedBots/Bots/**", "needs_ui": true, "ui_plan": "full" },
         { "glob": "HermedBotsTests/BotListTests.swift", "needs_ui": false },
-        { "glob": "HermedBotsTests/BotIdentityTests.swift", "needs_ui": false }
+        { "glob": "HermedBotsTests/BotIdentityTests.swift", "needs_ui": false },
+        { "glob": "HermedBotsTests/BotCardContentTests.swift", "needs_ui": false }
       ]
     },
     {
