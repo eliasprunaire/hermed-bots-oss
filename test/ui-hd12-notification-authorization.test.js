@@ -75,3 +75,16 @@ test("sans le faux, la ligne d'autorisation retombe sur le texte de loop-pause",
   ].join("\n");
   assert.equal(producedAuthorizationLine(withoutFake), null);
 });
+
+test("AppEnvironment et HD12Harness décrivent le faux d'autorisation, pas la voie native en mode test", () => {
+  const env = read("HermedBots/App/AppEnvironment.swift");
+  const harness = read("HermedBotsUITests/HD12Harness.swift");
+  const skipped = read("docs/spike/issue57/skipped-tests.md");
+  assert.equal(/garde `UNUserNotificationCenter`/.test(env), false);
+  assert.equal(/l'app garde `UNUserNotificationCenter`/.test(harness), false);
+  assert.match(env, /faux d'autorisation|court-circuite/);
+  assert.match(harness, /faux d'autorisation/);
+  assert.equal(/\| `NativeNotifications\/testLoopPauseNotificationDelivery` \|/.test(skipped), false);
+  assert.match(skipped, /n'est plus ignorée/);
+  assert.match(skipped, /42 tests ignorés/);
+});

@@ -1,17 +1,11 @@
 import SwiftUI
 
 /// Le bandeau d'erreur de la liaison : il reste tant que le tunnel ou l'API sont en échec, avec Réessayer
-/// Il flotte comme `ConnectingPill` : hauteur de pile nulle, l'accueil 401/down n'est pas poussé hors du pied
+/// Sur l'accueil il est incrusté en haut, sans occuper de hauteur de pile ; au-dessus d'une conversation il garde sa hauteur, l'en-tête reste visible
 struct ErrorBanner: View {
     let model: AppModel
 
     var body: some View {
-        banner
-            .frame(maxWidth: .infinity, alignment: .top)
-            .frame(height: 0, alignment: .top)
-    }
-
-    @ViewBuilder private var banner: some View {
         if let message = model.tunnel.state.bannerMessage ?? model.apiError {
             NoticeCard(tint: .orange, symbol: "exclamationmark.triangle.fill") {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -28,7 +22,6 @@ struct ErrorBanner: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 10)
-            .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

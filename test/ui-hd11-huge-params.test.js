@@ -78,3 +78,21 @@ test("un texte de 50 000 caractères défile encore dans le cadre de 260 pt", ()
   assert.equal(producedOverflow(HUGE, 50_000, maxHeight), true);
   assert.equal(producedOverflow(HUGE, 480, maxHeight), false);
 });
+
+test("HD-11 et son scénario UI ne promettent plus un défilement", () => {
+  const sixFile = read("HermedBotsUITests/SixActions.swift");
+  const six = firstBlock(sixFile, "func testAHugeParameter");
+  const sheet = read("HermedBots/Approval/ApprovalSheet.swift");
+  const plan = read("docs/plans/hermed-bots.md");
+  const feature = read(".cursor/skills/verify-hermed-bots/features/approval.md");
+  assert.match(sixFile, /testAHugeParameterIsBoundedAndMarksWhatItDoesNotShow/);
+  assert.match(sixFile, /le texte montré est borné/);
+  assert.equal(/scroll\(/.test(six), false);
+  assert.equal(/défile/.test(six), false);
+  assert.equal(/Les paramètres défilent/.test(sheet), false);
+  assert.match(sheet, /Les paramètres sont bornés/);
+  assert.equal(/sheet scrolls/.test(plan), false);
+  assert.match(plan, /sheet bounds the shown text/);
+  assert.equal(/feuille défilante/.test(feature), false);
+  assert.match(feature, /texte borné/);
+});

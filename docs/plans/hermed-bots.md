@@ -703,7 +703,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 **Build.**
 
 - [ ] Show `hd.tool.current` with the tool name while a tool runs.
-- [ ] Open `hd.approval.sheet` on `approval.requested` with `hd.approval.tool` and `hd.approval.params` before any answer. Scroll long parameters, never truncate them silently.
+- [ ] Open `hd.approval.sheet` on `approval.requested` with `hd.approval.tool` and `hd.approval.params` before any answer. Bound long parameters, never truncate them silently.
 - [ ] Send one decision through `approve` for `hd.approval.yes` or `hd.approval.no`, even on a double click.
 - [ ] Keep a pending approval on screen across a cut and send the decision once when the link returns.
 
@@ -721,7 +721,7 @@ Each live lane runs on its own cloud VM at the PR head. Drive through `control-u
 - [ ] Lane 2. Click `hd.approval.yes`. Save `hd11-yes.png`. Pass when one `approve` with yes goes out and the turn completes.
 - [ ] Lane 3. Click `hd.approval.no`. Save `hd11-no.png`. Pass when one `approve` with no goes out and the real end state shows.
 - [ ] Lane 4. Watch `hd.tool.current` during `tool.started`. Save `hd11-current-tool.png`. Pass when it reads `shell.exec` and clears on `tool.finished`.
-- [ ] Lane 5. Serve parameters of 200 000 characters and binary bytes. Save `hd11-huge-params.png`. Pass when the sheet scrolls and marks any cut.
+- [ ] Lane 5. Serve parameters of 200 000 characters and binary bytes. Save `hd11-huge-params.png`. Pass when the sheet bounds the shown text and marks any cut.
 - [ ] Lane 6. Double click `hd.approval.yes`. Save `hd11-double.png`. Pass when one decision goes out.
 - [ ] Lane 7. Cut the link with `/_hv/cut` while the sheet waits, then answer. Save `hd11-cut.png`. Pass when the sheet stays and the decision goes out once after the link returns.
 - [ ] Lane 8. Drop `approve`. Save `hd11-drop.png`. Pass when the sheet shows the request with the disabled message and the kill switch pointer.

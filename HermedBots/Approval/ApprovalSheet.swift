@@ -2,7 +2,7 @@ import SwiftUI
 
 /// La feuille d'approbation : l'outil qui demande et ses paramètres, avant toute réponse, puis Approuver ou Refuser
 /// Elle suit la demande du fil à l'écran et ne se ferme que par une décision que Hermes prend ou par la fin du tour : Échap ne la ferme pas
-/// Les paramètres défilent et ne sont jamais coupés en silence : ce que la feuille ne montre pas, ou écrit autrement, est dit dessous
+/// Les paramètres sont bornés et ne sont jamais coupés en silence : ce que la feuille ne montre pas, ou écrit autrement, est dit dessous
 /// Quand la liaison est coupée, la décision reste et repart au retour ; quand Hermes ne propose plus `approve`, la demande reste affichée et la réponse est grisée
 struct ApprovalSheet: View {
     let model: ConversationModel

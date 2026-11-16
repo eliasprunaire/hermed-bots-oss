@@ -18,7 +18,7 @@ Quand le bot demande un outil, une feuille montre l'outil et ses paramètres ava
 - **Feuille.** `app.sheets["hd.approval.sheet"]` ; `hd.approval.tool` = `terminal` ; `hd.approval.params` contient la commande de l'événement `approval.request` (`python3 -c ...`) et sa description. Capture `approval`.
 - **Oui.** `hd.approval.yes` ; `/_hv/log` : `POST /p/hv-bot-a/v1/runs/<run>/approval` avec `choice` = `once` ; le tour continue jusqu'à terminé.
 - **Non.** Relancer, `hd.approval.no` ; `POST` avec `choice` = `deny` ; le tour renonce, état affiché.
-- **Bords.** Paramètres énormes ou binaires : feuille défilante, jamais tronquée sans indication. Double clic Oui : une seule décision. Approbation pendant une coupure (`/_hv/cut`) : la feuille reste, la décision part au retour, une seule fois.
+- **Bords.** Paramètres énormes ou binaires : texte borné, jamais tronqué sans indication. Double clic Oui : une seule décision. Approbation pendant une coupure (`/_hv/cut`) : la feuille reste, la décision part au retour, une seule fois.
 
 ## Gotchas
 
