@@ -4,7 +4,7 @@ import XCTest
 class HD12Harness: XCTestCase {
     var app: XCUIApplication?
     var testProfileLocks = false
-    /// Lane NativeNotifications seulement : l'app garde `UNUserNotificationCenter`
+    /// Lane NativeNotifications seulement : `LoopPauseNotifications`, qui en mode test renvoie le faux d'autorisation sans `UNUserNotificationCenter`
     var nativePauseNotification = false
     let environment = ProcessInfo.processInfo.environment
 

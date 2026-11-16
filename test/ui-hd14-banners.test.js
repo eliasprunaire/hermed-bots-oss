@@ -18,6 +18,7 @@ const VIEW_FILES = [
   "HermedBots/Conversation/ConversationView.swift",
   "HermedBots/Bots/BotListView.swift",
   "HermedBots/Bots/HomeView.swift",
+  "HermedBots/Bots/BotLockPill.swift",
   "HermedBots/Banners/DegradedBanner.swift",
   "HermedBots/Banners/ErrorBanner.swift",
   "HermedBots/Approval/ApprovalSheet.swift",
@@ -78,17 +79,24 @@ test("le bandeau dégradé a les deux phrases et jamais la ligne technique brute
 test("la barre latérale affiche les pastilles courtes, pas le texte long du bandeau", () => {
   const lock = read("HermedBots/Transport/ProfileLock.swift");
   const row = read("HermedBots/Bots/BotListView.swift");
+  const pillView = read("HermedBots/Bots/BotLockPill.swift");
   const ui = read("HermedBotsUITests/ConcurrencyTests.swift");
   assert.match(lock, new RegExp(`"${PILL_HELD}"`));
   assert.match(lock, new RegExp(`"${PILL_DEGRADED}"`));
+  const sidebarLabel = firstBlock(lock, "var sidebarLabel: String?");
+  assert.match(sidebarLabel, /case \.free, \.unknown: nil/);
+  assert.match(sidebarLabel, /case \.degraded:/);
   assert.match(row, /profileLock\.sidebarLabel\(bot\.id\)/);
   assert.match(row, /lockLabel:/);
   const pill = firstBlock(row, "if let lockLabel");
-  assert.match(pill, /Text\(lockLabel\)/);
-  assert.match(pill, /accessibilityIdentifier\(AccessibilityID\.botLock\(bot\.id\)\)/);
+  assert.match(pill, /BotLockPill\(/);
+  assert.match(pill, /accessibilityID: AccessibilityID\.botLock\(bot\.id\)/);
   assert.equal(pill.includes("Text(lockReason)"), false, pill);
   assert.equal(pill.includes(HELD), false, pill);
   assert.equal(row.includes("Mode dégradé : la détection"), false);
+  assert.match(pillView, /Text\(label\)/);
+  assert.match(pillView, /\.help\(help\)/);
+  assert.match(pillView, /\.fixedSize\(\)/);
   assert.match(ui, /Tenu par Desktop/);
   assert.equal(ui.includes('text(reason).contains("Hermes Desktop")'), false);
 });

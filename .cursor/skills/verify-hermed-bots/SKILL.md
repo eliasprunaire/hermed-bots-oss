@@ -268,7 +268,7 @@ Modèle : aucun.
 
 Côté API seule (sans app) : `scripts/hv-contract-check.py` vérifie chaque contrat de la fixture (la liste des profils par `hermes profile list` via `--profile-cmd`) et sonde les bords (message vide, id inexistant, id négatif, JSON invalide, sans clé) en mode fake et en mode orb. En mode orb, `hv-run.sh api orb` lance ensuite `scripts/hv-spike-probe.py` (scénarios S1 à S7 du spike : coupure réseau, annulation d'un outil).
 
-**À la main (A3)** : jugement visuel final, veille réelle du Mac (fermer le capot pendant un tour long et pendant une approbation en attente), Trousseau au premier lancement. Utilisateur présent ; consigner le résultat dans `<evd>/manuel.md`.
+**À la main (A3)** : relecture locale du designer, veille réelle du Mac (fermer le capot pendant un tour long et pendant une approbation en attente), Trousseau au premier lancement. Seuls la veille réelle du Mac et le Trousseau au premier lancement restent manuels, utilisateur présent ; consigner le résultat dans `<evd>/manuel.md`.
 
 ## Evidence
 
@@ -297,7 +297,7 @@ Les références versionnées et leur régénération suivent le [README des ré
 - Chaque test appelle `HVShot.capture("<écran>")` (helper XCUITest : `XCUIScreen.main.screenshot()` ou `app.windows.firstMatch.screenshot()`, fenêtre 1280×800, apparence claire, `-AppleLanguages (fr)`), joint l'image au xcresult et écrit `HV-SHOT <écran>` dans la sortie. Le runner XCUITest est sandboxé : il n'écrit pas dans `$HV_SHOTS`. `hv-run.sh ui` exporte les pièces jointes vers `shots/<écran>.png` (`hv-shotdiff.sh --export`) et échoue (code 15) si une capture annoncée manque.
 - Écrans : `bots`, `conversation`, `model-picker`, `approval`, `tool-current`, `degraded`, `error`, `threads`.
 - Comparaison : `scripts/hv-shotdiff.sh <evd>/reference-shots baselines <evd>/diffs <tolérance>` (fraction de pixels différents, fuzz 5 %). Un écart franc localisé (zone connexe après érosion d’un pixel, ΔE élevé) échoue aussi, même si le ratio global reste sous la tolérance ; la sortie nomme alors la zone (`x,y,lxh`). La lane orb utilise 0.03 (3 %). Les lanes fake et les autres modes utilisent 0.02 (2 %). `hv-run.sh` choisit cette valeur selon `HV_UI_BACKEND` ou, à défaut, le mode d'environnement. Le code 11 fait échouer la passe.
-- Promotion d'une référence : **humaine seulement**, `scripts/hv-shotdiff.sh --bless <evd>/reference-shots baselines`, dans une PR dédiée. Le jugement visuel final reste manuel.
+- Promotion d'une référence : `scripts/hv-shotdiff.sh --bless <evd>/reference-shots baselines`, toujours dans une PR dédiée, qui passe les mêmes portes que les autres (verdict sur la tête exacte, CI). Le responsable de développement (Dev Lead) décide, avec l'ingénieur, après relecture visuelle du designer de l'avant/après sur la machine de vérification. Les preuves et captures brutes restent hors dépôt ; la PR n'en cite qu'un résumé caviardé, plus les PNG de référence promus. Sans question d'accord à l'utilisateur. La décision et son auteur sont journalisés. Le vérificateur ne promeut jamais une référence lui-même, ni l'auteur d'une PR de fonctionnalité. En cas de désaccord, Dev Lead tranche.
 
 ### Test quotidien (A11) — 13 h 00, heure de Paris
 
