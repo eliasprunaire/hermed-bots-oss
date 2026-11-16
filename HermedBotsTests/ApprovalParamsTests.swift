@@ -61,4 +61,13 @@ final class ApprovalParamsTests: XCTestCase {
         XCTAssertEqual(params.shown.count, ApprovalParams.limit)
         XCTAssertEqual(params.hidden, 200_000 - ApprovalParams.limit)
     }
+
+    func testAHugeCommandFitsTheVisibleSheetWithoutScrolling() {
+        let command = "HUGE-BEGIN " + String(repeating: "x", count: 200_000)
+        let params = ApprovalParams(command)
+        XCTAssertTrue(params.shown.hasPrefix("HUGE-BEGIN "))
+        XCTAssertEqual(params.shown.count, ApprovalParams.limit)
+        XCTAssertEqual(params.hidden, command.unicodeScalars.count - ApprovalParams.limit)
+        XCTAssertLessThanOrEqual(ApprovalParams.limit, 480)
+    }
 }

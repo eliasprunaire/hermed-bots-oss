@@ -35,7 +35,6 @@ Les proxies spécialisés ne partagent pas le même serveur HTTP que la suite or
 | `KillSwitchTests/test07KeptSessions` | Maintenu | Le proxy HD15 produit des tours annulables et les capacités stop. Lane `docs/spike/hd15-instruments/run-ui.sh`. |
 | `KillSwitchTests/test08WaitingApproval` | Maintenu | Le proxy HD15 produit des tours annulables et les capacités stop. Lane `docs/spike/hd15-instruments/run-ui.sh`. |
 | `KillSwitchTests/testPerfFiveStops` | Maintenu | Le proxy HD15 produit des tours annulables et les capacités stop. Lane `docs/spike/hd15-instruments/run-ui.sh`. |
-| `NativeNotifications/testLoopPauseNotificationDelivery` | Maintenu | macOS refuse la remise des notifications dans la VM. Le test tente la remise avant son skip. |
 | `ProfileKeys/testAllNineProfilesWithDistinctKeys` | Maintenu | Les deux tests exigent des clés distinctes et leur serveur authentifié. Lane `docs/spike/hd17-instruments/run-ui.sh`. |
 | `ProfileKeys/testCrossedKeyShowsTheAuthenticationError` | Maintenu | Les deux tests exigent des clés distinctes et leur serveur authentifié. Lane `docs/spike/hd17-instruments/run-ui.sh`. |
 | `ResumeBaseline/testTrunkCutOutcome` | Maintenu | Ce témoin mesure le code historique trunk, pas le comportement du head. Lane `HV13_BASELINE=1`. |
@@ -72,7 +71,9 @@ Le test `LiveTunnel/testRealTestProfilesThroughTheVMTunnel` reste réservé à `
 Il exige le tunnel inverse et les deux clés privées de test.
 Sa présence porte le total historique après #59 à 53 tests ignorés.
 
-La suite ordinaire attend donc 43 tests ignorés parmi les 52 initiaux, plus le test LiveTunnel.
+La lane NativeNotifications n'est plus ignorée : le faux d'autorisation suffit, sans remise macOS.
+
+La suite ordinaire attend donc 42 tests ignorés parmi les 52 initiaux, plus le test LiveTunnel.
 Les résultats de cette session figurent dans `evidence/issue57/`.
 
 Aucun test ni contrôle ne passe lorsque son prérequis manque.

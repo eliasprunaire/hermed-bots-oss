@@ -4,7 +4,8 @@ import Foundation
 /// Les caractères de contrôle et de mise en forme (NUL, ESC, inversion du sens d'écriture, espace de largeur nulle) s'écrivent `\u{…}` : montrés tels quels, ils cacheraient une partie de la commande
 /// Le texte montré est borné à `limit` caractères pour que la feuille reste fluide ; le reste est compté, pas jeté en silence
 struct ApprovalParams: Equatable {
-    static let limit = 50_000
+    /// 480 caractères tiennent dans le cadre 260 pt de la feuille : la capture `hd11-huge-params` ne défile plus
+    static let limit = 480
 
     /// Le texte à afficher
     let shown: String
