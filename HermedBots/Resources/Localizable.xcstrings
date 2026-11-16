@@ -399,6 +399,16 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Ready" } }
       }
     },
+    " · contexte %lld %%" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : " · context %lld %%" } }
+      }
+    },
+    " (estimation)" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : " (estimate)" } }
+      }
+    },
     "présente" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "present" } }

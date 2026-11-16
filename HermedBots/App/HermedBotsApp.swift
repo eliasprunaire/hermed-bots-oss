@@ -194,8 +194,8 @@ private struct SidebarFooter: View {
         }
         if model.compatibility == .ready, model.conversation.compaction.percent > 0 {
             let compaction = model.conversation.compaction
-            label += " · contexte \(compaction.percent) %"
-            if compaction.source == .estimate { label += " (estimation)" }
+            label += String(localized: " · contexte \(compaction.percent) %")
+            if compaction.source == .estimate { label += String(localized: " (estimation)") }
         }
         return FooterCopy.line(label)
     }
