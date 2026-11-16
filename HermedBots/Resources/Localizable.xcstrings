@@ -399,9 +399,9 @@
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Ready" } }
       }
     },
-    " · contexte %lld %" : {
+    " · contexte %lld %%" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : " · context %lld %" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : " · context %lld %%" } }
       }
     },
     " (estimation)" : {
