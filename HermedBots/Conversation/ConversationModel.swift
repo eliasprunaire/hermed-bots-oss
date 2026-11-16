@@ -91,7 +91,7 @@ final class ConversationModel {
     private var loopHistory: [ProfileKey: [LoopGuard.TurnStats]] = [:]
     private var loopEvents: [RunKey: [LoopGuard.Event]] = [:]
     private var loopReports: [RunKey: LoopGuard.Report] = [:]
-    /// Dernier `usage.total_tokens` reçu pour un fil ; absent : l'UI estime.
+    /// Dernier `usage.total_tokens` reçu pour un fil ; absent : l'UI estime
     private var lastServerTokens: [RunKey: Int] = [:]
     #if DEBUG
     private var pauseTimes: [RunKey: TimeInterval] = [:]
@@ -184,7 +184,7 @@ final class ConversationModel {
         catch { return "Lecture du fichier de reprise impossible." }
     }
 
-    /// Capture XCUITest : pose un fil fictif sans effet réseau.
+    /// Capture XCUITest : pose un fil fictif sans effet réseau
     func seedShot(bot: String, session: String? = nil, lines: [ConversationMachine.Line] = [], streaming: String? = nil, isOpening: Bool = false, openError: String? = nil, serverTokens: Int? = nil) {
         let host = connection()
         var machine = machines[host, default: ConversationMachine()]

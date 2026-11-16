@@ -382,7 +382,7 @@ test("hv-vm-ui default profile table matches ProfileTable.parse layout", () => {
   assert.match(src, /Profile\s+Model\s+Gateway/);
   assert.match(src, /hv-bot-a\s+hv-fake-1\s+running/);
   assert.match(src, /hv-bot-b\s+hv-fake-1\s+running/);
-  // Un en-tête à espaces simples (« Profile Model Gateway ») est rejeté par ProfileTable.parse.
+  // Un en-tête à espaces simples (« Profile Model Gateway ») est rejeté par ProfileTable.parse
   assert.doesNotMatch(src, /"Profile Model Gateway\\nhv-bot-a hv-fake-1 running/);
 });
 
@@ -433,7 +433,7 @@ exit 2
   assert.match(argv, /hv-run\.sh/);
   assert.match(argv, /HV_RUNNER_DIR=/);
   assert.match(argv, /HV_UNDER_RUNNER=1/);
-  // Le script invité lit un fichier 0600 ; le nom de variable peut apparaître, pas les valeurs.
+  // Le script invité lit un fichier 0600 ; le nom de variable peut apparaître, pas les valeurs
   assert.equal(argv.includes("aaaaaaaaaaaaaaaaaaaa"), false, "key material in argv: " + argv);
   assert.equal(argv.includes("bbbbbbbbbbbbbbbbbbbb"), false, "key material in argv: " + argv);
   assert.match(argv, /hv-ui-keys-private\.json/);
@@ -551,7 +551,7 @@ test("fake Hermes dedupes transcript by run id, not assistant text", async () =>
       assert.ok([200, 202].includes(started.status), started.raw);
       const runId = started.json && (started.json.id || started.json.run_id);
       assert.ok(runId, started.raw);
-      // Drain SSE to completion so record_run_transcript runs.
+      // Drain SSE to completion so record_run_transcript runs
       await new Promise((resolve, reject) => {
         const req = http.request(
           {
@@ -629,7 +629,7 @@ test("fake Hermes partitions transcripts by profile", async () => {
     assert.equal(own.status, 200);
     assert.ok((own.json.data || []).some((m) => String(m.content).includes("secret-for-a")));
 
-    // Même session id côté B : 404 (pas dans SESSIONS[B]) — pas de fuite du transcript A.
+    // Même session id côté B : 404 (pas dans SESSIONS[B]) — pas de fuite du transcript A
     const crossed = await request(port, `/p/hv-bot-b/api/sessions/${sid}/messages`, { headers: authB });
     assert.equal(crossed.status, 404, crossed.raw);
   } finally {
@@ -652,7 +652,7 @@ test("fake Hermes keeps approval decision across Last-Event-ID resume", async ()
     const runId = started.json && (started.json.id || started.json.run_id);
     assert.ok(runId, started.raw);
 
-    // Open stream briefly to create PENDING / RUN_SSE, then decide.
+    // Open stream briefly to create PENDING / RUN_SSE, then decide
     const first = await new Promise((resolve, reject) => {
       const events = [];
       const req = http.request(
@@ -671,7 +671,7 @@ test("fake Hermes keeps approval decision across Last-Event-ID resume", async ()
               events.push("seen");
               const m = buf.match(/"request_id":\s*"([^"]+)"/);
               const requestId = m ? m[1] : "apr_" + runId;
-              // Decide once the request is visible.
+              // Decide once the request is visible
               request(port, `/p/hv-bot-a/v1/runs/${runId}/approval`, {
                 method: "POST",
                 headers: auth,
@@ -688,7 +688,7 @@ test("fake Hermes keeps approval decision across Last-Event-ID resume", async ()
     assert.match(first, /approval\.responded/);
     assert.match(first, /"choice": "once"/);
 
-    // Resume after the last event id (5 = last of head(2)+tail(4) zero-based → use 5).
+    // Resume after the last event id (5 = last of head(2)+tail(4) zero-based → use 5)
     const resumed = await new Promise((resolve, reject) => {
       const req = http.request(
         {
@@ -1067,7 +1067,7 @@ test("hv-vm-ui host guest argv never carries HV_TEST_API_KEYS", () => {
   const src = readFileSync(VM_UI, "utf8");
   assert.match(src, /install_transport_shim/);
   assert.match(src, /hv-ui-keys-private\.json/);
-  // guest_env list must not append the packed keys.
+  // guest_env list must not append the packed keys
   assert.doesNotMatch(src, /guest_env\.append\(\s*"HV_TEST_API_KEYS=/);
 });
 
@@ -1209,7 +1209,7 @@ test("hv-shotdiff fails when image dimensions differ", () => {
   mkdirSync(base);
   mkdirSync(dif);
   // Same 1x1 PNG fixture as other shotdiff tests — dimensions come from the identify stub
-  // (CI has no ImageMagick magick; cdf9e332 pattern).
+  // (CI has no ImageMagick magick; cdf9e332 pattern)
   writeFileSync(join(base, "x.png"), PNG1);
   writeFileSync(join(cap, "x.png"), PNG1);
   const bin = join(dir, "bin");
@@ -1563,7 +1563,7 @@ test("hv-shotdiff fails closed when AE is nonzero and the PNG depth is 4-bit", (
 });
 
 test("hv-shotdiff flags hd09-cancelled orange vs grey from #150 against main", () => {
-  // Capture historique de #150 (c4138edb), figée hors baselines, indépendante de l'historique git.
+  // Capture historique de #150 (c4138edb), figée hors baselines, indépendante de l'historique git
   const dir = mkdtempSync(join(tmpdir(), "hv-shot-hd09-"));
   const cap = join(dir, "cap");
   const base = join(dir, "base");

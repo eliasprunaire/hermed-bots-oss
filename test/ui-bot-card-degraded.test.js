@@ -31,7 +31,7 @@ function firstBlock(source, marker) {
   assert.fail(marker);
 }
 
-// Contenu produit de la carte en mode dégradé : le modèle, la pastille, l'aide — jamais le texte du bandeau.
+// Contenu produit de la carte en mode dégradé : le modèle, la pastille, l'aide — jamais le texte du bandeau
 function degradedCardCopy() {
   const model = "demo";
   const lockLabel = PILL_DEGRADED;

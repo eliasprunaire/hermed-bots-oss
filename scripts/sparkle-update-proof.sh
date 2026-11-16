@@ -1,6 +1,6 @@
 #!/bin/bash
 # Proves the Sparkle update from version N (VERSION) to N+1 with local builds, a local feed and an Ed25519 key pair
-# created for this run and discarded at exit. Nothing is published and no production key is read.
+# created for this run and discarded at exit. Nothing is published and no production key is read
 #   bash scripts/sparkle-update-proof.sh prepare   builds both versions, signs the feed, checks the signatures; launches nothing
 #   bash scripts/sparkle-update-proof.sh           also starts the builds: needs a macOS GUI session, run it in a disposable VM
 #   bash scripts/sparkle-update-proof.sh published no build: installs the previous published release, then the next through the public feed
@@ -156,7 +156,7 @@ sys.exit(0 if ok else 1)
 PY
 }
 
-# Live discovery on the machine that ran the install. Simulated files skip this.
+# Live discovery on the machine that ran the install. Simulated files skip this
 # A discovery tool that is missing or exits nonzero fails the check: its list would be incomplete
 prove_single_copy() {
   local target=$1 bundle=$2
@@ -193,7 +193,7 @@ if [ "$(uname -s)" != Darwin ]; then
   exit 2
 fi
 
-# Automatic Sparkle checks are off. The proof clicks the same app-menu command a user would.
+# Automatic Sparkle checks are off. The proof clicks the same app-menu command a user would
 request_user_check() {
   local pid=$1
   [ -n "$pid" ] || return 1

@@ -8,7 +8,7 @@ final class SixActions: XCTestCase {
     private let environment = ProcessInfo.processInfo.environment
     private var apiURL: String? { environment["HV_API_URL"] }
 
-    /// Processus partagé : les tests du mode faux serveur par défaut le réutilisent ; un lancement isolé (autre mode, injection, coupure) l'invalide.
+    /// Processus partagé : les tests du mode faux serveur par défaut le réutilisent ; un lancement isolé (autre mode, injection, coupure) l'invalide
     private static var hostedApp: XCUIApplication?
     private static var hostedIsDefault = false
 
@@ -18,7 +18,7 @@ final class SixActions: XCTestCase {
 
     // MARK: outils
 
-    /// Attend une condition : lecture immédiate, puis toutes les 50 ms sur le `RunLoop`. `XCTNSPredicateExpectation` ne sondait qu'après ~1 s et manquait un état transitoire.
+    /// Attend une condition : lecture immédiate, puis toutes les 50 ms sur le `RunLoop`. `XCTNSPredicateExpectation` ne sondait qu'après ~1 s et manquait un état transitoire
     @discardableResult
     private func waitUntil(_ timeout: TimeInterval, _ condition: @escaping () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
@@ -30,7 +30,7 @@ final class SixActions: XCTestCase {
         return false
     }
 
-    /// `isolated: false` relance l'app seulement si la classe n'a pas déjà un processus du mode par défaut.
+    /// `isolated: false` relance l'app seulement si la classe n'a pas déjà un processus du mode par défaut
     private func launch(isolated: Bool = true) -> XCUIApplication {
         if !isolated, Self.hostedIsDefault, let hosted = Self.hostedApp, hosted.state == .runningForeground {
             return hosted
@@ -743,7 +743,7 @@ final class SixActions: XCTestCase {
         try XCTSkipUnless(serverMode() == "normal", "le faux serveur n'est pas en mode normal")
     }
 
-    /// Profils issue56 / table de test : XCTFail sous faux serveur ; XCTSkip seulement hors fake (orb sans ces profils).
+    /// Profils issue56 / table de test : XCTFail sous faux serveur ; XCTSkip seulement hors fake (orb sans ces profils)
     private func requireIssue56Bots(in app: XCUIApplication, timeout: TimeInterval = 20) throws {
         let row = element(AccessibilityID.botRow("hv-bot-a"), in: app)
         let present = row.waitForExistence(timeout: timeout)
@@ -756,7 +756,7 @@ final class SixActions: XCTestCase {
     }
 
     /// Le sélecteur n'a qu'une option tant que les profils ont tous le même modèle : `hv-bot-b` prend `model-y`
-    /// Ne réinitialise pas le faux serveur : les scénarios appellent `FakeServer.reset()` avant `lockModel` ou `configureFake`.
+    /// Ne réinitialise pas le faux serveur : les scénarios appellent `FakeServer.reset()` avant `lockModel` ou `configureFake`
     private func launchWithTwoModels() -> XCUIApplication {
         FakeServer.setProfileModels(["hv-bot-b": "model-y"])
         return launch()

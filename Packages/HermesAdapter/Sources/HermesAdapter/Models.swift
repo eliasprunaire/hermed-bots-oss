@@ -28,7 +28,7 @@ public struct Session: Equatable, Sendable {
         self.source = source
     }
 
-    /// `POST /v1/runs` ne peut lier qu'un fil de l'API. Sans `source`, le fil est traité comme pouvant être lié (fixtures anciennes).
+    /// `POST /v1/runs` ne peut lier qu'un fil de l'API. Sans `source`, le fil est traité comme pouvant être lié (fixtures anciennes)
     public var canBindFromAPI: Bool {
         source == nil || source == "api_server"
     }

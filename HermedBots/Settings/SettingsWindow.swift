@@ -10,7 +10,7 @@ struct SettingsWindow: View {
         // native settings tab button (AXUniqueId stays nil), and selection-bound
         // proxy controls behind TabView do not reliably switch the visible pane
         // under XCTest. Use an explicit pane strip so hd.settings.* stay
-        // findable and clickable while still listing one control per SettingsPane.
+        // findable and clickable while still listing one control per SettingsPane
         VStack(spacing: 0) {
             HStack {
                 Spacer(minLength: 0)

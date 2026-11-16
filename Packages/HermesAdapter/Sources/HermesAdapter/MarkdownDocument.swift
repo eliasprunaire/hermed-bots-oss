@@ -1,7 +1,7 @@
 import Foundation
 
-/// Document Markdown réduit : titres, listes, tableaux GFM, blocs de code, gras et italique.
-/// Les marqueurs (`**`, `|`, clôtures) ne restent pas dans le texte visible.
+/// Document Markdown réduit : titres, listes, tableaux GFM, blocs de code, gras et italique
+/// Les marqueurs (`**`, `|`, clôtures) ne restent pas dans le texte visible
 public struct MarkdownDocument: Equatable, Sendable {
     public enum Inline: Equatable, Sendable {
         case text(String)
@@ -29,7 +29,7 @@ public struct MarkdownDocument: Equatable, Sendable {
         return MarkdownDocument(blocks: parser.parse())
     }
 
-    /// Texte montré à l'écran, sans marqueurs Markdown.
+    /// Texte montré à l'écran, sans marqueurs Markdown
     public var visibleText: String {
         blocks.map(\.visibleText).joined(separator: "\n")
     }

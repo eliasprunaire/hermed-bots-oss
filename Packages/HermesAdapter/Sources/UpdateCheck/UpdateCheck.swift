@@ -38,7 +38,7 @@ public enum UpdateCheckCopy {
 }
 
 public enum UpdateCheckState: Equatable, Sendable {
-    /// Aucune recherche n'a encore abouti : l'écran À propos n'affiche aucun statut Sparkle.
+    /// Aucune recherche n'a encore abouti : l'écran À propos n'affiche aucun statut Sparkle
     case idle
     case upToDate
     case checking

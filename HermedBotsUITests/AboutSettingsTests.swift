@@ -5,7 +5,7 @@ final class AboutSettingsTests: XCTestCase {
     private let environment = ProcessInfo.processInfo.environment
     private var apiURL: String? { environment["HV_API_URL"] }
 
-    /// `/_hv/ready` n'existe que sur le faux serveur (pas sur orb).
+    /// `/_hv/ready` n'existe que sur le faux serveur (pas sur orb)
     private func isFakeServer() -> Bool {
         guard let apiURL, let url = URL(string: apiURL + "/_hv/ready") else { return false }
         guard let data = try? Data(contentsOf: url),
@@ -67,10 +67,10 @@ final class AboutSettingsTests: XCTestCase {
         let open = element(.connectionOpen, in: app)
         XCTAssertTrue(open.waitForExistence(timeout: 10), "hd.connection.open absent")
         open.click()
-        // La scène Réglages est une autre fenêtre : attendre un contrôle Connexion avant l'onglet À propos.
+        // La scène Réglages est une autre fenêtre : attendre un contrôle Connexion avant l'onglet À propos
         let connectionHost = element(.connectionHost, in: app)
         XCTAssertTrue(connectionHost.waitForExistence(timeout: 10), "la fenêtre Réglages (Connexion) ne s'ouvre pas")
-        // Rangée de boutons SettingsPane (connection) — aperçu demandé hors baselines.
+        // Rangée de boutons SettingsPane (connection) — aperçu demandé hors baselines
         HVShot.capture("settings-connection", app)
         let about = element(.settingsUpdates, in: app)
         XCTAssertTrue(about.waitForExistence(timeout: 10), "l'onglet À propos est absent")
@@ -99,7 +99,7 @@ final class AboutSettingsTests: XCTestCase {
         let button = element(.updatesCheck, in: app)
         XCTAssertTrue(button.waitForExistence(timeout: 5), "hd.updates.check absent")
         XCTAssertGreaterThanOrEqual(button.frame.minY, lastMaxY - 1, "le bouton n'est pas sous les versions")
-        // Rangée de boutons SettingsPane (updates / À propos).
+        // Rangée de boutons SettingsPane (updates / À propos)
         HVShot.capture("settings-updates", app)
         HVShot.capture("about-settings", app)
     }

@@ -249,7 +249,7 @@ def main(argv: list[str]) -> int:
 
     def lane_ctx(tag: str):
         # HOME / runner / work isolés par lane (artefacts synthétiques de l'une
-        # ne polluent pas les suivantes — FAIL@cdf9e332 lane4 → lane6).
+        # ne polluent pas les suivantes — FAIL@cdf9e332 lane4 → lane6)
         home = root / f"home-{tag}"
         runner = root / f"runner-{tag}"
         work = root / f"work-{tag}"

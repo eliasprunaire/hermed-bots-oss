@@ -153,8 +153,8 @@ final class KillSwitchTests: HD12Harness {
         XCTAssertEqual(rows.filter { ($0["messages"] as? Int ?? 0) > 0 && $0["http"] as? Int == 200 }.count, 3)
         for profile in profiles {
             openRun(profile)
-            // Chat unique : recharge le transcript API du fil (HV_KILL n'y est versé qu'à la fin du tour, donc absent après annulation).
-            // On vérifie que le fil est toujours là (messages seed) et que la fin « annulé » du tour survit à la réouverture.
+            // Chat unique : recharge le transcript API du fil (HV_KILL n'y est versé qu'à la fin du tour, donc absent après annulation)
+            // On vérifie que le fil est toujours là (messages seed) et que la fin « annulé » du tour survit à la réouverture
             guard let ids = rows.first(where: { $0["profile"] as? String == profile })?["ids"] as? [Int], let first = ids.first else { return XCTFail("transcript absent") }
             let message = "hd.conversation.message.\(first)"
             XCTAssertTrue(element(message).waitForExistence(timeout: 10), "le chat unique de \(profile) doit montrer le transcript conservé")

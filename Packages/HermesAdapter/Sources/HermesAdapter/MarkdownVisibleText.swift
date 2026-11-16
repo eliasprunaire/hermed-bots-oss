@@ -1,7 +1,7 @@
 import Foundation
 
-/// Texte Markdown préparé pour le rendu (Textual) : les délimiteurs ouverts du flux sont fermés.
-/// Le texte brut n'est un secours que si le rendu échoue. Les tests lisent `of`, sans étoile restante.
+/// Texte Markdown préparé pour le rendu (Textual) : les délimiteurs ouverts du flux sont fermés
+/// Le texte brut n'est un secours que si le rendu échoue. Les tests lisent `of`, sans étoile restante
 public enum MarkdownVisibleText: Sendable {
     public static func prepared(_ source: String) -> String {
         Walker(source: Walker(source: source).withoutRemoteImages()).prepared()
@@ -156,7 +156,7 @@ private struct Walker {
         return result
     }
 
-    /// Remplace `![alt](url)` et `![alt][ref]` par `alt`, hors code, pour qu'aucun chargeur ne voie d'URL.
+    /// Remplace `![alt](url)` et `![alt][ref]` par `alt`, hors code, pour qu'aucun chargeur ne voie d'URL
     func withoutRemoteImages() -> String {
         var result = ""
         var inlineCode = false

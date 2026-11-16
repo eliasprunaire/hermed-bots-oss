@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# hv-guard.sh — garde des chemins protégés (A8, A12). Modèle : aucun (script).
+# hv-guard.sh — garde des chemins protégés (A8, A12). Modèle : aucun (script)
 # Usage :
 #   hv-guard.sh snapshot <fichier>          # relève existence, mtime, hash
 #   hv-guard.sh check <fichier-avant>       # recompare ; arrêt si changement
 #   hv-guard.sh target <hôte>               # refuse ${HV_PROTECTED_HOST}
 # Codes : 0 OK ; 2 usage ; 20 chemin protégé modifié ; 21 chemin protégé présent
-#         avant la passe ; 22 cible interdite (${HV_PROTECTED_HOST}).
-# Compatible bash 3.2 (macOS) et Linux. HOME surchargeable pour l'auto-test.
+#         avant la passe ; 22 cible interdite (${HV_PROTECTED_HOST})
+# Compatible bash 3.2 (macOS) et Linux. HOME surchargeable pour l'auto-test
 set -euo pipefail
 
 PROTECTED=("$HOME/.hermes/hermes-agent" "$HOME/.local/bin/hermes")
@@ -53,9 +53,9 @@ case "$cmd" in
     echo "GUARD OK: chemins protégés inchangés" ;;
   target)
     [ -n "$arg" ] || { echo "usage: $0 target <hôte>" >&2; exit 2; }
-    # HV_PROTECTED_HOST : jeton d'hôte interdit (fourni par l'environnement du lanceur).
+    # HV_PROTECTED_HOST : jeton d'hôte interdit (fourni par l'environnement du lanceur)
     # Si la variable manque, le jeton littéral sert de motif : le selftest refuse
-    # HV_PROTECTED_HOST.invalid sans citer d'hôte réel. Comparaison insensible à la casse.
+    # HV_PROTECTED_HOST.invalid sans citer d'hôte réel. Comparaison insensible à la casse
     _deny=$(printf '%s' "${HV_PROTECTED_HOST:-HV_PROTECTED_HOST}" | tr '[:upper:]' '[:lower:]')
     case "$(printf '%s' "$arg" | tr '[:upper:]' '[:lower:]')" in
       *${_deny}*) echo "GUARD FAIL (22): cible interdite : $arg" >&2; exit 22 ;;

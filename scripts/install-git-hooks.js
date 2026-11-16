@@ -91,7 +91,7 @@ function installDispatcher(cwd) {
 }
 
 // Rule 13: the hooks written above replace pre-push; re-chain an optional extra
-// local check (outside the repo) so its pre-commit/pre-push checks stay active.
+// local check (outside the repo) so its pre-commit/pre-push checks stay active
 function chainInfraGuard(cwd, env = process.env) {
   const bin = env.INFRA_GUARD_BIN || "infra-guard";
   const top = git(cwd, ["rev-parse", "--show-toplevel"]);
@@ -138,12 +138,12 @@ function installGitHooks(cwd = process.cwd()) {
   return 0;
 }
 
-// CLI entry (npm prepare / npm test): write the hooks, then re-chain infra-guard.
-// installGitHooks alone stays side-effect free for the hook tests on temp repos.
+// CLI entry (npm prepare / npm test): write the hooks, then re-chain infra-guard
+// installGitHooks alone stays side-effect free for the hook tests on temp repos
 function main(cwd = process.cwd(), env = process.env) {
   const rc = installGitHooks(cwd);
   if (rc !== 0) return rc;
-  // Only checkouts that can push somewhere need the rule 13 guard (temp test repos have no remote).
+  // Only checkouts that can push somewhere need the rule 13 guard (temp test repos have no remote)
   const remotes = git(cwd, ["remote"]);
   if (remotes.status === 0 && remotes.stdout.trim() !== "") chainInfraGuard(cwd, env);
   return 0;

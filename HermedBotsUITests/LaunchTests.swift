@@ -5,7 +5,7 @@ final class LaunchTests: XCTestCase {
     private let environment = ProcessInfo.processInfo.environment
     private var apiURL: String? { environment["HV_API_URL"] }
 
-    /// `/_hv/ready` n'existe que sur le faux serveur (pas sur orb).
+    /// `/_hv/ready` n'existe que sur le faux serveur (pas sur orb)
     private func isFakeServer() -> Bool {
         guard let apiURL, let url = URL(string: apiURL + "/_hv/ready") else { return false }
         guard let data = try? Data(contentsOf: url),
@@ -71,7 +71,7 @@ final class LaunchTests: XCTestCase {
     func testWindowOpensWithTheServerVersionAndTheBotList() throws {
         let app = launch()
         XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 10), "la fenêtre ne s'ouvre pas")
-        // Capture avant que la version ne se stabilise : sinon launch ≡ language-fr (même UI settled).
+        // Capture avant que la version ne se stabilise : sinon launch ≡ language-fr (même UI settled)
         HVShot.capture("launch", app)
         let bot = app.descendants(matching: .any).matching(identifier: AccessibilityID.botRow("hv-bot-a")).firstMatch
         if !bot.waitForExistence(timeout: 20) {

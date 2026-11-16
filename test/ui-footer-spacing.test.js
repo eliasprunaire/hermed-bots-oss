@@ -64,7 +64,7 @@ function producedVersionLine(appSource, footer, catalog, locale, token) {
     : UNKNOWN;
   const value = token === undefined ? unknown : token;
   if (/FooterCopy\.line\(/.test(footer)) return footerLine(label, value);
-  // Deux Text (libellé puis jeton) : l'écart du HStack se lit comme un double espace.
+  // Deux Text (libellé puis jeton) : l'écart du HStack se lit comme un double espace
   return `${label}  ${value}`;
 }
 

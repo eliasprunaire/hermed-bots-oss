@@ -1,6 +1,6 @@
 import Foundation
 
-/// Scènes de capture XCUITest : données fictives seulement, sans hôte ni nom réel.
+/// Scènes de capture XCUITest : données fictives seulement, sans hôte ni nom réel
 enum ShotScene: String, CaseIterable {
     case footerReady = "footer-ready"
     case footerConnecting = "footer-connecting"

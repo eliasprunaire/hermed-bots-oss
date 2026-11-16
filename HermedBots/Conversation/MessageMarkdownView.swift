@@ -2,7 +2,7 @@ import HermesAdapter
 import SwiftUI
 import Textual
 
-/// Rendu Markdown d'une réponse via Textual ; le texte brut n'est qu'un secours.
+/// Rendu Markdown d'une réponse via Textual ; le texte brut n'est qu'un secours
 struct MessageMarkdownView: View {
     let source: String
     var selectable: Bool
@@ -32,8 +32,8 @@ struct MessageMarkdownView: View {
     }
 }
 
-/// Textual charge par défaut les images Markdown via `URLAttachmentLoader` / `ImageLoader` (hors tunnel).
-/// Ce chargeur n'ouvre aucune URL : il rend le texte alternatif.
+/// Textual charge par défaut les images Markdown via `URLAttachmentLoader` / `ImageLoader` (hors tunnel)
+/// Ce chargeur n'ouvre aucune URL : il rend le texte alternatif
 struct InertMarkdownAttachmentLoader: AttachmentLoader {
     func attachment(
         for url: URL,

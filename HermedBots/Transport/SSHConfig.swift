@@ -180,7 +180,7 @@ enum SSHConfig {
         "id_rsa", "id_ecdsa", "id_ecdsa_sk", "id_ed25519", "id_ed25519_sk", "id_xmss", "id_dsa",
     ]
 
-    /// Analyse la sortie de `ssh -G`. Les chemins restent hors des libellés affichés.
+    /// Analyse la sortie de `ssh -G`. Les chemins restent hors des libellés affichés
     static func parse(
         _ dump: SSHConfigDump,
         alias: String,

@@ -74,13 +74,13 @@ def load_ui_secrets() -> tuple[str, str]:
     import hashlib
     for name in served:
         if name not in keys:
-            # 64 hex chars, stable across runs, distinct per profile (HD17 crossed-key).
+            # 64 hex chars, stable across runs, distinct per profile (HD17 crossed-key)
             keys[name] = hashlib.sha256(("hv-ui-fixture:" + name).encode()).hexdigest()
     # Table courte issue56 (layout ProfileTable.parse). Défaut multiligne OK en env local
     # (guest()); via `env KEY=value` ssh (host) les retours à la ligne cassent — host()
-    # n'exporte que si la table est mono-ligne. Fake sans export → /_hv/profile-list.
-    # En-tête et colonnes comme `hermes profile list` (ProfileTable.parse exige «  » et Gateway).
-    # L'ancienne table compacte « Profile Model Gateway » (espaces simples) ne parsait pas → bots.error + version inconnue.
+    # n'exporte que si la table est mono-ligne. Fake sans export → /_hv/profile-list
+    # En-tête et colonnes comme `hermes profile list` (ProfileTable.parse exige «  » et Gateway)
+    # L'ancienne table compacte « Profile Model Gateway » (espaces simples) ne parsait pas → bots.error + version inconnue
     default_table = (
         " Profile          Model                        Gateway      Alias        Distribution\n"
         " ───────────────    ───────────────────────────    ───────────    ───────────    ────────────────────\n"
@@ -160,7 +160,7 @@ def install_ssh_reverse_wrapper(port: str) -> Path:
     d = Path(tempfile.mkdtemp(prefix="hv-ssh-r-"))
     spec = reverse_tunnel_spec(port)
     wrapper = d / "ssh"
-    # Ne pas passer -N/-R comme argv invité de « vm.sh exec » : le shim les pose sur /usr/bin/ssh.
+    # Ne pas passer -N/-R comme argv invité de « vm.sh exec » : le shim les pose sur /usr/bin/ssh
     wrapper.write_text(
         "#!/bin/sh\n"
         "exec /usr/bin/ssh -o ExitOnForwardFailure=yes -R %s \"$@\"\n" % spec,
@@ -169,11 +169,11 @@ def install_ssh_reverse_wrapper(port: str) -> Path:
     wrapper.chmod(0o755)
     zdot = d / "zdot"
     zdot.mkdir()
-    # Fonctions zsh : survivent au « export PATH=.../usr/bin:... » de vm.sh.
+    # Fonctions zsh : survivent au « export PATH=.../usr/bin:... » de vm.sh
     # Ne PAS poser -R sur chaque ssh : les appels courts de setup se chevauchent
-    # et ExitOnForwardFailure coupe la session (port 18642 déjà pris).
+    # et ExitOnForwardFailure coupe la session (port 18642 déjà pris)
     # vm.sh lance la passe longue via « timeout N ssh … » ; timeout(1) fait
-    # execvp("ssh") et ignore une fonction ssh — on réécrit l'argv vers le shim.
+    # execvp("ssh") et ignore une fonction ssh — on réécrit l'argv vers le shim
     wrap = str(wrapper)
     (zdot / ".zshenv").write_text(
         "timeout() {\n"
@@ -203,8 +203,8 @@ def install_transport_shim(port: str | None, keys_packed: str | None) -> Path:
     les mêmes -i / -o que le transport VM (identité + confiance).
     """
     d = Path(tempfile.mkdtemp(prefix="hv-ssh-shim-"))
-    # Fragment POSIX : collecte -i et -o du transport pour les recopier.
-    # HV_SSH_BIN / HV_SCP_BIN permettent les tests avec des binaires synthétiques.
+    # Fragment POSIX : collecte -i et -o du transport pour les recopier
+    # HV_SSH_BIN / HV_SCP_BIN permettent les tests avec des binaires synthétiques
     opts_helper = """SSH_BIN="${HV_SSH_BIN:-/usr/bin/ssh}"
 SCP_BIN="${HV_SCP_BIN:-/usr/bin/scp}"
 _hv_transport_opts() {
@@ -298,8 +298,8 @@ def start_reverse_tunnel(port: str) -> subprocess.Popen | None:
     if vm_argv("exec") is None:
         return None
     shim = install_ssh_reverse_wrapper(port)
-    # Holder : garde le répertoire shim et prouve qu'un exec vm.sh reste joignable avec le PATH.
-    # « true » est une commande invitée inoffensive ; -N/-R ne figurent jamais dans argv invité.
+    # Holder : garde le répertoire shim et prouve qu'un exec vm.sh reste joignable avec le PATH
+    # « true » est une commande invitée inoffensive ; -N/-R ne figurent jamais dans argv invité
     cmd = vm_argv("exec", "sleep", "30")
     if cmd is None:
         shutil.rmtree(shim, ignore_errors=True)
@@ -339,7 +339,7 @@ def host() -> int:
     env.setdefault("HV_UNDER_RUNNER", "1")
     env.setdefault("HV_API_URL", "http://127.0.0.1:%s" % port)
     # Invité : hv-run.sh exige HV_RUNNER_DIR (set -u / :?). Chemin générique absent OK
-    # (PAUSE/.lock inexistants) — pas de chemin hôte réel dans le dépôt.
+    # (PAUSE/.lock inexistants) — pas de chemin hôte réel dans le dépôt
     guest_runner = os.environ.get("HV_GUEST_RUNNER_DIR") or "/tmp/hv-runner"
     ui_plan = env.get("HV_UI_PLAN", "ui-full")
     guest_env = [
@@ -352,9 +352,9 @@ def host() -> int:
     packed = None
     try:
         packed, table = load_ui_secrets()
-        # Hôte seulement (pas d'argv invité) : utile aux tests unitaires locaux.
+        # Hôte seulement (pas d'argv invité) : utile aux tests unitaires locaux
         env["HV_TEST_API_KEYS"] = packed
-        # Table vide : ne pas exporter ("" est non-nil en Swift et casse ProfileTable.parse).
+        # Table vide : ne pas exporter ("" est non-nil en Swift et casse ProfileTable.parse)
         if table:
             env["HV_TEST_PROFILE_TABLE"] = table
             # ssh `env KEY=value` refuse les retours à la ligne : n'exporter que mono-ligne
@@ -362,11 +362,11 @@ def host() -> int:
                 guest_env.append("HV_TEST_PROFILE_TABLE=%s" % table)
     except (OSError, ValueError, json.JSONDecodeError):
         packed = None
-    # Tunnel -R (orb) + fichier clés 0600 : un seul shim. Les clés ne passent jamais par argv.
+    # Tunnel -R (orb) + fichier clés 0600 : un seul shim. Les clés ne passent jamais par argv
     shim = install_transport_shim(port if backend == "orb" else None, packed)
     env["PATH"] = "%s:%s" % (shim, env.get("PATH", ""))
     env["ZDOTDIR"] = str(shim / "zdot")
-    # Invité : lire ~/hv-ui-keys-private.json (posé par le shim), exporter, effacer, puis hv-run.
+    # Invité : lire ~/hv-ui-keys-private.json (posé par le shim), exporter, effacer, puis hv-run
     guest_script = (
         'K="$HOME/hv-ui-keys-private.json"; '
         "trap 'rm -f \"$K\"' EXIT; " 
@@ -379,8 +379,8 @@ def host() -> int:
         + " ".join(guest_env)
         + " bash .cursor/skills/verify-hermed-bots/scripts/hv-run.sh ui fake"
     )
-    # Une seule VM : vm.sh fait build-for-testing, pose HV_XCTESTRUN sur le produit invité, puis la commande.
-    # Ne pas chercher le .xctestrun sur l'hôte après une compilation invitée.
+    # Une seule VM : vm.sh fait build-for-testing, pose HV_XCTESTRUN sur le produit invité, puis la commande
+    # Ne pas chercher le .xctestrun sur l'hôte après une compilation invitée
     cmd = vm_argv("exec", "bash", "-c", guest_script)
     try:
         proc = subprocess.run(cmd, env=env)

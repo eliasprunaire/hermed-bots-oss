@@ -34,7 +34,7 @@ final class LiveTunnel: XCTestCase {
         app.launchEnvironment["HV_TEST_PROFILE_TABLE"] = table
         defer { app.terminate() }
         for profile in ["hv-bot-a", "hv-bot-b"] {
-            // Un bot déjà ouvert peut masquer l'autre ligne : chaque profil repart d'un lancement propre.
+            // Un bot déjà ouvert peut masquer l'autre ligne : chaque profil repart d'un lancement propre
             if app.state != .notRunning { app.terminate() }
             app.launch()
             let row = app.descendants(matching: .any).matching(identifier: AccessibilityID.botRow(profile)).firstMatch
