@@ -1,7 +1,6 @@
 import SwiftUI
 
 /// Le bandeau d'erreur de la liaison : il reste tant que le tunnel ou l'API sont en échec, avec Réessayer
-/// En pile dans le détail, il réserve sa hauteur : l'orbe d'accueil et l'en-tête de conversation restent dessous
 struct ErrorBanner: View {
     let model: AppModel
 
