@@ -92,23 +92,30 @@ struct ConversationView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { model.newSession() } label: {
-                    ViewThatFits(in: .horizontal) {
-                        Label("Nouvelle session", systemImage: "square.and.pencil")
-                            .labelStyle(.titleAndIcon)
-                        Label("Nouvelle session", systemImage: "square.and.pencil")
-                            .labelStyle(.iconOnly)
+                HStack(spacing: 0) {
+                    Color.clear
+                        .frame(width: ToolbarCapsuleGap.extraContainerSpacing(
+                            dark: colorScheme == .dark,
+                            largeText: dynamicTypeSize > .large
+                        ))
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    Button { model.newSession() } label: {
+                        ViewThatFits(in: .horizontal) {
+                            Label("Nouvelle session", systemImage: "square.and.pencil")
+                                .labelStyle(.titleAndIcon)
+                            Label("Nouvelle session", systemImage: "square.and.pencil")
+                                .labelStyle(.iconOnly)
+                        }
                     }
+                    .buttonStyle(.glass)
+                    .help("Nouvelle session")
+                    .accessibilityLabel("Nouvelle session")
+                    .accessibilityID(.sessionNew)
+                    .disabled(model.stopInProgress || model.profileLockReason != nil)
                 }
-                .help("Nouvelle session")
-                .accessibilityLabel("Nouvelle session")
-                .accessibilityID(.sessionNew)
-                .disabled(model.stopInProgress || model.profileLockReason != nil)
-                .padding(.leading, ToolbarCapsuleGap.extraLeadingPadding(
-                    dark: colorScheme == .dark,
-                    largeText: dynamicTypeSize > .large
-                ))
             }
+            .sharedBackgroundVisibility(.hidden)
             .visibilityPriority(.high)
         }
     }
