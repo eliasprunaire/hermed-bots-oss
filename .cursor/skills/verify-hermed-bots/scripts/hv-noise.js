@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 "use strict";
 
-// hv-noise.js — mesure le bruit entre deux dossiers de captures du même SHA.
+// hv-noise.js — mesure le bruit entre deux dossiers de captures du même SHA
 // Node plutôt que bash : JSON natif, tests `node --test` sans ImageMagick (absent
 // de la CI), PNG décodés ici. Le verdict reste celui de hv-shotdiff.sh, appelé
-// tel quel (aucune copie de sa logique de zone, aucune promotion).
+// tel quel (aucune copie de sa logique de zone, aucune promotion)
 // Usage : hv-noise.js [--json] [--tol 0.02] [--shotdiff chemin] <passe-1> <passe-2>
 
 const { spawnSync } = require("node:child_process");
@@ -461,15 +461,41 @@ function classifyNames(namesA, namesB) {
   };
 }
 
-function parseShotdiffStdout(stdout) {
+function matchShotdiffName(rest, names) {
+  const text = String(rest || "");
+  const sorted = [...names].sort((a, b) => b.length - a.length);
+  for (const name of sorted) {
+    if (text === name || text.startsWith(`${name} `)) {
+      return name;
+    }
+  }
+  return null;
+}
+
+function parseShotdiffStdout(stdout, names = []) {
   const out = {};
   for (const line of String(stdout || "").split("\n")) {
-    const m = /^(OK|DIFF|MISSING)\s+(\S+)/.exec(line);
-    if (m) {
-      out[m[2]] = m[1];
+    const m = /^(OK|DIFF|MISSING)\s+(.*)$/.exec(line);
+    if (!m) {
+      continue;
+    }
+    const png = /^(.+\.png)(?:\s|$)/.exec(m[2]);
+    const name = names.length ? matchShotdiffName(m[2], names) : png && png[1];
+    if (name) {
+      out[name] = m[1];
     }
   }
   return out;
+}
+
+function shotdiffUnusable(shot, comparable) {
+  if (shot.error) {
+    return true;
+  }
+  if (shot.status !== 0 && shot.status !== 11) {
+    return true;
+  }
+  return comparable.some((name) => shot.verdicts[name] == null);
 }
 
 function shotdiffVerdicts(shotdiff, names, dirA, dirB, tol, env) {
@@ -496,7 +522,7 @@ function shotdiffVerdicts(shotdiff, names, dirA, dirB, tol, env) {
       status: run.status,
       error: run.error,
       stderr: run.stderr,
-      verdicts: parseShotdiffStdout(run.stdout),
+      verdicts: parseShotdiffStdout(run.stdout, names),
     };
   } finally {
     fs.rmSync(parent, { recursive: true, force: true });
@@ -577,9 +603,12 @@ function measureFolders(dirA, dirB, opts = {}) {
   if (comparable.length > 0) {
     shot = shotdiffVerdicts(shotdiff, comparable, dirA, dirB, tol, opts.env);
   }
-  for (const row of screens) {
-    if (row.verdict == null) {
-      row.verdict = shot.verdicts[row.name] || "DIFF";
+  shot.unusable = shotdiffUnusable(shot, comparable);
+  if (!shot.unusable) {
+    for (const row of screens) {
+      if (row.verdict == null) {
+        row.verdict = shot.verdicts[row.name];
+      }
     }
   }
   return {
@@ -628,8 +657,11 @@ function main(argv = process.argv.slice(2), io = {}) {
     stderr.write("SHOT FAIL (13): mesure impossible\n");
     return 13;
   }
-  if (report.shot.error || report.shot.status === 13) {
-    stderr.write("SHOT FAIL (13): hv-shotdiff.sh inexécutable ou ImageMagick absent\n");
+  if (report.shot.unusable) {
+    const status = report.shot.status == null ? "erreur" : report.shot.status;
+    stderr.write(
+      `SHOT FAIL (13): hv-shotdiff.sh inutilisable (statut ${status}) ou verdict absent\n`,
+    );
     return 13;
   }
   if (opts.json) {

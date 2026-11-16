@@ -103,6 +103,17 @@ function noiseEnv(dir) {
   return env;
 }
 
+function writeIdentPair(dir, name) {
+  const passA = join(dir, "pass-a");
+  const passB = join(dir, "pass-b");
+  mkdirSync(passA, { recursive: true });
+  mkdirSync(passB, { recursive: true });
+  const ident = rgbCanvas(8, 8, [40, 80, 120]);
+  writeFileSync(join(passA, name), encodePngRgb(8, 8, ident));
+  writeFileSync(join(passB, name), encodePngRgb(8, 8, ident));
+  return { passA, passB };
+}
+
 test("hv-noise --help décrit la mesure et le verdict shotdiff", () => {
   const io = captureIo(process.env);
   const rc = noise.main(["--help"], io);
@@ -251,4 +262,66 @@ test("le script appelle hv-shotdiff.sh sans promotion ni réseau", () => {
   assert.match(src, /hv-shotdiff\.sh/);
   assert.doesNotMatch(src, /spawnSync\([^)]*bless/);
   assert.doesNotMatch(src, /https?:\/\//);
+});
+
+test("--shotdiff absent : code non nul, aucun DIFF", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-noise-noshot-"));
+  try {
+    const { passA, passB } = writeIdentPair(dir, "ident.png");
+    const io = captureIo(process.env);
+    const rc = noise.main(["--shotdiff", join(dir, "absent.sh"), passA, passB], io);
+    assert.notEqual(rc, 0);
+    assert.equal(rc, 13);
+    assert.match(io.stderrText(), /SHOT FAIL \(13\)/);
+    assert.doesNotMatch(`${io.stdoutText()}${io.stderrText()}`, /\bDIFF\b/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("statut shotdiff inattendu : code non nul, aucun DIFF", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-noise-badst-"));
+  try {
+    const { passA, passB } = writeIdentPair(dir, "ident.png");
+    const stub = join(dir, "hv-shotdiff.sh");
+    writeFileSync(stub, "#!/bin/sh\nexit 99\n", { mode: 0o755 });
+    const io = captureIo(process.env);
+    const rc = noise.main(["--shotdiff", stub, passA, passB], io);
+    assert.notEqual(rc, 0);
+    assert.equal(rc, 13);
+    assert.match(io.stderrText(), /SHOT FAIL \(13\)/);
+    assert.doesNotMatch(`${io.stdoutText()}${io.stderrText()}`, /\bDIFF\b/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("deux same screen.png identiques : pas de DIFF", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hv-noise-space-"));
+  try {
+    const { passA, passB } = writeIdentPair(dir, "same screen.png");
+    const io = captureIo(noiseEnv(dir));
+    const rc = noise.main([passA, passB], io);
+    assert.equal(rc, 0, io.stderrText());
+    const out = io.stdoutText();
+    assert.match(out, /same screen\.png/);
+    assert.match(out, /\bOK\b/);
+    assert.doesNotMatch(out, /\bDIFF\b/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("parseShotdiffStdout garde le nom complet avec espaces", () => {
+  const names = ["same.png", "same screen.png"];
+  const parsed = noise.parseShotdiffStdout(
+    [
+      "OK   same screen.png ratio=0.00000",
+      "DIFF same.png ratio=0.10000 > 0.02",
+      "",
+    ].join("\n"),
+    names,
+  );
+  assert.equal(parsed["same screen.png"], "OK");
+  assert.equal(parsed["same.png"], "DIFF");
 });
