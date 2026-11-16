@@ -1619,7 +1619,6 @@ test("hv-shotdiff accepts every baseline compared to itself", () => {
 test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", () => {
   const refs = join(ROOT, "UIReferences");
   const baselines = join(ROOT, ".cursor/skills/verify-hermed-bots/baselines");
-  const stale = "issue58-version-missing-key.png";
   const pngs = readdirSync(refs).filter((name) => name.endsWith(".png"));
   assert.equal(pngs.length, 27);
   for (const name of pngs) {
@@ -1627,8 +1626,7 @@ test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", ()
   }
   const lacunes = readFileSync(join(baselines, "LACUNES-PNG.md"), "utf8");
   const listed = [...lacunes.matchAll(/- LACUNE binaire : `([^`]+)`/g)].map((m) => m[1]);
-  assert.ok(listed.includes(stale));
-  assert.equal(listed.length, 16, String(listed.length));
+  assert.equal(listed.length, 13, String(listed.length));
   assert.match(
     lacunes,
     /Les 26 PNG déjà versionnés dans `UIReferences\/` \(hors `issue58-version-missing-key\.png`/,
@@ -1656,6 +1654,8 @@ test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", ()
     "design-compact-home.png",
     "design-dark-conversation.png",
     "design-dark-home.png",
+    "hd11-huge-params.png",
+    "hd12-notification-authorization.png",
     "hd13-local-state.png",
     "hd13-loop-guard.png",
     "hd13-ten-min-banner.png",
@@ -1672,22 +1672,13 @@ test("skill baselines copy UIReferences PNGs and LACUNES names stay missing", ()
     "hd15-idle.png",
     "hd15-kept.png",
     "hd15-no-tunnel.png",
+    "issue58-version-missing-key.png",
   ];
   for (const name of promoted) {
     assert.equal(existsSync(join(baselines, name)), true, name);
     assert.equal(listed.includes(name), false, name);
   }
-  const promotedLot2 = [
-    "hd11-huge-params.png",
-    "hd12-notification-authorization.png",
-    "issue58-version-missing-key.png",
-  ];
-  for (const name of promotedLot2) {
-    assert.equal(existsSync(join(baselines, name)), true, name);
-    assert.equal(listed.includes(name), true, name);
-  }
   for (const name of listed) {
-    if (promotedLot2.includes(name)) continue;
     assert.equal(existsSync(join(baselines, name)), false, name);
   }
 });

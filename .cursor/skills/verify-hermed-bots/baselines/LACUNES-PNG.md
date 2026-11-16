@@ -17,8 +17,6 @@ Noms encore absents :
 - LACUNE binaire : `hd07-wrong-key.png`
 - LACUNE binaire : `hd08-orb-nine.png`
 - LACUNE binaire : `hd09-orb-send.png`
-- LACUNE binaire : `hd11-huge-params.png` — texte qui défile, 2,8 % de pixels différents entre deux captures pour un seuil de 2 %.
-- LACUNE binaire : `hd12-notification-authorization.png`
 - LACUNE binaire : `hd12-trunk-no-banners.png`
 - LACUNE binaire : `hd13-cut-trunk.png`
 - LACUNE binaire : `hd14-trunk-held.png`
@@ -26,4 +24,3 @@ Noms encore absents :
 - LACUNE binaire : `hd15-trunk-no-button.png`
 - LACUNE binaire : `issue56-hv-bot-a.png`
 - LACUNE binaire : `issue56-hv-bot-b.png`
-- LACUNE binaire : `issue58-version-missing-key.png`
