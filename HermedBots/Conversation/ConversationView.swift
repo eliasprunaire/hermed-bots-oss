@@ -186,23 +186,31 @@ struct ConversationView: View {
         }
     }
 
+    /// Masqué dès que la réponse du tour a du texte ; le curseur de flux reste sur la ligne
+    private var replyHasText: Bool {
+        guard let last = model.conversation.entries.last, last.role == .assistant else { return false }
+        return !last.text.isEmpty
+    }
+
     @ViewBuilder private var footer: some View {
         VStack(alignment: .leading, spacing: 10) {
             if model.isBusy {
-                HStack(spacing: 10) {
-                    // la ligne de réponse porte déjà l'avatar : la ligne d'activité s'aligne sur son texte
-                    if model.conversation.entries.last?.role == .assistant {
-                        Color.clear.frame(width: 26, height: 1)
-                    } else {
-                        BotAvatar(bot: bot, size: 26, activity: model.isWaitingForUser ? .waiting : .working)
-                    }
-                    if model.isWaitingForUser {
-                        Label("Le bot attend votre réponse…", systemImage: "hand.raised.fill")
-                            .foregroundStyle(.orange)
-                            .accessibilityID(.conversationBusy)
-                    } else {
-                        TypingDots(tint: colors[0])
-                        Text(CompatibilityStatus.thinkingLabel).foregroundStyle(.secondary).accessibilityID(.conversationBusy)
+                if model.isWaitingForUser || !replyHasText {
+                    HStack(spacing: 10) {
+                        // la ligne de réponse porte déjà l'avatar : la ligne d'activité s'aligne sur son texte
+                        if model.conversation.entries.last?.role == .assistant {
+                            Color.clear.frame(width: 26, height: 1)
+                        } else {
+                            BotAvatar(bot: bot, size: 26, activity: model.isWaitingForUser ? .waiting : .working)
+                        }
+                        if model.isWaitingForUser {
+                            Label("Le bot attend votre réponse…", systemImage: "hand.raised.fill")
+                                .foregroundStyle(.orange)
+                                .accessibilityID(.conversationBusy)
+                        } else {
+                            TypingDots(tint: colors[0])
+                            Text(CompatibilityStatus.thinkingLabel).foregroundStyle(.secondary).accessibilityID(.conversationBusy)
+                        }
                     }
                 }
                 if let tool = model.currentTool {
