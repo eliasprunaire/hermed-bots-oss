@@ -118,11 +118,62 @@ function createNoopTracker() {
   };
 }
 
+const JS_REGEX_AFTER_KEYWORD = new Set([
+  "return",
+  "throw",
+  "case",
+  "else",
+  "do",
+  "typeof",
+  "void",
+  "delete",
+  "new",
+  "await",
+  "yield",
+  "in",
+  "of",
+  "instanceof",
+]);
+
+function skipJsRegexLiteral(line, from) {
+  let i = from + 1;
+  let inClass = false;
+  while (i < line.length) {
+    const c = line[i];
+    if (c === "\\") {
+      i += 2;
+      continue;
+    }
+    if (inClass) {
+      if (c === "]") {
+        inClass = false;
+      }
+      i += 1;
+      continue;
+    }
+    if (c === "[") {
+      inClass = true;
+      i += 1;
+      continue;
+    }
+    if (c === "/") {
+      i += 1;
+      while (i < line.length && /[A-Za-z]/.test(line[i])) {
+        i += 1;
+      }
+      return i;
+    }
+    i += 1;
+  }
+  return -1;
+}
+
 function createJsTracker() {
   const stack = ["code"];
   const braces = [0];
   let quote = null;
   let blockComment = false;
+  let canRegex = true;
 
   return {
     isInMultilineString() {
@@ -151,6 +202,7 @@ function createJsTracker() {
             }
             if (line[i] === quote) {
               quote = null;
+              canRegex = false;
               i += 1;
               break;
             }
@@ -159,6 +211,7 @@ function createJsTracker() {
           if (quote) {
             if (!line.endsWith("\\")) {
               quote = null;
+              canRegex = false;
             }
             return;
           }
@@ -172,12 +225,14 @@ function createJsTracker() {
           if (line[i] === "`") {
             stack.pop();
             braces.pop();
+            canRegex = false;
             i += 1;
             continue;
           }
           if (line[i] === "$" && line[i + 1] === "{") {
             stack.push("code");
             braces.push(1);
+            canRegex = true;
             i += 2;
             continue;
           }
@@ -197,14 +252,51 @@ function createJsTracker() {
           i += 1;
           continue;
         }
+        if (line[i] === "/" && canRegex) {
+          const end = skipJsRegexLiteral(line, i);
+          if (end !== -1) {
+            i = end;
+            canRegex = false;
+            continue;
+          }
+        }
         if (line[i] === "`") {
           stack.push("template");
           braces.push(0);
           i += 1;
           continue;
         }
+        if (line[i] === "/") {
+          canRegex = true;
+          i += 1;
+          continue;
+        }
+        if (line[i] === " " || line[i] === "\t") {
+          i += 1;
+          continue;
+        }
+        if (/[A-Za-z_$]/.test(line[i])) {
+          let j = i + 1;
+          while (j < line.length && /[A-Za-z0-9_$]/.test(line[j])) {
+            j += 1;
+          }
+          const ident = line.slice(i, j);
+          canRegex = JS_REGEX_AFTER_KEYWORD.has(ident);
+          i = j;
+          continue;
+        }
+        if (/[0-9]/.test(line[i])) {
+          canRegex = false;
+          i += 1;
+          continue;
+        }
+        if ((line[i] === "+" || line[i] === "-") && line[i + 1] === line[i]) {
+          i += 2;
+          continue;
+        }
         if (line[i] === "{") {
           braces[braces.length - 1] += 1;
+          canRegex = true;
           i += 1;
           continue;
         }
@@ -214,8 +306,27 @@ function createJsTracker() {
             if (braces[braces.length - 1] === 0) {
               stack.pop();
               braces.pop();
+              i += 1;
+              continue;
             }
           }
+          canRegex = true;
+          i += 1;
+          continue;
+        }
+        // shortcut: after ) a slash stays a division
+        if (line[i] === ")" || line[i] === "]") {
+          canRegex = false;
+          i += 1;
+          continue;
+        }
+        if (line[i] === ".") {
+          canRegex = false;
+          i += 1;
+          continue;
+        }
+        if ("=(,!&|?:;~%^*<>+".includes(line[i]) || line[i] === "-") {
+          canRegex = true;
           i += 1;
           continue;
         }
@@ -299,6 +410,71 @@ function createPythonTracker() {
   };
 }
 
+function isHereDocMeta(c) {
+  return (
+    c === " " ||
+    c === "\t" ||
+    c === ";" ||
+    c === "&" ||
+    c === "|" ||
+    c === "<" ||
+    c === ">" ||
+    c === "(" ||
+    c === ")"
+  );
+}
+
+function readHereDocDelimiter(line, start) {
+  let i = start;
+  let delim = "";
+  while (i < line.length) {
+    const c = line[i];
+    if (isHereDocMeta(c)) {
+      break;
+    }
+    if (c === "\\") {
+      if (i + 1 >= line.length) {
+        break;
+      }
+      delim += line[i + 1];
+      i += 2;
+      continue;
+    }
+    if (c === "'") {
+      const end = line.indexOf("'", i + 1);
+      if (end === -1) {
+        return { delim: null, next: line.length };
+      }
+      delim += line.slice(i + 1, end);
+      i = end + 1;
+      continue;
+    }
+    if (c === '"') {
+      i += 1;
+      while (i < line.length && line[i] !== '"') {
+        if (line[i] === "\\" && i + 1 < line.length) {
+          delim += line[i + 1];
+          i += 2;
+          continue;
+        }
+        delim += line[i];
+        i += 1;
+      }
+      if (i >= line.length) {
+        return { delim: null, next: i };
+      }
+      i += 1;
+      continue;
+    }
+    delim += c;
+    i += 1;
+  }
+  if (!delim) {
+    return { delim: null, next: i };
+  }
+  return { delim, next: i };
+}
+
 function createShellTracker() {
   const queue = [];
 
@@ -338,7 +514,19 @@ function createShellTracker() {
           i += 1;
           continue;
         }
-        if (c === "<" && line[i + 1] === "<" && line[i + 2] !== "<") {
+        if (c === "(" && line[i + 1] === "(") {
+          const end = line.indexOf("))", i + 2);
+          if (end === -1) {
+            return;
+          }
+          i = end + 2;
+          continue;
+        }
+        if (c === "<" && line[i + 1] === "<") {
+          if (line[i + 2] === "<") {
+            i += 3;
+            continue;
+          }
           i += 2;
           let stripTabs = false;
           if (line[i] === "-") {
@@ -348,40 +536,13 @@ function createShellTracker() {
           while (line[i] === " " || line[i] === "\t") {
             i += 1;
           }
-          let delim = null;
-          if (line[i] === "'") {
-            const end = line.indexOf("'", i + 1);
-            if (end === -1) {
-              return;
-            }
-            delim = line.slice(i + 1, end);
-            i = end + 1;
-          } else if (line[i] === '"') {
-            const end = line.indexOf('"', i + 1);
-            if (end === -1) {
-              return;
-            }
-            delim = line.slice(i + 1, end);
-            i = end + 1;
-          } else if (line[i] === "\\") {
-            const m = /^\\(\S+)/.exec(line.slice(i));
-            if (!m) {
-              i += 1;
-              continue;
-            }
-            delim = m[1];
-            i += m[0].length;
-          } else {
-            const m = /^[A-Za-z_][A-Za-z0-9_]*/.exec(line.slice(i));
-            if (!m) {
-              continue;
-            }
-            delim = m[0];
-            i += m[0].length;
+          const read = readHereDocDelimiter(line, i);
+          if (!read.delim) {
+            i = Math.max(read.next, i + 1);
+            continue;
           }
-          if (delim) {
-            queue.push({ delim, stripTabs });
-          }
+          queue.push({ delim: read.delim, stripTabs });
+          i = read.next;
           continue;
         }
         i += 1;
