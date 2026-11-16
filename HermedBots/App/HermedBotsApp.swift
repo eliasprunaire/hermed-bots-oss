@@ -44,13 +44,16 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 220, ideal: 260)
         } detail: {
             VStack(spacing: 0) {
-                ErrorBanner(model: model)
+                if shownBot != nil {
+                    ErrorBanner(model: model)
+                }
                 DegradedBanner(map: model.capabilities)
                 if let bot = shownBot {
                     ConversationView(model: model.conversation, killSwitch: model.killSwitch, bot: bot, apiFailed: model.apiError != nil)
                 } else {
                     HomeView(bots: model.bots, profileLock: model.profileLock, activity: model.conversation.activity(of:), needsConnection: needsConnection,
                              open: open(bot:), configure: { openSettings() })
+                        .overlay(alignment: .top) { ErrorBanner(model: model) }
                 }
             }
             .overlay(alignment: .top) { ConnectingPill(model: model) }
@@ -154,16 +157,14 @@ private struct SidebarFooter: View {
                         .help(footerLabel)
                         .accessibilityID(.statusCompat)
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("Version Hermes")
-                            .accessibilityHidden(true)
-                        Text(verbatim: model.version.token)
+                        Text(verbatim: FooterCopy.line(String(localized: "Version Hermes"), model.version.token))
                             .fixedSize(horizontal: false, vertical: true)
                             .lineLimit(2)
                             .accessibilityLabel(Text("Version de Hermes"))
                             .accessibilityValue(model.version.token)
                             .accessibilityID(.statusVersion)
                         if let port = model.displayedPort {
-                            Text(verbatim: port.statusText).accessibilityID(.statusPort)
+                            Text(verbatim: FooterCopy.line(port.statusText)).accessibilityID(.statusPort)
                         }
                     }
                 }
@@ -196,7 +197,7 @@ private struct SidebarFooter: View {
             label += " · contexte \(compaction.percent) %"
             if compaction.source == .estimate { label += " (estimation)" }
         }
-        return label
+        return FooterCopy.line(label)
     }
 
     /// Vert : prêt ; bleu info : version non testée ; rouge : échec ; orange : connexion

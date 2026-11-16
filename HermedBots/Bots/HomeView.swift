@@ -43,7 +43,7 @@ struct HomeView: View {
         if let shown = bots.list.shown, !shown.isEmpty {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 220, maximum: 320), spacing: 14)], spacing: 14) {
                 ForEach(shown) { bot in
-                    BotCard(bot: bot, activity: activity(bot.id), lockReason: profileLock.reason(bot.id)) { open(bot.id) }
+                    BotCard(bot: bot, activity: activity(bot.id), lockLabel: profileLock.sidebarLabel(bot.id), lockHelp: profileLock.reason(bot.id)) { open(bot.id) }
                 }
             }
         } else if needsConnection {
@@ -65,36 +65,43 @@ struct HomeView: View {
 private struct BotCard: View {
     let bot: Bot
     let activity: ConversationMachine.Activity
-    let lockReason: String?
+    let lockLabel: String?
+    let lockHelp: String?
     let action: () -> Void
     @State private var hovered = false
 
     var body: some View {
         let colors = Palette.colors(bot)
+        let content = BotCardContent(bot: bot, lockLabel: lockLabel, lockHelp: lockHelp)
         Button(action: action) {
             HStack(spacing: 12) {
                 BotAvatar(bot: bot, size: 44, activity: activity)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(bot.name)
-                        .font(.headline)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    if let lockReason {
-                        Text(lockReason).font(.caption).foregroundStyle(.orange).lineLimit(2)
-                    } else {
-                        Group { if let model = bot.model { Text(verbatim: model) } else { Text("Modèle du profil") } }
-                            .font(.caption.monospaced())
-                            .foregroundStyle(.secondary)
+                    HStack(spacing: BotLockPill.nameSpacing) {
+                        Text(bot.name)
+                            .font(.headline)
                             .lineLimit(1)
+                            .truncationMode(.tail)
+                            .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                        if let lockLabel = content.lockLabel {
+                            BotLockPill(label: lockLabel, help: content.lockHelp ?? lockLabel, accessibilityID: AccessibilityID.homeBotLock(bot.id))
+                        }
                     }
+                    Text(verbatim: content.subtitle)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
-                Spacer(minLength: 0)
-                Image(systemName: "arrow.up.right")
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(colors[0])
-                    .opacity(hovered ? 1 : 0)
+                .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
+                if content.lockLabel == nil {
+                    Image(systemName: "arrow.up.right")
+                        .font(.callout.weight(.semibold))
+                        .foregroundStyle(colors[0])
+                        .opacity(hovered ? 1 : 0)
+                }
             }
-            .padding(14)
+            .padding(.horizontal, BotLockPill.cardInset)
+            .padding(.vertical, 14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background {
                 RoundedRectangle(cornerRadius: 18)

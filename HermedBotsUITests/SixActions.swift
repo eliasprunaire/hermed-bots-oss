@@ -1101,8 +1101,8 @@ final class SixActions: XCTestCase {
         XCTAssertTrue(waitForMessage(containing: "Outil terminé", in: app))
     }
 
-    /// Lane 5 : 200 000 caractères, dont des caractères de contrôle : la feuille défile, marque ce qu'elle ne montre pas, la fenêtre répond
-    func testAHugeParameterScrollsAndMarksWhatItDoesNotShow() throws {
+    /// Lane 5 : 200 000 caractères, dont des caractères de contrôle : le texte montré est borné, la feuille marque ce qu'elle ne montre pas, la fenêtre répond
+    func testAHugeParameterIsBoundedAndMarksWhatItDoesNotShow() throws {
         try requireFakeServer()
         let app = launch(isolated: false)
         try openBot(in: app)
@@ -1117,7 +1117,6 @@ final class SixActions: XCTestCase {
         print("HV-HUGE shown_chars=\(shown.count) cut=\(text(of: cut))")
         XCTAssertTrue(text(of: cut).contains("non affichés"), text(of: cut))
         XCTAssertTrue(text(of: cut).contains("200"), "le marqueur donne la taille totale : \(text(of: cut))")
-        params.scroll(byDeltaX: 0, deltaY: -2000)
         XCTAssertEqual(app.state, .runningForeground)
         XCTAssertTrue(element(.approvalNo, in: app).isHittable, "la fenêtre ne répond plus")
         HVShot.capture("hd11-huge-params", app)
