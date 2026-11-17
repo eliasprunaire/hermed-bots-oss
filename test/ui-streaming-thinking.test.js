@@ -11,7 +11,7 @@ function read(rel) {
   return readFileSync(join(ROOT, rel), "utf8");
 }
 
-function firstBlock(source, marker) {
+function blockEnd(source, marker) {
   const start = source.indexOf(marker);
   assert.notEqual(start, -1, marker);
   const open = source.indexOf("{", start);
@@ -22,10 +22,16 @@ function firstBlock(source, marker) {
     if (char === "{") depth += 1;
     else if (char === "}") {
       depth -= 1;
-      if (depth === 0) return source.slice(start, index + 1);
+      if (depth === 0) return index;
     }
   }
   assert.fail(marker);
+}
+
+function firstBlock(source, marker) {
+  const start = source.indexOf(marker);
+  assert.notEqual(start, -1, marker);
+  return source.slice(start, blockEnd(source, marker) + 1);
 }
 
 function showsThinking(isBusy, isWaitingForUser, last) {
@@ -134,4 +140,20 @@ test("isBusy et les scènes hd09-busy / hd10-busy restent tels quels", () => {
   const busy10 = hd10.indexOf("conversationBusy");
   const capture10 = hd10.indexOf('HVShot.capture("hd10-busy"');
   assert.ok(busy10 !== -1 && busy10 < capture10, "hd10-busy attend encore hd.conversation.busy");
+  assert.match(hd10, /le tour tourne encore/);
+  assert.match(hd10, /pickModel\("model-y"/);
+  assert.match(hd10, /waitForModel\("model-y"/);
+  assert.match(hd10, /le tour suivant part avec le modèle choisi/);
+
+  const view = read("HermedBots/Conversation/ConversationView.swift");
+  const footer = firstBlock(view, "private var footer");
+  const chromeEnd = blockEnd(footer, "if model.isWaitingForUser || !replyHasText");
+  const afterChrome = footer.slice(chromeEnd + 1);
+  const toolAt = afterChrome.indexOf("if let tool = model.currentTool");
+  assert.notEqual(toolAt, -1, "if let tool = model.currentTool");
+  assert.match(
+    afterChrome.slice(0, toolAt),
+    /accessibilityID\(\.conversationBusy\)/,
+    "hd.conversation.busy reste pendant .sending après le premier jeton",
+  );
 });

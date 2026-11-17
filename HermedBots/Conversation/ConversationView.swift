@@ -212,6 +212,10 @@ struct ConversationView: View {
                             Text(CompatibilityStatus.thinkingLabel).foregroundStyle(.secondary).accessibilityID(.conversationBusy)
                         }
                     }
+                } else {
+                    // isBusy reste vrai pendant .sending : l'identifiant décrit l'état du tour, pas le libellé masqué
+                    Color.clear.frame(width: 1, height: 1).accessibilityElement()
+                        .accessibilityID(.conversationBusy)
                 }
                 if let tool = model.currentTool {
                     CurrentToolRow(tool: tool).padding(.leading, 36)
