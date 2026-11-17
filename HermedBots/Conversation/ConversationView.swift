@@ -1,3 +1,4 @@
+import AppSettings
 import HermesAdapter
 import SwiftUI
 
@@ -10,6 +11,8 @@ struct ConversationView: View {
     /// La bannière d'API a déjà tranché : la pastille d'ouverture ne reste pas sur un échec définitif
     let apiFailed: Bool
     @Environment(\.motion) private var motion
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var colors: [Color] { Palette.colors(bot) }
 
@@ -89,19 +92,30 @@ struct ConversationView: View {
         }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button { model.newSession() } label: {
-                    ViewThatFits(in: .horizontal) {
-                        Label("Nouvelle session", systemImage: "square.and.pencil")
-                            .labelStyle(.titleAndIcon)
-                        Label("Nouvelle session", systemImage: "square.and.pencil")
-                            .labelStyle(.iconOnly)
+                HStack(spacing: 0) {
+                    Color.clear
+                        .frame(width: ToolbarCapsuleGap.extraContainerSpacing(
+                            dark: colorScheme == .dark,
+                            largeText: dynamicTypeSize > .large
+                        ))
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                    Button { model.newSession() } label: {
+                        ViewThatFits(in: .horizontal) {
+                            Label("Nouvelle session", systemImage: "square.and.pencil")
+                                .labelStyle(.titleAndIcon)
+                            Label("Nouvelle session", systemImage: "square.and.pencil")
+                                .labelStyle(.iconOnly)
+                        }
                     }
+                    .buttonStyle(.glass)
+                    .help("Nouvelle session")
+                    .accessibilityLabel("Nouvelle session")
+                    .accessibilityID(.sessionNew)
+                    .disabled(model.stopInProgress || model.profileLockReason != nil)
                 }
-                .help("Nouvelle session")
-                .accessibilityLabel("Nouvelle session")
-                .accessibilityID(.sessionNew)
-                .disabled(model.stopInProgress || model.profileLockReason != nil)
             }
+            .sharedBackgroundVisibility(.hidden)
             .visibilityPriority(.high)
         }
     }
