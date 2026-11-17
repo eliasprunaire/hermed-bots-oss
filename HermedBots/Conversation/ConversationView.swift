@@ -213,8 +213,9 @@ struct ConversationView: View {
                         }
                     }
                 } else {
-                    // isBusy reste vrai pendant .sending : l'identifiant décrit l'état du tour, pas le libellé masqué
+                    // isBusy reste vrai pendant .sending : l'identifiant décrit l'état du tour, pas le chrome masqué
                     Color.clear.frame(width: 1, height: 1).accessibilityElement()
+                        .accessibilityLabel(CompatibilityStatus.thinkingLabel)
                         .accessibilityID(.conversationBusy)
                 }
                 if let tool = model.currentTool {

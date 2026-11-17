@@ -151,9 +151,15 @@ test("isBusy et les scènes hd09-busy / hd10-busy restent tels quels", () => {
   const afterChrome = footer.slice(chromeEnd + 1);
   const toolAt = afterChrome.indexOf("if let tool = model.currentTool");
   assert.notEqual(toolAt, -1, "if let tool = model.currentTool");
+  const busyAfterChrome = afterChrome.slice(0, toolAt);
   assert.match(
-    afterChrome.slice(0, toolAt),
+    busyAfterChrome,
     /accessibilityID\(\.conversationBusy\)/,
     "hd.conversation.busy reste pendant .sending après le premier jeton",
+  );
+  assert.match(
+    busyAfterChrome,
+    /accessibilityLabel\(CompatibilityStatus\.thinkingLabel\)/,
+    "l'élément d'accessibilité a un libellé en production",
   );
 });
