@@ -11,19 +11,25 @@ struct BotListView: View {
     let select: (String) -> Void
 
     var body: some View {
-        List {
+        // hors de la List : un ForEach aux mêmes identifiants n'insère pas la carte comme première ligne
+        VStack(spacing: 0) {
             if let change = model.list.change {
                 BotChangeNotice(change: change, apply: model.validateChange)
+                    .padding(.horizontal, 8)
+                    .padding(.top, 6)
+                    .padding(.bottom, 2)
             }
-            ForEach(model.list.shown ?? []) { bot in
-                BotRow(bot: bot, isSelected: bot.id == selectedBot, activity: activity(bot.id), lockLabel: profileLock.sidebarLabel(bot.id), lockHelp: profileLock.reason(bot.id)) {
-                    select(bot.id)
+            List {
+                ForEach(model.list.shown ?? []) { bot in
+                    BotRow(bot: bot, isSelected: bot.id == selectedBot, activity: activity(bot.id), lockLabel: profileLock.sidebarLabel(bot.id), lockHelp: profileLock.reason(bot.id)) {
+                        select(bot.id)
+                    }
                 }
             }
+            // l'identifiant se pose avant l'overlay : sinon les textes de l'overlay le portent aussi
+            .accessibilityID(.botsList)
+            .overlay { placeholder }
         }
-        // l'identifiant se pose avant l'overlay : sinon les textes de l'overlay le portent aussi
-        .accessibilityID(.botsList)
-        .overlay { placeholder }
     }
 
     @ViewBuilder private var placeholder: some View {
@@ -44,7 +50,7 @@ struct BotListView: View {
             }
             .padding()
         default:
-            if model.list.shown?.isEmpty ?? true {
+            if model.list.change == nil, model.list.shown?.isEmpty ?? true {
                 VStack(spacing: 4) {
                     Text("Aucun bot").accessibilityID(.botsEmpty)
                     if model.phase == .ready { Text("Hermes ne liste aucun profil actif.") }
@@ -120,21 +126,23 @@ struct BotChangeNotice: View {
     let apply: () -> Void
 
     var body: some View {
+        let content = BotChangeNoticeContent(change: change)
         // sans icône ni grandes marges : la barre latérale est étroite et le titre comme le bouton doivent tenir en entier
         VStack(alignment: .leading, spacing: 6) {
-            Text("La liste des bots a changé").fontWeight(.semibold).lineLimit(2).accessibilityID(.botsChange)
-            if !change.added.isEmpty {
-                Text("Ajouté : \(change.added.joined(separator: ", "))").lineLimit(2).truncationMode(.tail)
+            Text(content.title).fontWeight(.semibold).lineLimit(2).accessibilityID(.botsChange)
+            if let added = content.added {
+                Text(added).lineLimit(2).truncationMode(.tail)
             }
-            if !change.removed.isEmpty {
-                Text("Retiré : \(change.removed.joined(separator: ", "))").lineLimit(2).truncationMode(.tail)
+            if let removed = content.removed {
+                Text(removed).lineLimit(2).truncationMode(.tail)
             }
-            Button("Afficher la nouvelle liste", action: apply).accessibilityID(.botsChangeApply)
+            Button(content.apply, action: apply).accessibilityID(.botsChangeApply)
         }
         .font(.callout)
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.accentColor.opacity(0.1), in: .rect(cornerRadius: 12))
         .padding(.vertical, 4)
+        .accessibilityElement(children: .contain)
     }
 }

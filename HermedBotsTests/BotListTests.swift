@@ -38,6 +38,29 @@ final class BotListTests: XCTestCase {
         XCTAssertNil(list.change)
     }
 
+    func testAPendingAdditionProducesTheSidebarNoticeCopyWhileShownStaysPut() {
+        var list = list("hv-bot-a")
+        list.receive([bot("hv-bot-a"), bot("hv-new")])
+        guard let change = list.change else { return XCTFail("change absent") }
+        let content = BotChangeNoticeContent(change: change)
+        XCTAssertEqual(list.shown?.map(\.id), ["hv-bot-a"])
+        XCTAssertEqual(content.title, "La liste des bots a changé")
+        XCTAssertEqual(content.added, "Ajouté : hv-new")
+        XCTAssertNil(content.removed)
+        XCTAssertEqual(content.apply, "Afficher la nouvelle liste")
+    }
+
+    func testAPendingRemovalProducesTheSidebarNoticeCopy() {
+        var list = list("hv-bot-a", "hv-bot-b")
+        list.receive([bot("hv-bot-a")])
+        guard let change = list.change else { return XCTFail("change absent") }
+        let content = BotChangeNoticeContent(change: change)
+        XCTAssertEqual(content.title, "La liste des bots a changé")
+        XCTAssertNil(content.added)
+        XCTAssertEqual(content.removed, "Retiré : hv-bot-b")
+        XCTAssertEqual(content.apply, "Afficher la nouvelle liste")
+    }
+
     func testARemovedProfileStaysUntilTheValidationToo() {
         var list = list("hv-bot-a", "hv-bot-b")
         list.receive([bot("hv-bot-a")])

@@ -79,3 +79,18 @@ struct BotList: Equatable {
         self.pending = nil
     }
 }
+
+/// Textes de la carte d'invite de la barre latérale : le titre, le détail, le bouton
+struct BotChangeNoticeContent: Equatable {
+    let title: String
+    let added: String?
+    let removed: String?
+    let apply: String
+
+    init(change: BotList.Change) {
+        title = String(localized: "La liste des bots a changé")
+        added = change.added.isEmpty ? nil : String(localized: "Ajouté : \(change.added.joined(separator: ", "))")
+        removed = change.removed.isEmpty ? nil : String(localized: "Retiré : \(change.removed.joined(separator: ", "))")
+        apply = String(localized: "Afficher la nouvelle liste")
+    }
+}
