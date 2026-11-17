@@ -44,16 +44,13 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 220, ideal: 260)
         } detail: {
             VStack(spacing: 0) {
-                if shownBot != nil {
-                    ErrorBanner(model: model)
-                }
+                ErrorBanner(model: model)
                 DegradedBanner(map: model.capabilities)
                 if let bot = shownBot {
                     ConversationView(model: model.conversation, killSwitch: model.killSwitch, bot: bot, apiFailed: model.apiError != nil)
                 } else {
                     HomeView(bots: model.bots, profileLock: model.profileLock, activity: model.conversation.activity(of:), needsConnection: needsConnection,
                              open: open(bot:), configure: { openSettings() })
-                        .overlay(alignment: .top) { ErrorBanner(model: model) }
                 }
             }
             .overlay(alignment: .top) { ConnectingPill(model: model) }
